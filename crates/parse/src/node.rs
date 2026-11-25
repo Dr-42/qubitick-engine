@@ -1622,7 +1622,7 @@ fn parse_expr_ok(ctx: &Ctx, src: &str) -> Option<Expr> {
             // juxtaposition with a compound argument (`\ge_{0}^{\mathbb{Z}}
             // \mathbb{Z}^{+} n` inside D_BT_78's \forall bodies). Parenthesise
             // each maximal run of atoms: `op a b` → `op (a b)`.
-            let wrapped = group_atom_runs(t);
+            let wrapped = group_atom_runs(t, ctx);
             if wrapped != t
                 && let Ok(e) = crate::semantic::parse_expr(&wrapped, ctx)
             {
@@ -1646,15 +1646,34 @@ fn parse_expr_ok(ctx: &Ctx, src: &str) -> Option<Expr> {
     }
 }
 
+/// Whether a token SPLITS an atom run in the recovery above: grammar punctuation, or an
+/// operator the corpus declares (or one the engine generates).
+///
+/// The list this replaces was names (`\cap`, `\Delta`, `\land`, ...): the engine's idea
+/// of the corpus's operators. `=` and the binder/punctuation tokens are the declaration
+/// FORMAT's, so they stay named here; anything else is an operator only where a
+/// declaration or the engine's own table says so.
+fn is_separator(ctx: &Ctx, tk: &str) -> bool {
+    if matches!(
+        tk,
+        "=" | ":" | ";" | "," | "\\forall" | "\\exists" | "\\mapsto" | "\\equiv"
+    ) {
+        return true;
+    }
+    if qubitick_model::corpus::is_any_class(tk) {
+        return true; // the engine's own glyphs: arrows, the iff, the generated sorts
+    }
+    ctx.by_tex(tk).is_some_and(|rows| {
+        let row = &rows[0];
+        row.role.is_some() || row.facets != 0
+    })
+}
+
 /// Wrap each maximal whitespace run of ≥2 ATOM tokens as `a (b c …)`, leaving
 /// infix tokens (`=`, `\land`, `\forall`, …) to split runs. A token is an atom
 /// when it is a LaTeX command, an identifier, `^+`/`^-`, a digit literal, or a
 /// parenthesised group; infixes break the run.
-fn group_atom_runs(src: &str) -> String {
-    const INFIXES: &[&str] = &[
-        "=", "\\land", "\\leftrightarrow", "\\iff", "\\forall", "\\exists", "\\mapsto", "\\to",
-        ":", ";", ",", "\\in", "\\subseteq", "\\cap", "\\Delta", "+", "\\equiv",
-    ];
+fn group_atom_runs(src: &str, ctx: &Ctx) -> String {
     // LaTeX spacing/noise separators break an atom-run without joining it.
     const NOISE: &[&str] = &["\\;", "\\,", "\\!", "\\:", "\\quad", "\\qquad"];
     // Split trailing separators (`,`, `;`, `:`) off a token so the ∀-binder type
@@ -1675,7 +1694,7 @@ fn group_atom_runs(src: &str) -> String {
     }
     let toks: Vec<&str> = raw_toks.iter().map(|s| s.as_str()).collect();
     let is_atom = |tk: &str| {
-        !INFIXES.contains(&tk)
+        !is_separator(ctx, tk)
             && !NOISE.contains(&tk)
             && tk != "("
             && tk != ")"
