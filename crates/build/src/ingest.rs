@@ -49,8 +49,15 @@ fn compute_facets(tex: &str, _kind: &str) -> u32 {
     if matches!(tex, r"\Vert" | r"\ulcorner" | r"\urcorner") { bits |= 1 << (Facet::Collector as u8); }
     // Nullity / empty carrier
     if tex == r"\varnothing" { bits |= 1 << (Facet::Null as u8); }
-    // Binary operator heads
-    if matches!(tex, r"\cap" | r"\cup" | r"\land" | r"\lor" | r"\cdot" | r"\subseteq" | r"\in" | r"\ne" | r"\le" | r"\times" | r"\Delta" | "+" | "×") { bits |= 1 << (Facet::BinOp as u8); }
+    // Binary operator heads (BinOp): REMOVED name-based list.
+    // D9: BinOp is derived from the DECLARATION's glyph-line shape (two operands
+    // around the head → infix → BinOp). A project's own operator must not need
+    // to be named in the engine. The previous list (\cap, \cup, \land, \lor,
+    // \cdot, \subseteq, \in, \ne, \le, \times, \Delta, +, ×) is gone. The
+    // shipped PUBLIC_SYMBOL_CLASSES table still carries these for the fallback
+    // used by use-only symbols in the 330-file corpus (which never declares
+    // them); those rows are candidates for the later slice that deletes the
+    // shipped vocabulary.
     // Delta is also Nullity
     if tex == r"\Delta" { bits |= 1 << (Facet::Nullity as u8); }
     bits
@@ -670,9 +677,24 @@ fn persist_definition_metadata(
     )?;
     persist_mod_roles(tx, sid, &d.d_block.mod_roles)?;
     if let Some(role) = derive_role(ctx, src, sid) {
+        // D9: derive BinOp facet from the glyph-line shape. An infix operator
+        // (two operands around the head) is a binary operator; prefix/unary and
+        // collector/bracket are not. Update the facets column so the DB is the
+        // single source of truth for BinOp, not the hardcoded name list.
+        let mut facets: u32 = tx
+            .query_row("SELECT facets FROM symbols WHERE id = ?1", [sid], |r| r.get(0))
+            .unwrap_or(0);
+        if role == "infix" {
+            facets |= 1 << (qubitick_model::corpus::Facet::BinOp as u8);
+        } else {
+            // Explicitly clear BinOp for non-infix roles (prefix, collector) so a
+            // project can declare a glyph that the shipped table calls BinOp
+            // (e.g. \times as prefix) and the declaration wins.
+            facets &= !(1 << (qubitick_model::corpus::Facet::BinOp as u8));
+        }
         tx.execute(
-            "UPDATE symbols SET role = ?1 WHERE id = ?2",
-            rusqlite::params![role, sid],
+            "UPDATE symbols SET role = ?1, facets = ?2 WHERE id = ?3",
+            rusqlite::params![role, facets as i64, sid],
         )?;
     }
     Ok(())
@@ -1864,6 +1886,56 @@ mod tests {
         let bin = roles.iter().find(|(t, _)| t == "\\mybin").and_then(|(_, r)| r.clone());
         assert_eq!(un.as_deref(), Some("prefix"), "unary op -> prefix, got {un:?}");
         assert_eq!(bin.as_deref(), Some("infix"), "binary op -> infix, got {bin:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prefix_declaration_wins_over_builtin_binop_table() {
+        // D9: a corpus can declare a glyph that the SHIPPED table classifies as
+        // BinOp (e.g. \times) as a UNARY PREFIX operator, and the declaration wins.
+        // The shipped PUBLIC_SYMBOL_CLASSES says \times is BinOp, but the corpus
+        // declares it with a single operand: "times a". The parser must see it as
+        // prefix, not infix. This test asserts the declaration overrides the engine's
+        // fallback table — the point of D9 is that the corpus declaration IS the
+        // answer, not an OR with the builtin.
+        let dir = scratch_dir("prefix_wins");
+        fs::write(
+            dir.join("D_A_01_TimesPrefix.qbit"),
+            "D.A.01. TimesPrefix\ntimes a\nType: R to R\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("T_A_01_Use.qbit"),
+            "T.A.01. Use\ntimes x = x\n",
+        )
+        .unwrap();
+        let mut conn = qubitick_db::open_in_memory().unwrap();
+        ingest_corpus(&mut conn, &dir).unwrap();
+
+        // The declared symbol `times` must be in the symbols table with role=prefix.
+        // Its facets must NOT have BinOp (prefix is not a binary operator).
+        let syms = qubitick_db::queries::symbols_in_scope(&conn, "Era0/Strata0").unwrap();
+        let times = syms.iter().find(|r| r.tex == "times").cloned();
+        assert!(times.is_some(), "prefix operator `times` must be registered");
+        let times = times.unwrap();
+        assert_eq!(times.role.as_deref(), Some("prefix"), "`times` must have role=prefix, not infix");
+        // BinOp facet must be cleared for prefix (the declaration wins over the
+        // builtin table that says \times is BinOp).
+        let facets = times.facets;
+        let has_binop = facets & (1 << (qubitick_model::corpus::Facet::BinOp as u8)) != 0;
+        assert!(!has_binop, "prefix operator must NOT have BinOp facet — declaration wins over builtin table");
+
+        // The theorem's statement must parse as an application of prefix `times`.
+        let ctx = qubitick_ctx::Ctx::from_rows("Era0/Strata0", syms);
+        let e = qubitick_parse::parse_expr("times x", &ctx).unwrap();
+        match e {
+            qubitick_model::Expr::Apply(h, args) => {
+                assert_eq!(h.primary, times.id as u32, "parsed head must be the `times` symbol");
+                assert_eq!(args.len(), 1, "prefix application has one arg");
+            }
+            other => panic!("expected Apply(times, [x]), got {other:?}"),
+        }
+
         let _ = fs::remove_dir_all(&dir);
     }
 

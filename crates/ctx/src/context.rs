@@ -100,23 +100,32 @@ impl Ctx {
 
     /// Check if a symbol (by its tex) has a given facet.
     ///
-    /// PROJECT DECLARATIONS TAKE PRECEDENCE: the corpus's stored facet bitmask is
-    /// the primary source, but it ADDS TO (not replaces) the builtin table.
-    /// This means a project declaring `+` as BinOp gets that facet, while builtin
-    /// symbols like `\varnothing` keep their Null facet from PUBLIC_SYMBOL_CLASSES
-    /// even if the corpus doesn't redeclare them. This implements D9/D13.
+    /// D9: the corpus declaration is the answer. If the corpus has a DECLARED row
+    /// for this tex (a definition with a D-block, or a primitive/formation/bracket
+    /// kind, or an operator with a derived role), its stored facet bitmask is
+    /// authoritative — the builtin table is ONLY a fallback for texes the corpus
+    /// never declares (engine fixtures and the 330-file corpus rely on that
+    /// fallback for symbols like `\Delta`, `\cap`, `\varnothing` which they use
+    /// but never declare). A use-only row (kind="notation", no role, no elab)
+    /// does NOT count as a declaration; for those we fall back to the builtin.
     pub fn has_facet(&self, tex: &str, facet: Facet) -> bool {
-        let stored = if let Some(rows) = self.by_tex.get(tex) {
-            rows[0].facets
+        if let Some(rows) = self.by_tex.get(tex) {
+            let row = &rows[0];
+            // A symbol is "declared by the corpus" if it has a D-block (elab),
+            // or is a non-notation kind (primitive/formation/bracket), or has a
+            // derived operator role (prefix/infix/collector). Use-only symbols
+            // have kind="notation", role=None, elab=None.
+            let is_declared = row.elab.is_some()
+                || row.kind != "notation"
+                || row.role.is_some();
+            if is_declared {
+                row.facets & facet.bits() != 0
+            } else {
+                qubitick_model::corpus::is_class(tex, facet)
+            }
         } else {
-            0
-        };
-        let builtin = if qubitick_model::corpus::is_class(tex, facet) {
-            facet.bits()
-        } else {
-            0
-        };
-        (stored | builtin) & facet.bits() != 0
+            qubitick_model::corpus::is_class(tex, facet)
+        }
     }
 }
 
