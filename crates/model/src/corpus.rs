@@ -165,6 +165,20 @@ pub fn is_any_class(tex: &str) -> bool {
         .any(|(t, bits)| *t == tex && *bits != 0)
 }
 
+/// The punctuation alphabet that can be an OPERATOR in the corpus surface.
+///
+/// Structural punctuation — brackets `()[]{}`, comma `,`, period `.`, semicolon `;`,
+/// quotes `'"`, and backslash `\` — is EXCLUDED because it is GRAMMAR, not notation.
+/// Registering a bracket as a symbol would let the parser treat grouping syntax as
+/// a declarable operator, which breaks expression structure.
+pub const OPERATOR_PUNCT: &[char] = &['+', '-', '*', '/', '=', '<', '>', '!', '%', '&', '|', '~', '^', ':'];
+
+/// Check if a character is a valid operator punctuation.
+#[inline]
+pub fn is_operator_punct(c: char) -> bool {
+    OPERATOR_PUNCT.contains(&c)
+}
+
 /// Count how many balanced `{ … }` groups immediately follow `i` (positioned just
 /// after a `\command` word) WITHOUT consuming them.
 ///

@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use qubitick_db::hash::hash_symbol;
 use qubitick_db::write::write_expr;
 use qubitick_model::{Node, NodeKind};
-use qubitick_model::corpus::Facet;
+use qubitick_model::corpus::{Facet, is_operator_punct};
 
 use rusqlite::Connection;
 
@@ -1032,19 +1032,41 @@ fn head_control_word(line: &str) -> Option<String> {
     let trimmed = line.trim();
     match trimmed.find('\\') {
         None => {
-            // Bare-token glyph (e.g. the canon's operators `S`, `T`, `U`). Take the
-            // leading identifier RUN as the declaration tex, so `T_{jk}` declares
-            // `T` (a tensor carrying an index mod) rather than the whole `T_{jk}`.
-            // A line that is already a single bare token is unchanged (`S` -> `S`).
-            let lead: String = trimmed
+            // No backslash: the glyph line is a bare expression. It may be:
+            //  - a single bare identifier (`S`, `T`, `U`) → the identifier is the head
+            //  - an infix expression with a punctuation operator (`a + b`) → the operator is the head
+            //  - a bare identifier with mods (`T_{jk}`) → the leading identifier is the head
+            // Heuristic: split by whitespace. If exactly 3 tokens and the middle is
+            // all OPERATOR_PUNCT characters, it's an infix operator declaration.
+            let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+            if tokens.len() == 3 {
+                let middle = tokens[1];
+                let middle_is_punct = !middle.is_empty()
+                    && middle.chars().all(is_operator_punct);
+                if middle_is_punct {
+                    return Some(middle.to_string());
+                }
+            }
+            // Otherwise, take the leading alphanumeric run (e.g. the canon's `S`, `T`, `U`).
+            let lead_alpha: String = trimmed
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric())
                 .collect();
-            if lead.is_empty() {
-                if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-            } else {
-                Some(lead)
+            if !lead_alpha.is_empty() {
+                return Some(lead_alpha);
             }
+            // Next, try a leading OPERATOR PUNCTUATION run: only OPERATOR_PUNCT characters.
+            // Structural punctuation (brackets, comma, period, semicolon, quotes, backslash)
+            // is EXCLUDED — it is grammar, not notation.
+            let lead_punct: String = trimmed
+                .chars()
+                .take_while(|c| is_operator_punct(*c))
+                .collect();
+            if !lead_punct.is_empty() {
+                return Some(lead_punct);
+            }
+            // Fallback: empty or only whitespace/backslash.
+            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
         }
         Some(pos) => {
             let rest = &trimmed[pos + 1..];
@@ -1267,6 +1289,16 @@ fn control_words(src: &str) -> Vec<String> {
             // The corpus's tick glyph is written literally as `^+` (no `\command`).
             out.push("^+".to_string());
             i += 2;
+        } else if is_operator_punct(src.as_bytes()[i] as char) {
+            // BARE OPERATOR PUNCTUATION RUN: a maximal sequence of OPERATOR_PUNCT characters.
+            // This catches `=`, `**`, `==`, `!=`, `+=`, `->`, etc. as declarable symbols.
+            // Structural punctuation (brackets, comma, period, semicolon, quotes, backslash)
+            // is EXCLUDED — it is grammar, not notation.
+            let start = i;
+            while i < src.len() && is_operator_punct(src.as_bytes()[i] as char) {
+                i += 1;
+            }
+            out.push(src[start..i].to_string());
         } else {
             i += 1;
         }
@@ -1377,15 +1409,28 @@ fn lean_name(tex: &str) -> String {
             .collect::<String>();
         trimmed.trim_matches('_').to_string()
     };
-    if let Some(word) = match tex.chars().next() {
-        Some('+') => Some("plus"),
-        Some('-') => Some("minus"),
-        Some('*') => Some("star"),
-        Some('/') => Some("slash"),
+    // Handle single-char punctuation operators first, then multi-char runs.
+    // The match on the first char gives us the base name; the tail (rest of the
+    // punctuation run) is sanitized and appended. This covers `+` -> `plus`,
+    // `=` -> `eq`, `**` -> `star_star`, `!=` -> `bang_eq`, etc.
+    if let Some((word, tail_start)) = match tex.chars().next() {
+        Some('+') => Some(("plus", 1)),
+        Some('-') => Some(("minus", 1)),
+        Some('*') => Some(("star", 1)),
+        Some('/') => Some(("slash", 1)),
+        Some('=') => Some(("eq", 1)),
+        Some('!') => Some(("bang", 1)),
+        Some('<') => Some(("lt", 1)),
+        Some('>') => Some(("gt", 1)),
+        Some('%') => Some(("pct", 1)),
+        Some('&') => Some(("amp", 1)),
+        Some('|') => Some(("bar", 1)),
+        Some('^') => Some(("caret", 1)),
+        Some('~') => Some(("tilde", 1)),
         _ => None,
     } {
         // `-` followed by digits was already returned as `neg_<n>` above.
-        let tail = sanitize(&tex[1..]);
+        let tail = sanitize(&tex[tail_start..]);
         return if tail.is_empty() {
             word.to_string()
         } else {
@@ -2013,5 +2058,98 @@ mod tests {
         let report = ingest_corpus(&mut conn, &dir).unwrap();
         assert_eq!(report.nodes, 0);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn punctuation_operator_declares_and_gets_infix_role() {
+        // A corpus can declare a bare punctuation operator (e.g. `+`) in a glyph line
+        // `a + b` and the engine must recognise it as the declared symbol, register it,
+        // and derive role=infix from the two-operand shape.
+        let dir = scratch_dir("punct_op");
+        fs::write(
+            dir.join("D_A_01_Add.qbit"),
+            "D.A.01. Add\na + b\nType: R to R to R\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("T_A_01_Use.qbit"),
+            "T.A.01. Use\nx + y = y + x\n",
+        )
+        .unwrap();
+        let mut conn = qubitick_db::open_in_memory().unwrap();
+        let report = ingest_corpus(&mut conn, &dir).unwrap();
+        assert_eq!(report.nodes, 2, "one definition + one theorem");
+
+        // The declared symbol `+` must be in the symbols table with role=infix.
+        let syms = qubitick_db::queries::symbols_in_scope(&conn, "Era0/Strata0").unwrap();
+        let plus = syms.iter().find(|r| r.tex == "+").cloned();
+        assert!(plus.is_some(), "punctuation operator `+` must be registered");
+        let plus = plus.unwrap();
+        assert_eq!(plus.role.as_deref(), Some("infix"), "`+` must have role=infix");
+        // Lean name must be a valid identifier (not empty, not a keyword).
+        assert!(!plus.lean_name.is_empty(), "lean_name must not be empty");
+        assert!(!LEAN_KEYWORDS.contains(&plus.lean_name.as_str()), "lean_name must not be a Lean keyword");
+
+        // The theorem's statement must parse as an application of `+` (not raw text).
+        let ctx = qubitick_ctx::Ctx::from_rows("Era0/Strata0", syms);
+        let e = qubitick_parse::parse_expr("x + y", &ctx).unwrap();
+        match e {
+            qubitick_model::Expr::Apply(h, args) => {
+                assert_eq!(h.primary, plus.id as u32, "parsed head must be the `+` symbol");
+                assert_eq!(args.len(), 2, "infix application has two args");
+            }
+            other => panic!("expected Apply(plus, [x, y]), got {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn punctuation_alphabet_excludes_structural_chars() {
+        // A corpus text with structural punctuation must register only the
+        // OPERATOR_PUNCT characters (+, =) and NOT brackets, comma, period, or semicolon.
+        // TRAP: a bracket registered as a symbol is a bracket the parser may stop
+        // treating as grouping.
+        let dir = scratch_dir("punct_alphabet");
+        fs::write(
+            dir.join("D_A_01_Test.qbit"),
+            "D.A.01. Test\n(a + b), c = d.\nType: R to R to R\n",
+        )
+        .unwrap();
+        let mut conn = qubitick_db::open_in_memory().unwrap();
+        ingest_corpus(&mut conn, &dir).unwrap();
+
+        let syms = qubitick_db::queries::symbols_in_scope(&conn, "Era0/Strata0").unwrap();
+        let texes: Vec<&str> = syms.iter().map(|r| r.tex.as_str()).collect();
+
+        // Operator punctuation that SHOULD be registered
+        assert!(texes.contains(&"+"), "operator `+` must be registered");
+        assert!(texes.contains(&"="), "operator `=` must be registered");
+
+        // Structural punctuation that must NOT be registered
+        assert!(!texes.contains(&"("), "bracket `(` must NOT be registered — trap: a bracket registered as a symbol is a bracket the parser may stop treating as grouping");
+        assert!(!texes.contains(&")"), "bracket `)` must NOT be registered");
+        assert!(!texes.contains(&","), "comma `,` must NOT be registered");
+        assert!(!texes.contains(&"."), "period `.` must NOT be registered");
+        assert!(!texes.contains(&";"), "semicolon `;` must NOT be registered");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn glyph_line_with_bracket_middle_token_does_not_declare_bracket() {
+        // A glyph line whose middle token is a bracket run (e.g. "a ( b") must NOT
+        // declare "(" as the head. The 3-token infix heuristic must only accept
+        // OPERATOR_PUNCT characters as the middle token.
+        let head = head_control_word("a ( b");
+        assert!(head.is_none() || head.as_deref() != Some("("),
+            "head_control_word must not return a bracket for 'a ( b' — brackets are structural, not operators");
+
+        // Also test that a valid operator middle token still works
+        let head = head_control_word("a + b");
+        assert_eq!(head.as_deref(), Some("+"), "head_control_word must return `+` for 'a + b'");
+
+        let head = head_control_word("a = b");
+        assert_eq!(head.as_deref(), Some("="), "head_control_word must return `=` for 'a = b'");
     }
 }

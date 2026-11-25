@@ -7,6 +7,7 @@ use qubitick_model::{
     ElabRule, ApplyForm, FormBody, JustRef, Node, NodeBase, NodeKind, PhysOrMath, ProofStep,
     StepRel, Strata, SymbolKind, Theorem,
 };
+use qubitick_model::corpus::is_operator_punct;
 
 /// Parse `.qbit` source into a `Vec<model::Node>`.
 ///
@@ -707,35 +708,70 @@ fn collect_symbol_ids(e: &Expr, out: &mut Vec<u32>) {
 /// The `\command` (with an optional braced argument) that heads a surface glyph
 /// line, e.g. `\log_b(x)` → `\log`, `\mathfrak{L}(t)` → `\mathfrak{L}`.
 fn first_control_word(s: &str) -> Option<String> {
-    // A bare-letter glyph (`T_{jk}`, `S`, `U`) has no backslash: take the leading
-    // identifier run as the declared symbol, mirroring the ingest registrar, so
-    // `T_{jk}` resolves to `T` (a tensor carrying an index mod), not the whole.
-    let Some(bs) = s.find('\\') else {
-        let lead: String = s.trim().chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
-        return if lead.is_empty() { None } else { Some(lead) };
-    };
-    let rest = &s[bs + 1..];
-    let word: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .collect();
-    if word.is_empty() {
-        return None;
+    let trimmed = s.trim();
+    match trimmed.find('\\') {
+        None => {
+            // No backslash: the glyph line is a bare expression. It may be:
+            //  - a single bare identifier (`S`, `T`, `U`) → the identifier is the head
+            //  - an infix expression with a punctuation operator (`a + b`) → the operator is the head
+            //  - a bare identifier with mods (`T_{jk}`) → the leading identifier is the head
+            // Heuristic: split by whitespace. If exactly 3 tokens and the middle is
+            // all OPERATOR_PUNCT characters, it's an infix operator declaration.
+            let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+            if tokens.len() == 3 {
+                let middle = tokens[1];
+                let middle_is_punct = !middle.is_empty()
+                    && middle.chars().all(is_operator_punct);
+                if middle_is_punct {
+                    return Some(middle.to_string());
+                }
+            }
+            // Otherwise, try a leading alphanumeric run (e.g. the canon's `S`, `T`, `U`).
+            let lead_alpha: String = trimmed
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            if !lead_alpha.is_empty() {
+                return Some(lead_alpha);
+            }
+            // Next, try a leading OPERATOR PUNCTUATION run: only OPERATOR_PUNCT characters.
+            // Structural punctuation (brackets, comma, period, semicolon, quotes, backslash)
+            // is EXCLUDED — it is grammar, not notation.
+            let lead_punct: String = trimmed
+                .chars()
+                .take_while(|c| is_operator_punct(*c))
+                .collect();
+            if !lead_punct.is_empty() {
+                return Some(lead_punct);
+            }
+            // Fallback: empty or only whitespace/backslash.
+            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        }
+        Some(bs) => {
+            let rest = &trimmed[bs + 1..];
+            let word: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            if word.is_empty() {
+                return None;
+            }
+            let mut tex = format!("\\{word}");
+            let after = &rest[word.len()..];
+            // Braced-ARGUMENT macros (`\frac`) register the BARE command; font commands
+            // (`\mathbb{Z}`) glue the single braced group. Mirrors ingest/lexer via the
+            // shared structural count of consecutive braced groups.
+            let after_bytes = after.as_bytes();
+            let n2 = after_bytes.len();
+            let is_braced_apply = qubitick_model::corpus::braced_group_count(after_bytes, 0, n2) >= 2;
+            if !is_braced_apply
+                && let Some(end) = after.strip_prefix('{').and_then(|r| r.find('}'))
+            {
+                tex.push_str(&after[..=end + 1]);
+            }
+            Some(tex)
+        }
     }
-    let mut tex = format!("\\{word}");
-    let after = &rest[word.len()..];
-    // Braced-ARGUMENT macros (`\frac`) register the BARE command; font commands
-    // (`\mathbb{Z}`) glue the single braced group. Mirrors ingest/lexer via the
-    // shared structural count of consecutive braced groups.
-    let after_bytes = after.as_bytes();
-    let n2 = after_bytes.len();
-    let is_braced_apply = qubitick_model::corpus::braced_group_count(after_bytes, 0, n2) >= 2;
-    if !is_braced_apply
-        && let Some(end) = after.strip_prefix('{').and_then(|r| r.find('}'))
-    {
-        tex.push_str(&after[..=end + 1]);
-    }
-    Some(tex)
 }
 
 /// Best-effort glyph → symbol id.
