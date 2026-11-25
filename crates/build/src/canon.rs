@@ -31,6 +31,26 @@ pub struct Canon {
     pub lean_module: String,
     /// `Require:` (repeatable) — Lake requirements the package adds, e.g. `mathlib`.
     pub requires: Vec<String>,
+    /// `Precedence:` (repeatable) — the master precedence table, ONE LINE PER LEVEL,
+    /// **loosest first**. A line is a whitespace-separated list of glyphs written the
+    /// way the corpus writes them (`+`, `×`, `\times`, `\le_{\mathbb{Z}}`).
+    ///
+    /// The charter says what binds tighter than what; a glyph it does not name binds
+    /// LOOSER than every glyph it does name. Association is not here: every operator
+    /// the table orders is left-associative, and `(a + b) + c = a + (b + c)` is a
+    /// theorem a corpus states, not metadata it declares.
+    pub precedence: Vec<Vec<String>>,
+}
+
+impl Canon {
+    /// The level a glyph binds at: 1 is the loosest line, and a higher number binds
+    /// tighter. `None` means the charter's table does not name this glyph.
+    pub fn level_of(&self, tex: &str) -> Option<i64> {
+        self.precedence
+            .iter()
+            .position(|level| level.iter().any(|g| g == tex))
+            .map(|i| i as i64 + 1)
+    }
 }
 
 /// Read `Canon.qbit` from a corpus root, if it has one.
@@ -75,6 +95,7 @@ pub fn read(corpus: &Path) -> Result<Option<Canon>> {
     let mut lean_dir: Option<String> = None;
     let mut lean_module = String::from("Qubitick.HL");
     let mut requires: Vec<String> = Vec::new();
+    let mut precedence: Vec<Vec<String>> = Vec::new();
     for line in lines {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("Id:") {
@@ -88,6 +109,12 @@ pub fn read(corpus: &Path) -> Result<Option<Canon>> {
             let module = rest.trim();
             if !module.is_empty() {
                 lean_module = module.to_string();
+            }
+        } else if let Some(rest) = line.strip_prefix("Precedence:") {
+            // One line = one level, loosest first; the glyphs on it bind at that level.
+            let level: Vec<String> = rest.split_whitespace().map(str::to_string).collect();
+            if !level.is_empty() {
+                precedence.push(level);
             }
         } else if let Some(rest) = line.strip_prefix("Require:") {
             let requirement = rest.trim();
@@ -109,6 +136,7 @@ pub fn read(corpus: &Path) -> Result<Option<Canon>> {
         lean_dir,
         lean_module,
         requires,
+        precedence,
     }))
 }
 
@@ -270,6 +298,26 @@ mod tests {
         let canon = read(&dir).unwrap().expect("charter present");
         assert_eq!(canon.id, "qubitick");
         assert!(canon.name.contains("\\text{The}"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_table_orders_the_glyphs_it_names_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("canon-prec-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Canon.qbit"),
+            "P. school\nId: school\nPrecedence: + -\nPrecedence: × \\times\n",
+        )
+        .unwrap();
+        let canon = read(&dir).unwrap().expect("charter present");
+        // Loosest first: `+` is level 1, `×` level 2, and a glyph nothing names is None
+        // (which the parser reads as "looser than every level here").
+        assert_eq!(canon.level_of("+"), Some(1));
+        assert_eq!(canon.level_of("-"), Some(1));
+        assert_eq!(canon.level_of("×"), Some(2));
+        assert_eq!(canon.level_of("\\times"), Some(2));
+        assert_eq!(canon.level_of("\\cap"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

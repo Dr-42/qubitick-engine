@@ -2,5 +2,10 @@ P. Algebra — the starter corpus
 Id: algebra
 Kind: project
 Module: Qubitick.HL
-Note: The engine's tutorial ship. Its vocabulary is its own: +, × and R are
-Note: declared here, not by the engine.
+Note: The engine's tutorial ship. Its operators are declared here, on the nodes that use
+Note: them, never by the engine; the carrier \mathfrak{R} appears in their signatures.
+% The master precedence table: one line per level, loosest first. A glyph the table
+% does not name binds looser than every glyph it does. Association is not here —
+% (a + b) + c = a + (b + c) is a theorem a corpus states, not metadata it declares.
+Precedence: +
+Precedence: ×

@@ -156,7 +156,6 @@ mod tests {
             kind: "notation".into(),
             role: (!role.is_empty()).then(|| role.to_string()),
             precedence: None,
-            assoc: None,
             home_node: 1,
             elab: None,
             binder_kind: None,
@@ -194,7 +193,6 @@ mod tests {
             kind: "notation".into(),
             role: None,
             precedence: None,
-            assoc: None,
             home_node: 1,
             elab: None,
             binder_kind: None,
@@ -277,6 +275,42 @@ mod tests {
         } else {
             panic!("expected an equality application");
         }
+    }
+
+    #[test]
+    fn the_charter_level_orders_the_infix_fold() {
+        // The charter's master table (D10) says `+` binds looser than `\times`, so
+        // `a + b \times c` is `Plus a (Times b c)` and NOT `Times (Plus a b) c`.
+        let mut plus = declared(1, "+", "infix");
+        plus.precedence = Some(1);
+        let mut times = declared(2, "\\times", "infix");
+        times.precedence = Some(2);
+        let ctx = qubitick_ctx::Ctx::from_rows("Era0/Strata0", vec![plus, times]);
+
+        let e = parse_expr("a + b \\times c", &ctx).unwrap();
+        let Expr::Apply(head, args) = &e else {
+            panic!("expected an application, got {e:?}");
+        };
+        assert_eq!(head.primary, 1, "the LOOSER operator is the root: {e:?}");
+        match &args[1] {
+            Expr::Apply(inner, inner_args) => {
+                assert_eq!(inner.primary, 2, "the tighter operator binds into the right operand: {e:?}");
+                assert_eq!(inner_args.len(), 2);
+            }
+            other => panic!("the right operand should be the \\times application, got {other:?}"),
+        }
+
+        // Equal levels nest LEFT: `a + b + c` is `Plus (Plus a b) c`, because
+        // associativity is a theorem and not metadata.
+        let nested = parse_expr("a + b + c", &ctx).unwrap();
+        let Expr::Apply(head, args) = &nested else {
+            panic!("expected an application, got {nested:?}");
+        };
+        assert_eq!(head.primary, 1);
+        assert!(
+            matches!(&args[0], Expr::Apply(inner, _) if inner.primary == 1),
+            "equal levels nest left: {nested:?}"
+        );
     }
 
     #[test]

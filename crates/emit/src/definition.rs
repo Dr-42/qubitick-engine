@@ -939,7 +939,6 @@ mod tests {
                 kind: "macro".into(),
                 role: Some("primary".into()),
                 precedence: None,
-                assoc: None,
                 home_node: 1,
             elab: None,
             binder_kind: None,

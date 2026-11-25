@@ -780,34 +780,65 @@ fn parse_bin_term(
         }
         lhs = StructExpr::Application(ac.clone(), vec![arg]);
     }
+    fold_infix(tokens, pos, ctx, lhs, 0)
+}
+
+/// The infix fold, ordered by the charter's master table (D10).
+///
+/// `min` is the lowest level this call may consume: an operator below it belongs to
+/// the CALLER, which is how a tighter operator binds into the right operand, so
+/// `a + b \times c` reads as `a + (b \times c)`. Equal levels nest LEFT — the caller
+/// takes the next one — because association is a theorem (`(a + b) + c = a + (b + c)`),
+/// not metadata, and left is the default the charter's table never has to say.
+fn fold_infix(
+    tokens: &[Token],
+    pos: usize,
+    ctx: &Ctx,
+    mut lhs: StructExpr,
+    min: i64,
+) -> Result<(StructExpr, usize), Diagnostic> {
+    let mut pos = pos;
     loop {
-        match tokens.get(pos) {
-            Some(Token::Symbol(id, _)) if is_sym_pair_glyph(ctx, *id) => {
-                // An unmatched closing norm bar terminates this term; the caller
-                // decides whether to consume it as a closing delimiter.
-                break;
-            }
-            Some(Token::Symbol(id, _)) if is_logic_connective(ctx, *id) || is_relation(ctx, *id) => {
-                // Propositional connectives, relations (and the implication arrow,
-                // handled at the `parse_flat` level) bind looser than `=`; a binary
-                // arm must not swallow them here.
-                break;
-            }
-            Some(Token::Symbol(id, _)) => {
-                // An operator is one a DECLARATION states. The engine owns no
-                // vocabulary to fall back on, so a glyph nothing declares cannot
-                // head a term here: this is the corpus's error, and it names it.
-                require_declared_operator(ctx, *id, pos)?;
-                // Infix symbol acts as the binary head: `lhs s rhs` = `s lhs rhs`.
-                pos += 1;
-                let (rhs, next) = parse_atom(tokens, pos, ctx)?;
-                lhs = StructExpr::Application(AtomicComposite::new(*id), vec![lhs, rhs]);
-                pos = next;
-            }
-            _ => break,
+        let Some(Token::Symbol(id, _)) = tokens.get(pos) else {
+            break;
+        };
+        let id = *id;
+        if is_sym_pair_glyph(ctx, id) {
+            // An unmatched closing norm bar terminates this term; the caller decides
+            // whether to consume it as a closing delimiter.
+            break;
         }
+        if is_logic_connective(ctx, id) || is_relation(ctx, id) {
+            // Propositional connectives, relations (and the implication arrow,
+            // handled at the `parse_flat` level) bind looser than `=`; a binary arm
+            // must not swallow them here.
+            break;
+        }
+        // An operator is one a DECLARATION states. The engine owns no vocabulary to
+        // fall back on, so a glyph nothing declares cannot head a term here: this is
+        // the corpus's error, and it names it.
+        require_declared_operator(ctx, id, pos)?;
+        let level = infix_level(ctx, id);
+        if level < min {
+            break;
+        }
+        pos += 1;
+        let (rhs, next) = parse_atom(tokens, pos, ctx)?;
+        // The right operand takes only TIGHTER operators; an equal one is the outer
+        // loop's, which is what makes the chain left-associative.
+        let (rhs, next) = fold_infix(tokens, next, ctx, rhs, level + 1)?;
+        lhs = StructExpr::Application(AtomicComposite::new(id), vec![lhs, rhs]);
+        pos = next;
     }
     Ok((lhs, pos))
+}
+
+/// The level an infix operator binds at: the charter's master table, or 0 — looser
+/// than any glyph the table names — for a glyph it does not name.
+fn infix_level(ctx: &Ctx, id: u32) -> i64 {
+    ctx.by_id(id as i64)
+        .and_then(|r| r.precedence)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -819,7 +850,7 @@ mod tests {
         let row = |id: i64, tex: &str, kind: &str| SymbolRow { facets: 0,
             id, scope: "Era0/Strata0".into(), tex: tex.into(), display: tex.into(),
             lean_name: tex.trim_start_matches('\\').chars().map(|c| if c.is_ascii_alphanumeric(){c}else{'_'}).collect::<String>().trim_matches('_').to_string(),
-            trigger: None, kind: kind.into(), role: None, precedence: None, assoc: None, home_node: 1,
+            trigger: None, kind: kind.into(), role: None, precedence: None, home_node: 1,
             elab: None,
             binder_kind: None,
         };
@@ -859,7 +890,7 @@ mod tests {
         let row = |id: i64, tex: &str| SymbolRow { facets: 0,
             id, scope: "Era0/Strata0".into(), tex: tex.into(), display: tex.into(),
             lean_name: tex.trim_start_matches('\\').chars().map(|c| if c.is_ascii_alphanumeric(){c}else{'_'}).collect::<String>().trim_matches('_').to_string(),
-            trigger: None, kind: "notation".into(), role: None, precedence: None, assoc: None, home_node: 1,
+            trigger: None, kind: "notation".into(), role: None, precedence: None, home_node: 1,
             elab: None,
             binder_kind: None,
         };
@@ -886,7 +917,7 @@ mod tests {
         let row = |id: i64, tex: &str, elab: Option<&str>| SymbolRow { facets: 0,
             id, scope: "Era0/Strata0".into(), tex: tex.into(), display: tex.into(),
             lean_name: tex.trim_start_matches('\\').chars().map(|c| if c.is_ascii_alphanumeric(){c}else{'_'}).collect::<String>().trim_matches('_').to_string(),
-            trigger: None, kind: "notation".into(), role: None, precedence: None, assoc: None, home_node: 1,
+            trigger: None, kind: "notation".into(), role: None, precedence: None, home_node: 1,
             elab: elab.map(|s| s.to_string()),
             binder_kind: None,
         };
@@ -911,7 +942,7 @@ mod tests {
         let row = |id: i64, tex: &str| SymbolRow { facets: 0,
             id, scope: "Era0/Strata0".into(), tex: tex.into(), display: tex.into(),
             lean_name: tex.trim_start_matches('\\').chars().map(|c| if c.is_ascii_alphanumeric(){c}else{'_'}).collect::<String>().trim_matches('_').to_string(),
-            trigger: None, kind: "notation".into(), role: None, precedence: None, assoc: None, home_node: 1,
+            trigger: None, kind: "notation".into(), role: None, precedence: None, home_node: 1,
             elab: None,
             binder_kind: None,
         };
@@ -930,7 +961,7 @@ mod tests {
         let row = |id: i64, tex: &str| SymbolRow { facets: 0,
             id, scope: "Era0/Strata0".into(), tex: tex.into(), display: tex.into(),
             lean_name: tex.trim_start_matches('\\').chars().map(|c| if c.is_ascii_alphanumeric(){c}else{'_'}).collect::<String>().trim_matches('_').to_string(),
-            trigger: None, kind: "notation".into(), role: None, precedence: None, assoc: None, home_node: 1,
+            trigger: None, kind: "notation".into(), role: None, precedence: None, home_node: 1,
             elab: None,
             binder_kind: None,
         };
@@ -953,7 +984,7 @@ mod mtx2 {
         let row = |id: i64, tex: &str| SymbolRow { facets: 0,
             id, scope: "Era0/Strata0".into(), tex: tex.into(), display: tex.into(),
             lean_name: tex.trim_start_matches('\\').chars().map(|c| if c.is_ascii_alphanumeric(){c}else{'_'}).collect::<String>().trim_matches('_').to_string(),
-            trigger: None, kind: "notation".into(), role: None, precedence: None, assoc: None, home_node: 1,
+            trigger: None, kind: "notation".into(), role: None, precedence: None, home_node: 1,
             elab: None,
             binder_kind: None,
         };

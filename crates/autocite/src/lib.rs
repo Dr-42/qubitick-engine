@@ -138,7 +138,6 @@ mod tests {
             kind: "symbol".to_string(),
             role: None,
             precedence: None,
-            assoc: None,
             home_node: 0,
             elab: None,
             binder_kind: None,

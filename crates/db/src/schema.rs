@@ -15,7 +15,7 @@ use rusqlite::Connection;
 
 /// Compatibility stamp for `DDL`. Any other value means the file on disk was
 /// built by a different schema, and since it is a cache, it is rebuilt.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Bring the connection up to the current schema.
 ///
@@ -463,7 +463,6 @@ CREATE TABLE symbols (
   role TEXT CHECK (role IN ('primary','ctor','notation-atom','extra','prefix','infix','collector','connective') OR role IS NULL),
   decl_order INTEGER,
   precedence INTEGER,
-  assoc TEXT CHECK (assoc IN ('left','right','post') OR assoc IS NULL),
   home_node INTEGER NOT NULL,
   symbol_hash BLOB NOT NULL, facets INTEGER NOT NULL DEFAULT 0,
   UNIQUE (scope, tex),

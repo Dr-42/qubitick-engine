@@ -172,7 +172,6 @@ mod tests {
             kind: kind.into(),
             role: None,
             precedence: None,
-            assoc: None,
             home_node: 1,
             elab: None,
             binder_kind: None,

@@ -13,7 +13,6 @@ fn row(id: i64, tex: &str, lean: &str, role: Option<&str>) -> SymbolRow {
         kind: "notation".into(),
         role: role.map(|s| s.into()),
         precedence: None,
-        assoc: None,
         home_node: 1,
         elab: None,
         binder_kind: None,

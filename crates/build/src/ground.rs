@@ -326,6 +326,7 @@ mod tests {
             lean_dir: Some(lean_dir.into()),
             lean_module: "Qubitick.HL".into(),
             requires: Vec::new(),
+            precedence: Vec::new(),
         }
     }
 

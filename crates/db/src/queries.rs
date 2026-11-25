@@ -17,7 +17,6 @@ pub struct SymbolRow {
     pub kind: String,
     pub role: Option<String>,
     pub precedence: Option<i64>,
-    pub assoc: Option<String>,
     pub home_node: i64,
     /// The D-block ElabRule for this symbol (single source of truth, DataSchema
     /// §6.4): 'Identity'|'Apply'|'CurriedApply'|'Binder'|'Matrix'|'Vector'|'Set'|
@@ -38,7 +37,7 @@ pub struct SymbolRow {
 pub fn symbols_all(conn: &Connection) -> Result<Vec<SymbolRow>> {
     let mut stmt = conn.prepare(
         "SELECT s.id, s.scope, s.tex, s.display, s.lean_name, s.trigger, s.kind, s.role,
-                s.precedence, s.assoc, s.home_node, s.facets, e.rule, e.binder_kind
+                s.precedence, s.home_node, s.facets, e.rule, e.binder_kind
          FROM symbols s
          LEFT JOIN symbol_elab_rules e ON e.symbol_id = s.id
          ORDER BY s.lean_name",
@@ -54,11 +53,10 @@ pub fn symbols_all(conn: &Connection) -> Result<Vec<SymbolRow>> {
             kind: r.get(6)?,
             role: r.get(7)?,
             precedence: r.get(8)?,
-            assoc: r.get(9)?,
-            home_node: r.get(10)?,
-            facets: r.get(11)?,
-            elab: r.get(12)?,
-            binder_kind: r.get(13)?,
+            home_node: r.get(9)?,
+            facets: r.get(10)?,
+            elab: r.get(11)?,
+            binder_kind: r.get(12)?,
         })
     })?;
     rows.map(|r| r.map_err(anyhow::Error::from))
@@ -81,7 +79,7 @@ pub fn symbols_in_scope(conn: &Connection, scope: &str) -> Result<Vec<SymbolRow>
 pub fn symbol_by_tex(conn: &Connection, scope: &str, tex: &str) -> Result<Option<SymbolRow>> {
     let mut stmt = conn.prepare(
         "SELECT s.id, s.scope, s.tex, s.display, s.lean_name, s.trigger, s.kind, s.role,
-                s.precedence, s.assoc, s.home_node, s.facets, e.rule, e.binder_kind
+                s.precedence, s.home_node, s.facets, e.rule, e.binder_kind
          FROM symbols s
          LEFT JOIN symbol_elab_rules e ON e.symbol_id = s.id
          WHERE s.tex = ?1 AND (s.scope = ?2 OR s.scope = '' OR s.scope LIKE ?2 || '/%')
@@ -99,11 +97,10 @@ pub fn symbol_by_tex(conn: &Connection, scope: &str, tex: &str) -> Result<Option
             kind: r.get(6)?,
             role: r.get(7)?,
             precedence: r.get(8)?,
-            assoc: r.get(9)?,
-            home_node: r.get(10)?,
-            facets: r.get(11)?,
-            elab: r.get(12)?,
-            binder_kind: r.get(13)?,
+            home_node: r.get(9)?,
+            facets: r.get(10)?,
+            elab: r.get(11)?,
+            binder_kind: r.get(12)?,
         })
     })?;
     Ok(rows.next().transpose()?)

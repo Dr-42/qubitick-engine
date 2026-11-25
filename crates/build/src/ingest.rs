@@ -274,8 +274,8 @@ pub fn ingest_file_symbols(
         let sql = if declared {
             "INSERT INTO symbols
                (scope, tex, display, lean_name, trigger, kind, role,
-                decl_order, precedence, assoc, home_node, symbol_hash, facets)
-             VALUES (?1,?2,?3,?4,NULL,?5,NULL,?6,NULL,NULL,?7,?8,?9)
+                decl_order, precedence, home_node, symbol_hash, facets)
+             VALUES (?1,?2,?3,?4,NULL,?5,NULL,?6,NULL,?7,?8,?9)
              ON CONFLICT(scope, tex) DO UPDATE SET
                lean_name = excluded.lean_name, kind = excluded.kind,
                home_node = excluded.home_node, symbol_hash = excluded.symbol_hash,
@@ -283,8 +283,8 @@ pub fn ingest_file_symbols(
         } else {
             "INSERT INTO symbols
                (scope, tex, display, lean_name, trigger, kind, role,
-                decl_order, precedence, assoc, home_node, symbol_hash, facets)
-             VALUES (?1,?2,?3,?4,NULL,?5,NULL,?6,NULL,NULL,?7,?8,?9)
+                decl_order, precedence, home_node, symbol_hash, facets)
+             VALUES (?1,?2,?3,?4,NULL,?5,NULL,?6,NULL,?7,?8,?9)
              ON CONFLICT(scope, tex) DO NOTHING"
         };
         written += conn.execute(
@@ -440,8 +440,8 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
         tx.execute(
             "INSERT INTO symbols
                (scope, tex, display, lean_name, trigger, kind, role,
-                decl_order, precedence, assoc, home_node, symbol_hash, facets)
-             VALUES (?1,?2,?3,?4,NULL,?5,NULL,?6,NULL,NULL,?7,?8,?9)",
+                decl_order, precedence, home_node, symbol_hash, facets)
+             VALUES (?1,?2,?3,?4,NULL,?5,NULL,?6,NULL,?7,?8,?9)",
             rusqlite::params![
                 c.scope,
                 c.tex,
@@ -473,8 +473,8 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
     tx.execute(
         "INSERT INTO symbols
             (id, scope, tex, display, lean_name, trigger, kind, role,
-             decl_order, precedence, assoc, home_node, symbol_hash)
-         VALUES (?1,?2,'=','=','Eq',NULL,'notation',NULL,?3,NULL,NULL,?4,?5)
+             decl_order, precedence, home_node, symbol_hash)
+         VALUES (?1,?2,'=','=','Eq',NULL,'notation',NULL,?3,NULL,?4,?5)
          ON CONFLICT(id) DO NOTHING",
         rusqlite::params![
             qubitick_model::EQ_SYM,
@@ -511,13 +511,19 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
     // contexts were built before the metadata existed and dispatch silently fell
     // back to structural heuristics.
     {
+        // THE CHARTER'S MASTER PRECEDENCE TABLE (D10). Every declared glyph the
+        // charter orders gets its level here; a glyph the table does not name keeps
+        // the shared loosest level, which is what a corpus without a table has.
+        let precedence: Vec<Vec<String>> = crate::canon::read(project_root)?
+            .map(|c| c.precedence)
+            .unwrap_or_default();
         let tx = conn.unchecked_transaction()?;
         for (i, e) in entries.iter().enumerate() {
             let (ctx, _h) = &entry_ctxs[i];
             let src = std::fs::read_to_string(&e.path)?;
             let nodes = qubitick_parse::parse_content(ctx, &src)?;
             if let Some(Node::Definition(d)) = nodes.first() {
-                persist_definition_metadata(&tx, ctx, &src, d)?;
+                persist_definition_metadata(&tx, ctx, &src, d, &precedence)?;
             }
         }
         tx.commit()?;
@@ -646,6 +652,7 @@ fn persist_definition_metadata(
     ctx: &qubitick_ctx::Ctx,
     src: &str,
     d: &qubitick_model::Definition,
+    precedence: &[Vec<String>],
 ) -> anyhow::Result<()> {
     let Some(rule) = &d.d_block.elab_rule else {
         return Ok(());
@@ -702,9 +709,17 @@ fn persist_definition_metadata(
             Some(DeclaredRole::Nullity) => facets |= bit(Facet::Nullity),
             _ => {}
         }
+        // The charter's level for this glyph, 1 = loosest; NULL when the table does
+        // not name it (the parser then gives it the one shared loosest level).
+        let level: Option<i64> = ctx.by_id(sid).and_then(|r| {
+            precedence
+                .iter()
+                .position(|l| l.iter().any(|g| *g == r.tex))
+                .map(|i| i as i64 + 1)
+        });
         tx.execute(
-            "UPDATE symbols SET role = ?1, facets = ?2 WHERE id = ?3",
-            rusqlite::params![fixity, facets as i64, sid],
+            "UPDATE symbols SET role = ?1, facets = ?2, precedence = ?3 WHERE id = ?4",
+            rusqlite::params![fixity, facets as i64, level, sid],
         )?;
     }
     Ok(())
