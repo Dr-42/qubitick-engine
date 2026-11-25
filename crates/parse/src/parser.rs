@@ -339,6 +339,7 @@ fn lex_diag(e: LexError) -> Diagnostic {
         span: e.span,
         message: e.message,
         hints: Vec::new(),
+        code: "lex",
     }
 }
 
@@ -349,6 +350,7 @@ fn synth_diag(pos: usize, msg: &str) -> Diagnostic {
         span: Span::new(pos, pos),
         message: msg.into(),
         hints: Vec::new(),
+        code: "structural",
     }
 }
 
@@ -636,37 +638,80 @@ fn is_logic_connective(ctx: &Ctx, id: u32) -> bool {
     if ctx.by_id(id as i64).and_then(|r| r.role.as_deref()) == Some("connective") {
         return true;
     }
-    // Default: the four boolean-ring propositional connectives. These are the
-    // ENGINE'S LOGIC (LeanEmission §1: the boolean ring is the sole source of
-    // logic), not corpus mathematics — they bind looser than `=` by definition.
-    // Looseness is not derivable from any definition's shape (e.g. `\cup` and
-    // `\lor` have identical Sema structure yet differ), so this small default is
-    // the spec-faithful floor, overridable per-symbol via the DB role above.
+    // The declaration's classification (`Role: connective`), which the shape cannot
+    // give: `a \land b` and `a \cup b` are identical glyph lines.
+    if ctx
+        .by_id(id as i64)
+        .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Connective))
+    {
+        return true;
+    }
+    // Default: the two iff spellings, which are the connective a `Sema:` is
+    // written with and so belong to the declaration FORMAT, not to any corpus's
+    // mathematics. Every other connective — the boolean ring's `\land`/`\lor`
+    // included — is a corpus glyph, and binds loosely only where its own
+    // declaration says `Role: connective`.
     ctx.by_id(id as i64)
-        .map(|r| {
-            matches!(
-                r.tex.as_str(),
-                "\\leftrightarrow" | "\\land" | "\\lor" | "\\iff"
-            )
-        })
+        .map(|r| matches!(r.tex.as_str(), "\\leftrightarrow" | "\\iff"))
         .unwrap_or(false)
 }
 
-/// Whether a symbol is a RELATION between two terms (`\le_{\mathbb{Z}}`,
-/// `\subseteq`, `\in`, …).
+/// Whether a symbol is a RELATION between two terms — a glyph whose own declaration
+/// says `Role: relation`.
 ///
 /// A relation binds looser than the arithmetic it compares and tighter than the
-/// propositional connectives — a precedence level of its own. Without it the flat
-/// infix fold read `D.BT.76`'s
-/// `a \cdot_{\mathbb{Z}} d \le_{\mathbb{Z}} c \cdot_{\mathbb{Z}} b` as
-/// `((a \cdot_Z d) \le_Z c) \cdot_Z b`, and the definition of the rational order
-/// applied `\cdot_Z` to a proposition; calling the same glyph a
-/// `is_logic_connective` is not enough either, because then `⟷` and `≤_Z` share a
-/// level and the flat connective loop folds them left.
+/// propositional connectives — a precedence level of its own. Without that level a
+/// flat infix fold reads `a \cdot_{\mathbb{Z}} d \le_{\mathbb{Z}} c
+/// \cdot_{\mathbb{Z}} b` as `((a \cdot_Z d) \le_Z c) \cdot_Z b`, and a definition
+/// of the rational order applies `\cdot_Z` to a proposition; calling the same glyph
+/// a `is_logic_connective` is not enough either, because then the iff and the order
+/// share a level and the flat connective loop folds them left.
 fn is_relation(ctx: &Ctx, id: u32) -> bool {
     ctx.by_id(id as i64)
         .map(|r| ctx.has_facet(&r.tex, Facet::Relation))
         .unwrap_or(false)
+}
+
+/// Refuse a glyph used as an operator that no declaration states.
+///
+/// The engine classifies no mathematical glyph of its own, so `a op b` is legitimate
+/// exactly when the corpus declares `op` — by the shape of a glyph line (`a op b` is
+/// infix) or with a `Role:`. A glyph nothing declares cannot head a term here, and
+/// the message names it and says what a declaration looks like.
+fn require_declared_operator(ctx: &Ctx, id: u32, pos: usize) -> Result<(), Diagnostic> {
+    // A symbol-free context is a SYNTAX check — the LaTeX lint parses text with no
+    // corpus behind it — so there is no corpus that owes a declaration, and no
+    // error to report.
+    if ctx.symbols().next().is_none() {
+        return Ok(());
+    }
+    let code = "operator.undeclared";
+    let Some(row) = ctx.by_id(id as i64) else {
+        return Err(Diagnostic {
+            severity: Severity::Error,
+            phase: Phase::Structural,
+            span: Span::new(pos, pos),
+            message: "a symbol in operator position has no row in this corpus's table".into(),
+            hints: Vec::new(),
+            code,
+        });
+    };
+    if ctx.is_declared(&row.tex) || qubitick_model::corpus::is_any_class(&row.tex) {
+        // Declared by the corpus, or one of the engine's own glyphs (an arrow, an iff,
+        // a generated sort): both are a role the engine may rely on.
+        return Ok(());
+    }
+    Err(Diagnostic {
+        severity: Severity::Error,
+        phase: Phase::Structural,
+        span: Span::new(pos, pos),
+        message: format!(
+            "`{}` is used as an operator, but this corpus never declares it; declare it with a node whose glyph line is `a {} b` and a `Sema:`, a `Type:` or a `Role:`",
+            row.tex, row.tex
+        ),
+        hints: Vec::new(),
+        code,
+    })
 }
 
 /// Relations: looser than `=`, tighter than the propositional connectives.
@@ -749,6 +794,10 @@ fn parse_bin_term(
                 break;
             }
             Some(Token::Symbol(id, _)) => {
+                // An operator is one a DECLARATION states. The engine owns no
+                // vocabulary to fall back on, so a glyph nothing declares cannot
+                // head a term here: this is the corpus's error, and it names it.
+                require_declared_operator(ctx, *id, pos)?;
                 // Infix symbol acts as the binary head: `lhs s rhs` = `s lhs rhs`.
                 pos += 1;
                 let (rhs, next) = parse_atom(tokens, pos, ctx)?;

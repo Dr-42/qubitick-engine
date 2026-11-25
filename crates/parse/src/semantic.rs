@@ -31,6 +31,10 @@ pub struct Diagnostic {
     pub span: Span,
     pub message: String,
     pub hints: Vec<String>,
+    /// What kind of refusal this is, so a caller can act on ONE kind without
+    /// matching prose. `operator.undeclared` is the one a build escalates to an
+    /// error: a glyph in operator position that the corpus never declares.
+    pub code: &'static str,
 }
 
 /// The parse-crate error type, wrapping either a lex error or an elaboration error.
@@ -139,25 +143,34 @@ mod tests {
     use super::*;
     use qubitick_db::queries::SymbolRow;
 
-    fn test_ctx() -> qubitick_ctx::Ctx {
-        let row = |id: i64, tex: &str| SymbolRow { facets: 0,
+    /// A row that DECLARES its glyph with `role` (empty = the fixture does not
+    /// classify it), which is what a corpus node's glyph line does.
+    fn declared(id: i64, tex: &str, role: &str) -> SymbolRow {
+        SymbolRow { facets: 0,
             id,
-            scope: "".into(),
+            scope: "Era0/Strata0".into(),
             tex: tex.into(),
             display: tex.into(),
             lean_name: tex.trim_start_matches('\\').to_string(),
             trigger: None,
             kind: "notation".into(),
-            role: None,
+            role: (!role.is_empty()).then(|| role.to_string()),
             precedence: None,
             assoc: None,
             home_node: 1,
             elab: None,
             binder_kind: None,
-        };
+        }
+    }
+
+    fn test_ctx() -> qubitick_ctx::Ctx {
         qubitick_ctx::Ctx::from_rows(
             "Era0/Strata0",
-            vec![row(1, "\\Delta"), row(2, "\\cap"), row(3, "\\to")],
+            vec![
+                declared(1, "\\Delta", "infix"),
+                declared(2, "\\cap", "infix"),
+                declared(3, "\\to", "infix"),
+            ],
         )
     }
 
@@ -291,24 +304,13 @@ mod tests {
     fn elabs_forall_binder_over_equation() {
         // `\forall a b : \mathfrak{E}, a \Delta b = b \Delta a` must parse to a
         // Forall binder whose body is an equality, not a raw Var fallback.
-        let row = |id: i64, tex: &str| SymbolRow { facets: 0,
-            id,
-            scope: "Era0/Strata0".into(),
-            tex: tex.into(),
-            display: tex.into(),
-            lean_name: tex.trim_start_matches('\\').to_string(),
-            trigger: None,
-            kind: "notation".into(),
-            role: None,
-            precedence: None,
-            assoc: None,
-            home_node: 1,
-            elab: None,
-            binder_kind: None,
-        };
         let ctx = qubitick_ctx::Ctx::from_rows(
             "Era0/Strata0",
-            vec![row(1, "\\mathfrak{E}"), row(2, "\\Delta"), row(3, "\\cap")],
+            vec![
+                declared(1, "\\mathfrak{E}", ""),
+                declared(2, "\\Delta", "infix"),
+                declared(3, "\\cap", "infix"),
+            ],
         );
         let e = parse_expr(
             "\\forall a b : \\mathfrak{E}, a \\Delta b = b \\Delta a",

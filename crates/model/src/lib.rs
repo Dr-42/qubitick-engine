@@ -33,7 +33,7 @@ pub use node::{
 };
 pub use proof::{CaseArm, ChainJust, ChainRow, CiteName, IndCase, JustRef, ProofStep};
 pub use symbol::{
-    ApplyForm, CtorDecl, DBlockIR, ElabRule, FormBody, ModRoleKind, ModRoleTable, RoleSet,
-    SymDecl, SymbolKind,
+    ApplyForm, CtorDecl, DBlockIR, DeclaredRole, ElabRule, FormBody, ModRoleKind, ModRoleTable,
+    RoleSet, SymDecl, SymbolKind,
 };
 pub use tag::{CensusCharter, PhysOrMath, StepRel};

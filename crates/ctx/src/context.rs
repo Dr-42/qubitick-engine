@@ -102,23 +102,15 @@ impl Ctx {
     ///
     /// D9: the corpus declaration is the answer. If the corpus has a DECLARED row
     /// for this tex (a definition with a D-block, or a primitive/formation/bracket
-    /// kind, or an operator with a derived role), its stored facet bitmask is
-    /// authoritative — the builtin table is ONLY a fallback for texes the corpus
-    /// never declares (engine fixtures and the 330-file corpus rely on that
-    /// fallback for symbols like `\Delta`, `\cap`, `\varnothing` which they use
-    /// but never declare). A use-only row (kind="notation", no role, no elab)
-    /// does NOT count as a declaration; for those we fall back to the builtin.
+    /// kind, or an operator with a declared role), its stored facet bitmask is
+    /// authoritative — the engine's own table is only consulted for the glyphs the
+    /// ENGINE generates (its sorts, arrows and bracket bars), which no corpus can
+    /// declare. A use-only row (kind="notation", no role, no elab) is not a
+    /// declaration and names no facet.
     pub fn has_facet(&self, tex: &str, facet: Facet) -> bool {
         if let Some(rows) = self.by_tex.get(tex) {
             let row = &rows[0];
-            // A symbol is "declared by the corpus" if it has a D-block (elab),
-            // or is a non-notation kind (primitive/formation/bracket), or has a
-            // derived operator role (prefix/infix/collector). Use-only symbols
-            // have kind="notation", role=None, elab=None.
-            let is_declared = row.elab.is_some()
-                || row.kind != "notation"
-                || row.role.is_some();
-            if is_declared {
+            if Self::row_is_declared(row) {
                 row.facets & facet.bits() != 0
             } else {
                 qubitick_model::corpus::is_class(tex, facet)
@@ -126,6 +118,37 @@ impl Ctx {
         } else {
             qubitick_model::corpus::is_class(tex, facet)
         }
+    }
+
+    /// Whether the corpus DECLARES this glyph, rather than only using it.
+    ///
+    /// A declaration is a node that says what the glyph is: a D-block (`Sema:`,
+    /// `Type:`), a non-notation symbol kind, a role, or a facet. A use-only row is
+    /// the mention of a glyph nothing declares.
+    pub fn is_declared(&self, tex: &str) -> bool {
+        self.by_tex
+            .get(tex)
+            .map(|rows| Self::row_is_declared(&rows[0]))
+            .unwrap_or(false)
+    }
+
+    fn row_is_declared(row: &SymbolRow) -> bool {
+        // A facet is a claim about the glyph, so a row carrying one is a declaration
+        // too: that is what ingestion writes from a corpus's `Role:`.
+        row.elab.is_some() || row.kind != "notation" || row.role.is_some() || row.facets != 0
+    }
+
+    /// The lowest-id DECLARED row carrying `facet`.
+    ///
+    /// The rewriter asks this for the corpus's own nullity operator and empty
+    /// element; it reads what the corpus declared, and the engine names no glyph
+    /// for either. Deterministic (lowest id wins) because the row order of a
+    /// `HashMap` is not.
+    pub fn declared_with_facet(&self, facet: Facet) -> Option<&SymbolRow> {
+        self.by_id
+            .values()
+            .filter(|r| Self::row_is_declared(r) && r.facets & facet.bits() != 0)
+            .min_by_key(|r| r.id)
     }
 }
 

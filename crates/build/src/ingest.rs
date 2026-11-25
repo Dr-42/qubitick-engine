@@ -47,19 +47,11 @@ fn compute_facets(tex: &str, _kind: &str) -> u32 {
     if tex == r"\iff" { bits |= 1 << (Facet::RightIff as u8); }
     // Collector / bracketing glyphs
     if matches!(tex, r"\Vert" | r"\ulcorner" | r"\urcorner") { bits |= 1 << (Facet::Collector as u8); }
-    // Nullity / empty carrier
-    if tex == r"\varnothing" { bits |= 1 << (Facet::Null as u8); }
-    // Binary operator heads (BinOp): REMOVED name-based list.
-    // D9: BinOp is derived from the DECLARATION's glyph-line shape (two operands
-    // around the head → infix → BinOp). A project's own operator must not need
-    // to be named in the engine. The previous list (\cap, \cup, \land, \lor,
-    // \cdot, \subseteq, \in, \ne, \le, \times, \Delta, +, ×) is gone. The
-    // shipped PUBLIC_SYMBOL_CLASSES table still carries these for the fallback
-    // used by use-only symbols in the 330-file corpus (which never declares
-    // them); those rows are candidates for the later slice that deletes the
-    // shipped vocabulary.
-    // Delta is also Nullity
-    if tex == r"\Delta" { bits |= 1 << (Facet::Nullity as u8); }
+    // THE OPERATOR VOCABULARY IS NOT HERE. An operator, a relation, the empty
+    // element and the nullity operator are what a corpus's own declaration states
+    // (`Role:`), and `persist_definition_metadata` writes those bits from the
+    // declaration it read. The glyph SHAPE gives the fixity (an infix operator is a
+    // binary operator); nothing gives a glyph a mathematical meaning but a node.
     bits
 }
 /// Outcome counters of one corpus ingestion.
@@ -676,25 +668,43 @@ fn persist_definition_metadata(
         rusqlite::params![sid, rule.as_str(), apply_form, binder_kind],
     )?;
     persist_mod_roles(tx, sid, &d.d_block.mod_roles)?;
-    if let Some(role) = derive_role(ctx, src, sid) {
-        // D9: derive BinOp facet from the glyph-line shape. An infix operator
-        // (two operands around the head) is a binary operator; prefix/unary and
-        // collector/bracket are not. Update the facets column so the DB is the
-        // single source of truth for BinOp, not the hardcoded name list.
+    // TWO AXES, TWO PLACES. The glyph line states the FIXITY (where the operands
+    // sit) and that is what the `role` column carries; a `Role:` states the
+    // CLASSIFICATION (relation, connective, null, nullity) and that is a facet bit.
+    // A glyph can be both — a binary operator that is also the nullity op — so the
+    // two must not compete for one column.
+    let declared = d.d_block.role;
+    let fixity: Option<&'static str> = match declared {
+        Some(qubitick_model::DeclaredRole::Infix) => Some("infix"),
+        Some(qubitick_model::DeclaredRole::Prefix) => Some("prefix"),
+        Some(qubitick_model::DeclaredRole::Collector) => Some("collector"),
+        _ => derive_role(ctx, src, sid),
+    };
+    if fixity.is_some() || declared.is_some() {
+        use qubitick_model::corpus::Facet;
+        use qubitick_model::DeclaredRole;
         let mut facets: u32 = tx
             .query_row("SELECT facets FROM symbols WHERE id = ?1", [sid], |r| r.get(0))
             .unwrap_or(0);
-        if role == "infix" {
-            facets |= 1 << (qubitick_model::corpus::Facet::BinOp as u8);
+        let bit = |f: Facet| 1u32 << (f as u8);
+        if fixity == Some("infix") {
+            facets |= bit(Facet::BinOp);
         } else {
-            // Explicitly clear BinOp for non-infix roles (prefix, collector) so a
-            // project can declare a glyph that the shipped table calls BinOp
-            // (e.g. \times as prefix) and the declaration wins.
-            facets &= !(1 << (qubitick_model::corpus::Facet::BinOp as u8));
+            // A declaration outranks the glyph line, so a glyph the shape calls
+            // binary can still be declared unary — that is the point of D9.
+            facets &= !bit(Facet::BinOp);
+        }
+        match declared {
+            Some(DeclaredRole::Connective) => facets |= bit(Facet::Connective),
+            Some(DeclaredRole::Relation) => facets |= bit(Facet::Relation),
+            Some(DeclaredRole::Collector) => facets |= bit(Facet::Collector),
+            Some(DeclaredRole::Null) => facets |= bit(Facet::Null),
+            Some(DeclaredRole::Nullity) => facets |= bit(Facet::Nullity),
+            _ => {}
         }
         tx.execute(
             "UPDATE symbols SET role = ?1, facets = ?2 WHERE id = ?3",
-            rusqlite::params![role, facets as i64, sid],
+            rusqlite::params![fixity, facets as i64, sid],
         )?;
     }
     Ok(())
@@ -1133,7 +1143,7 @@ fn is_field_keyword(k: &str) -> bool {
     matches!(
         k.trim().to_ascii_lowercase().as_str(),
         "symbol" | "qunits" | "dims" | "rate"
-            | "sema" | "type"
+            | "sema" | "type" | "role"
             | "proof"
             | "falsify"
             | "math" | "phys"

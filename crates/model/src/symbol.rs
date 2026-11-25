@@ -36,6 +36,71 @@ impl SymbolKind {
     }
 }
 
+/// The surface role a declaration states for its glyph (`Role:` in a corpus node).
+///
+/// The glyph line says where the operands sit; a `Role:` says what the glyph means
+/// to the parser and the rewriter, and no shape can tell that: `a \cup b` and
+/// `a \lor b` are both `x op y` with an iff-headed `Sema:`, yet one is an operation
+/// on elements and the other is a connective. The engine carries no classification
+/// of a mathematical glyph of its own: an operator the parser may use is one a
+/// declaration states, and this is where a corpus states it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeclaredRole {
+    /// Binary, `a op b`. Also derivable from the glyph line.
+    Infix,
+    /// Unary prefix, `op a`. Also derivable from the glyph line.
+    Prefix,
+    /// A bracket pair written around its operand (`\Vert x \Vert`).
+    Collector,
+    /// Binds looser than `=`: the propositional connectives.
+    Connective,
+    /// A relation between two terms, binding looser than the arithmetic it compares.
+    Relation,
+    /// The carrier's empty element.
+    Null,
+    /// The nullity operator the proof rewriter anchors an equality on.
+    Nullity,
+}
+
+impl DeclaredRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeclaredRole::Infix => "infix",
+            DeclaredRole::Prefix => "prefix",
+            DeclaredRole::Collector => "collector",
+            DeclaredRole::Connective => "connective",
+            DeclaredRole::Relation => "relation",
+            DeclaredRole::Null => "null",
+            DeclaredRole::Nullity => "nullity",
+        }
+    }
+
+    /// The role a `Role:` line states, or `None` for a word the surface does not
+    /// know (the caller reports the word and the vocabulary it may have meant).
+    pub fn parse(word: &str) -> Option<DeclaredRole> {
+        Some(match word.trim().to_ascii_lowercase().as_str() {
+            "infix" => DeclaredRole::Infix,
+            "prefix" => DeclaredRole::Prefix,
+            "collector" => DeclaredRole::Collector,
+            "connective" => DeclaredRole::Connective,
+            "relation" => DeclaredRole::Relation,
+            "null" => DeclaredRole::Null,
+            "nullity" => DeclaredRole::Nullity,
+            _ => return None,
+        })
+    }
+
+    /// The fixed vocabulary, for an error message that names what was expected.
+    pub const VOCABULARY: [&'static str; 7] =
+        ["infix", "prefix", "collector", "connective", "relation", "null", "nullity"];
+}
+
+impl std::fmt::Display for DeclaredRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Constructor declaration of a formation's `FormBody::Formation` (DataSchema §6.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CtorDecl {
@@ -171,6 +236,12 @@ pub struct DBlockIR {
     pub mod_roles: ModRoleTable,
     pub elab_rule: Option<ElabRule>,
     pub apply_form: Option<ApplyForm>,
+    /// `Role:` — the classification the declaration states for its glyph.
+    ///
+    /// Absent means the declaration did not classify it, and the engine falls back
+    /// to the shape of the glyph line (infix/prefix/collector) or to no operator
+    /// role at all.
+    pub role: Option<DeclaredRole>,
 }
 
 impl Default for DBlockIR {
@@ -182,6 +253,7 @@ impl Default for DBlockIR {
             mod_roles: ModRoleTable::default(),
             elab_rule: None,
             apply_form: None,
+            role: None,
         }
     }
 }

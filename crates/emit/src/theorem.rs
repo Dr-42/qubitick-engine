@@ -220,10 +220,10 @@ fn nullity_parts(
     fn_names: &std::collections::HashMap<u32, String>,
     sorts: &std::collections::HashSet<u32>,
 ) -> Option<NullityParts> {
-    let delta = texes_with(Facet::Nullity)
-        .find_map(|t| ctx.by_tex(t).and_then(|r| r.first()).map(|r| r.id as u32))?;
-    let null = texes_with(Facet::Null)
-        .find_map(|t| ctx.by_tex(t).and_then(|r| r.first()).map(|r| r.id as u32))?;
+    // The corpus's own nullity operator and empty element: whatever glyphs its
+    // declarations marked, which is the only thing the engine may go on.
+    let delta = ctx.declared_with_facet(Facet::Nullity)?.id as u32;
+    let null = ctx.declared_with_facet(Facet::Null)?.id as u32;
     // Look THROUGH the statement's own quantifiers: `T.BT.01` states
     // `∀ a b, a Δ b = b Δ a`, and the equation the bridge connects is inside.
     let mut body = statement;
@@ -363,12 +363,8 @@ pub fn emit_theorem(
                 .first()
                 .and_then(|r| r.lhs.as_ref())
                 .is_some_and(|lhs| {
-                    texes_with(Facet::Nullity).any(|t| {
-                        ctx.by_tex(t)
-                            .and_then(|rows| rows.first())
-                            .is_some_and(|r| {
-                                matches!(lhs, Expr::Apply(h, _) if h.primary == r.id as u32)
-                            })
+                    ctx.declared_with_facet(Facet::Nullity).is_some_and(|r| {
+                        matches!(lhs, Expr::Apply(h, _) if h.primary == r.id as u32)
                     })
                 }),
             _ => false,
@@ -633,14 +629,10 @@ fn outer_binder_vars(ctx: &Ctx, e: &Expr) -> Vec<String> {
 /// emitted as `Eq (Delta l r) varnothing`, which is exactly what the corpus
 /// proof chains establish (they run to `∅`).
 fn nullity_form(ctx: &Ctx, e: &Expr) -> Expr {
-    let lookup = |tex: &str| {
-        ctx.by_tex(tex)
-            .and_then(|rows| rows.first())
-            .map(|r| r.id as u32)
-    };
-    // Nullity-anchored equality is `x Δ y = ∅`: the Δ-op and the empty carrier.
-    let delta = texes_with(Facet::Nullity).find_map(&lookup);
-    let null = texes_with(Facet::Null).find_map(lookup);
+    // Nullity-anchored equality is `x Δ y = ∅`: the corpus's nullity op and its
+    // empty element, each found by the declaration that marked it.
+    let delta = ctx.declared_with_facet(Facet::Nullity).map(|r| r.id as u32);
+    let null = ctx.declared_with_facet(Facet::Null).map(|r| r.id as u32);
     match (delta, null) {
         (Some(delta), Some(null)) => map_nullity(e, delta, null),
         _ => e.clone(),
@@ -665,6 +657,18 @@ fn map_nullity(e: &Expr, delta: u32, null: u32) -> Expr {
         ),
         _ => e.clone(),
     }
+}
+
+/// Mark a test fixture row as DECLARED with a facet — what a corpus node's
+/// `Role:` does. A use-only row classifies nothing, so a fixture that wants the
+/// rewriter to find the corpus's nullity operator must declare it.
+#[cfg(test)]
+fn declaring(
+    mut row: qubitick_db::queries::SymbolRow,
+    facet: qubitick_model::corpus::Facet,
+) -> qubitick_db::queries::SymbolRow {
+    row.facets |= facet.bits();
+    row
 }
 
 #[cfg(test)]
@@ -754,7 +758,10 @@ mod tests {
             elab: None,
             binder_kind: None,
         };
-        let ctx = Ctx::from_rows("Era0/Strata0", vec![row(5, "\\Delta")]);
+        let ctx = Ctx::from_rows(
+            "Era0/Strata0",
+            vec![declaring(row(5, "\\Delta"), Facet::Nullity)],
+        );
         let b = qubitick_model::Binder {
             vars: vec!["a".into(), "b".into()],
             ty: Expr::var("E"),
@@ -858,7 +865,10 @@ mod tests {
         };
         let ctx = Ctx::from_rows(
             "Era0/Strata0",
-            vec![row(5, "\\Delta"), row(6, "\\varnothing")],
+            vec![
+                declaring(row(5, "\\Delta"), Facet::Nullity),
+                declaring(row(6, "\\varnothing"), Facet::Null),
+            ],
         );
         let eq = |l: Expr, r: Expr| {
             Expr::Apply(AtomicComposite::new(qubitick_model::EQ_SYM), vec![l, r])

@@ -80,7 +80,7 @@ pub enum Quant {
 /// node.rs::split_fields has the same list, and crates/build/src/ingest.rs::is_field_keyword must
 /// agree with both — a key known to one and not the others is a line that is a field to the
 /// symbol scan and a statement to the parser). `Trigger`, `Kind`, `Tex`, `Prec`, `Assoc`, `Req`,
-/// `Sig`, `Form`, `Thm`, `Role` and `Shape` were here and are gone: they were recognized and then
+/// `Sig`, `Form`, `Thm` and `Shape` were here and are gone: they were recognized and then
 /// read by nothing, so they only made a typo harder to see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
@@ -90,6 +90,8 @@ pub enum FieldKind {
     Sema,
     /// definition: the symbolic signature
     Type,
+    /// definition: the glyph's classification (`infix`, `relation`, `null`, ...)
+    Role,
     /// theorem: the proof block
     Proof,
     /// axiom: the refutation protocol
@@ -112,6 +114,7 @@ impl FieldKind {
             "Symbol" => FieldKind::Symbol,
             "Sema" => FieldKind::Sema,
             "Type" => FieldKind::Type,
+            "Role" => FieldKind::Role,
             "Proof" => FieldKind::Proof,
             "Falsify" => FieldKind::Falsify,
             "Math" => FieldKind::Math,

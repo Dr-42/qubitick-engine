@@ -42,7 +42,20 @@ fn scratch(tag: &str) -> PathBuf {
 ///
 /// It is the trio `crates/build/src/pipeline.rs` uses for its own ground tests — known to verify,
 /// so anything this file says is about the GROUND and the ROUTES rather than about the corpus.
+/// The declarations the fixture corpus OWES: the engine classifies no mathematical
+/// glyph of its own, so a corpus that writes `\Delta`, `\cap` or `\varnothing`
+/// declares them. One node per glyph, distinct division numbers (two nodes claiming
+/// one number is an ingest error).
+fn declare_ops(dir: &Path) {
+    let defs = dir.join("Era0/Strata0/Definitions");
+    std::fs::create_dir_all(&defs).unwrap();
+    std::fs::write(defs.join("D_00_Delta.qbit"), "D.X.00. Delta\na \\Delta b\nRole: nullity\n").unwrap();
+    std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\n").unwrap();
+    std::fs::write(defs.join("D_03_Empty.qbit"), "D.X.03. Empty\n\\varnothing\nRole: null\n").unwrap();
+}
+
 fn corpus(dir: &Path) {
+    declare_ops(dir);
     for d in ["Axioms", "Definitions", "Theorems"] {
         std::fs::create_dir_all(dir.join("Era0/Strata0").join(d)).unwrap();
     }
@@ -157,7 +170,10 @@ async fn a_project_outside_every_root_is_wired_in_served_built_and_forgotten() {
         files_of(&files),
         vec![
             "Era0/Strata0/Axioms/A1_Base.qbit",
+            "Era0/Strata0/Definitions/D_00_Delta.qbit",
             "Era0/Strata0/Definitions/D_01_Wedge.qbit",
+            "Era0/Strata0/Definitions/D_02_Cap.qbit",
+            "Era0/Strata0/Definitions/D_03_Empty.qbit",
             "Era0/Strata0/Theorems/T_01_Self.qbit",
         ],
         "corpus-relative and sorted, and `Canon.qbit` is not a node: {files}"
@@ -172,8 +188,12 @@ async fn a_project_outside_every_root_is_wired_in_served_built_and_forgotten() {
     /* ---- THE PROMISE: it builds against ITS OWN ground ---- */
     let (status, built) = answer(handlers::post_build(st.clone(), Json(handlers::BuildReq { scope: None })).await).await;
     assert_eq!(status, 200, "a corpus that verifies is a 200: {built}");
-    assert_eq!(built["files"], json!(3));
-    assert_eq!(built["verified"], json!(3), "all three verify against the project's own ground: {built}");
+    assert_eq!(built["files"], json!(6), "three nodes and the three declarations they use");
+    assert_eq!(
+        built["verified"],
+        json!(6),
+        "all six verify against the project's own ground: {built}"
+    );
     assert_eq!(built["error_count"], json!(0));
 
     /* ---- and the same corpus FAILS when only the PROJECT's ground is broken ---- */
@@ -341,10 +361,14 @@ async fn an_admitted_theorem_verifies_and_is_counted() {
 
     let (status, built) = answer(handlers::post_build(st, Json(handlers::BuildReq { scope: None })).await).await;
     assert_eq!(status, 200, "{built}");
-    assert_eq!(built["files"], json!(4), "three proved nodes and one admitted: {built}");
+    assert_eq!(
+        built["files"],
+        json!(7),
+        "three proved nodes, one admitted, and the three declarations: {built}"
+    );
     assert_eq!(
         built["verified"],
-        json!(4),
+        json!(7),
         "an admitted theorem still checks — it is an axiom of its own module: {built}"
     );
     assert_eq!(built["error_count"], json!(0), "{built}");

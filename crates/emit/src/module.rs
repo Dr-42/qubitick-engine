@@ -346,23 +346,32 @@ pub(crate) fn definition_decl_name(
 
 /// Whether a `Definition` node actually declares its symbol.
 ///
-/// A definition whose `Sema:` is an equation headed by a corpus OPERATOR is a
-/// postulate about operands (`D.BT.43`: `e_1 \cap e_2 = \varnothing`), not a
-/// definition of that operator, and it declares nothing. The DB loader skips these
-/// nodes already; the emitter has to agree, or the node claims `cap` — which in a
-/// shared ground evicts `cap` from the frame the class axioms are written in.
+/// A definition whose `Sema:` is an equation headed by an operator the node does
+/// NOT itself declare is a postulate about operands (`D.BT.43`: `e_1 \cap e_2 =
+/// \varnothing` — the node declares `e_1`), not a definition of that operator, and
+/// it declares nothing. The DB loader skips these nodes already; the emitter has
+/// to agree, or the node claims `cap` — which in a shared ground evicts `cap` from
+/// the frame the class axioms are written in.
 fn defines_its_glyph(ctx: &Ctx, d: &qubitick_model::Definition) -> bool {
     match &d.d_block.form {
-        Some(FormBody::MacroExpr(e)) => !is_operand_postulate(ctx, e),
+        Some(FormBody::MacroExpr(e)) => !is_operand_postulate(ctx, e, d.symbol.primary),
         _ => true,
     }
 }
 
-fn is_operand_postulate(ctx: &Ctx, e: &Expr) -> bool {
+/// Whether a `Sema:` postulates about two operands instead of defining the operator
+/// that heads its equation.
+///
+/// The operator's own node defines it (`D.A.02` writes `a × b = a + a`); another
+/// node's operator heads an equation ABOUT its operands (`D.BT.43` writes
+/// `e_1 \cap e_2 = \varnothing` and declares `e_1`). So the question is the head's
+/// role and whose glyph it is — never a list of builtin names.
+fn is_operand_postulate(ctx: &Ctx, e: &Expr, own: u32) -> bool {
     qubitick_model::corpus::is_operand_postulate(e, |id| {
-        ctx.by_id(id as i64)
-            .map(|r| qubitick_model::corpus::is_class(&r.tex, Facet::BinOp))
-            .unwrap_or(false)
+        id != own
+            && ctx.by_id(id as i64).is_some_and(|r| {
+                r.role.is_some() || ctx.has_facet(&r.tex, Facet::BinOp)
+            })
     })
 }
 

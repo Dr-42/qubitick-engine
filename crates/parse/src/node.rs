@@ -175,13 +175,13 @@ fn split_fields(lines: &[&str]) -> Vec<(String, String)> {
         }
         if let Some((k, v)) = t.split_once(':') {
             let key = k.trim().to_ascii_lowercase();
-            /* THE VOCABULARY IS CLOSED AND SHORT: the ten keys a node actually carries. A line
+            /* THE VOCABULARY IS CLOSED AND SHORT: the eleven keys a node actually carries. A line
                whose `Word:` is not one of them is not a field — it is read as a STATEMENT, which
                is why a typo'd key does not fail to parse but lands in the node's content
                (see the note in crates/parse/src/lexer.rs::FieldKind). */
             match key.as_str() {
                 "symbol" | "qunits" | "dims" | "rate"      // a calibration's own fields
-                | "sema" | "type"                          // a definition's body
+                | "sema" | "type" | "role"                 // a definition's body and classification
                 | "proof"                                  // a theorem's block
                 | "falsify"                                // an axiom's refutation protocol
                 | "math" | "phys" => {                     // prose, kept as a note
@@ -450,6 +450,7 @@ fn def_equation_arity(ctx: &Ctx, sema: &Expr) -> Option<usize> {
 pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Result<Node> {
     let mut sema: Option<Expr> = None;
     let mut sig: Option<Expr> = None;
+    let mut role: Option<qubitick_model::DeclaredRole> = None;
     let mut glyph_tokens: Vec<String> = Vec::new();
     // Pre-scan the bare glyph line (`a \leftrightarrow b`) so we know the
     // defniendum's head token BEFORE parsing the `Sema:`. The head connective is
@@ -478,6 +479,19 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
                 match parse_expr_ok(ctx, v) {
                     Some(e) => sig = Some(e),
                     None => bail!("Type: failed to parse as a signature: {v}"),
+                }
+            }
+            "role" => {
+                // Role: classifies the glyph for the parser and the rewriter. The
+                // engine ships no such classification, so an unknown word is an
+                // error that names the vocabulary rather than a silent no-op.
+                match qubitick_model::DeclaredRole::parse(v) {
+                    Some(r) => role = Some(r),
+                    None => bail!(
+                        "Role: {} is not a role; expected one of {}",
+                        v,
+                        qubitick_model::DeclaredRole::VOCABULARY.join(", ")
+                    ),
                 }
             }
             "" if glyph_tokens.is_empty() => {
@@ -527,6 +541,7 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
         } else {
             None
         },
+        role,
         ..Default::default()
     };
 
@@ -1227,6 +1242,17 @@ fn parse_induction_at(
 }
 
 #[allow(clippy::items_after_test_module)]
+/// Mark a test fixture row as DECLARED with `role`.
+///
+/// A corpus declares a glyph in a node (`Role:`, or the shape of its glyph line);
+/// a row the engine merely mentions is not a declaration and classifies nothing, so
+/// a parser fixture that wants `a op b` to parse has to say what `op` is.
+#[cfg(test)]
+fn declaring(mut row: qubitick_db::queries::SymbolRow, role: &str) -> qubitick_db::queries::SymbolRow {
+    row.role = Some(role.to_string());
+    row
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1287,13 +1313,13 @@ mod tests {
                 // so the exact glyph under test is registered ahead of the
                 // same-prefixed `\mathfrak{E}`.
                 row(1, "\\mathfrak{L}"),
-                row(2, "\\cap"),
+                declaring(row(2, "\\cap"), "infix"),
                 row(3, "\\mathbb{1}"),
                 row(4, "\\tau"),
                 row(5, "\\to"),
                 row(6, "\\mathfrak{E}"),
-                row(7, "\\Delta"),
-                row(8, "\\varnothing"),
+                declaring(row(7, "\\Delta"), "nullity"),
+                declaring(row(8, "\\varnothing"), "null"),
             ],
         )
     }
@@ -1440,7 +1466,11 @@ mod tests {
         };
         let rich = Ctx::from_rows(
             "Era0/Strata0",
-            vec![row(1, "\\mathfrak{E}"), row(2, "\\Delta"), row(3, "\\cap")],
+            vec![
+                row(1, "\\mathfrak{E}"),
+                declaring(row(2, "\\Delta"), "infix"),
+                declaring(row(3, "\\cap"), "infix"),
+            ],
         );
         let src = "A1. Realm\n\\forall a b c : \\mathfrak{E}, (a \\Delta b) \\Delta c = a \\Delta (b \\Delta c)";
         let nodes = parse_content(&rich, src).unwrap();
@@ -1542,7 +1572,7 @@ mod tests {
             "Era0/Strata0",
             vec![
                 row(1, "\\mathbb{1}", "mathbb_1"),
-                row(2, "\\Delta", "Delta"),
+                declaring(row(2, "\\Delta", "Delta"), "infix"),
                 row(3, "\\leftrightarrow", "leftrightarrow"),
                 row(qubitick_model::EQ_SYM as i64, "=", "Eq_"),
             ],
@@ -1765,7 +1795,7 @@ mod formtests {
             vec![
                 row(qubitick_model::EQ_SYM as i64, "="),
                 row(1, "\\mathcal{W}"),
-                row(2, "\\vee"),
+                declaring(row(2, "\\vee"), "infix"),
                 row(10, "\\mathbf{p}"),
                 row(11, "\\mathbf{q}"),
             ],

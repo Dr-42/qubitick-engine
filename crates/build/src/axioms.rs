@@ -82,7 +82,7 @@ pub fn load_definition_nodes(
         let symbol = definiendum_head(ctx, &sema);
         // Skip operator-headed misparses, unidentifiable (symbol 0) glyphs, and
         // duplicate glyphs claimed by more than one definition.
-        if is_compound_definiendum_operator(ctx, &sema)
+        if is_operator_of_another_node(ctx, symbol, header.id as i64)
             || symbol == 0
             || !seen_symbols.insert(symbol)
         {
@@ -120,31 +120,25 @@ pub fn load_definition_nodes(
 ///
 /// `Eq(glyph args, body)` defines `glyph`; a non-equation Sema is taken at face
 /// value.
-/// Whether a Sema's definiendum is a compound whose head is an OPERATOR used
-/// across the corpus (so the defined glyph is actually a subject, not that
-/// operator). Handles `e_1 \cap e_2 = ∅` style rows via the context's tex.
-fn is_compound_definiendum_operator(ctx: &Ctx, sema: &qubitick_model::Expr) -> bool {
-    use qubitick_model::Expr;
-    let target = match sema {
-        Expr::Apply(h, args) if h.primary == qubitick_model::EQ_SYM && args.len() == 2 => &args[0],
-        other => other,
-    };
-    let Expr::Apply(h, _) = target else {
+/// Whether a definition's definiendum is headed by an operator that ANOTHER node
+/// declares — so the node postulates something about two operands rather than
+/// defining that operator.
+///
+/// `D.BT.43` declares `e_1` and writes `e_1 \cap e_2 = \varnothing`: the equation is
+/// headed by `cap`, which another node declares, and no reading of `D.43` defines
+/// it. `D.A.02` writes `a × b = a + a`: the head is the glyph THAT node declares,
+/// so it is a definition and is kept. A head nothing declares is not an operator at
+/// all, so it is not this rule's business.
+///
+/// This also refuses a `\land`-joined Sema (`D.BT.56`'s recursive tick operators),
+/// whose definiendum cannot be named because the head is `\land` — the operator the
+/// whole corpus is written with, declared by its own node.
+fn is_operator_of_another_node(ctx: &Ctx, head: u32, node: i64) -> bool {
+    let Some(row) = ctx.by_id(head as i64) else {
         return false;
     };
-    let Some(tex) = ctx.by_id(h.primary as i64).map(|r| r.tex.clone()) else {
-        return false;
-    };
-    // Deliberately broader than the emitter's [`corpus::is_operand_postulate`]: this
-    // one also refuses a `\land`-joined Sema (`D.BT.56`'s recursive tick operators),
-    // whose head is `\land`, because `definiendum_head` cannot name a definiendum for
-    // them and would answer `\land` — the operator the whole corpus is written with.
-    // Use the hardcoded PUBLIC_SYMBOL_CLASSES table only: this function is meant to
-    // skip definitions for BUILTIN operators (like \cap, \times) that are already in
-    // the frame. Project-declared operators (like +, ×) must NOT be skipped here,
-    // even if they have BinOp facet in the database, because they ARE the operator
-    // being defined.
-    qubitick_model::corpus::is_class(&tex, Facet::BinOp)
+    row.home_node != node
+        && (row.role.is_some() || ctx.has_facet(&row.tex, Facet::BinOp))
 }
 
 /// The head symbol of a definition's definiendum.

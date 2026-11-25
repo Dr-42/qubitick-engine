@@ -42,6 +42,7 @@ pub fn build_file(
     let ctx = qubitick_ctx::build_ctx(conn, &scope_of_path(path))?;
     let emitted = emit_file(&ctx, conn, path)?;
     let mut diagnostics = dangling_diagnostics(conn, path)?;
+    diagnostics.extend(refused_operator_diagnostics(&ctx, path)?);
     diagnostics.extend(latex_warnings(&ctx, path)?);
     diagnostics.extend(check_file_diagnostics(path, &emitted, ground)?);
     let verified = !diagnostics.iter().any(Diagnostic::is_error);
@@ -51,6 +52,62 @@ pub fn build_file(
         verified,
         diagnostics,
     })
+}
+
+/// Every row a node states, as stored: an axiom's statement rows, a definition's
+/// body, a theorem's statement.
+fn rows_of(node: &qubitick_model::Node) -> Vec<&qubitick_model::Expr> {
+    use qubitick_model::{FormBody, Node};
+    match node {
+        Node::Axiom(a) => a.statements.iter().collect(),
+        Node::Theorem(t) => vec![&t.statement],
+        Node::Definition(d) => match &d.d_block.form {
+            Some(FormBody::MacroExpr(e)) => vec![e],
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// A row the parser REFUSED because it uses a glyph the corpus never declares.
+///
+/// A row the strict parser cannot read is stored as raw LaTeX (`Expr::Var` holding
+/// the source text) so one exotic row does not stop the rest of a corpus from
+/// building. For this refusal that tolerance is the wrong answer: the row is text
+/// Lean cannot read, and Lean's "expected token" says nothing about the cause. So
+/// the row is parsed again — strictly — and the parser's own sentence becomes the
+/// build error, naming the glyph and what a declaration looks like.
+fn refused_operator_diagnostics(ctx: &Ctx, path: &Path) -> Result<Vec<Diagnostic>> {
+    let src = std::fs::read_to_string(path)?;
+    let nodes = qubitick_parse::parse_content(ctx, &src)?;
+    let file = path.display().to_string();
+    let mut out: Vec<Diagnostic> = Vec::new();
+    for node in &nodes {
+        for row in rows_of(node) {
+            let qubitick_model::Expr::Var(text) = row else {
+                continue;
+            };
+            // A row that parsed has plain metavariables; the raw text of a refused
+            // row is the only Var that still carries a control word.
+            if !text.contains('\\') {
+                continue;
+            }
+            if let Err(qubitick_parse::ParseError::Elab(d)) =
+                qubitick_parse::semantic::parse_expr(text, ctx)
+                && d.code == "operator.undeclared"
+            {
+                let said = Diagnostic::error(Phase::Parse, "parse.operator.undeclared", d.message)
+                    .in_file(file.clone())
+                    .of_node(node.base().name.clone());
+                // One error per glyph, not per row that uses it: the fix is the same
+                // declaration for all of them.
+                if !out.iter().any(|d| d.message == said.message) {
+                    out.push(said);
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// How many diagnostics in a build are warnings rather than errors.
@@ -200,6 +257,7 @@ fn file_diagnostics_cached(
         .into_iter()
         .map(|m| Diagnostic::error(Phase::Cite, "cite.dangling", m).in_file(file.clone()))
         .collect();
+    out.extend(refused_operator_diagnostics(ctx, path)?);
     out.extend(crate::latex::LatexLint::new(ctx).lint(path, &src));
     out.extend(admitted_diagnostics(&nodes, &src, &file));
     Ok(out)
@@ -786,6 +844,40 @@ mod tests {
     /// corpus (its own axioms, its own `=`-macro definition, and a theorem that
     /// CITES that definition) must build and Lean-verify with no engine edits.
     /// Requires the `lean` binary (as the other check_file tests do).
+    /// Mark a fixture row as DECLARED with facet bits — what a corpus's `Role:` writes
+    /// into the DB. A row with no claim on it classifies nothing.
+    fn declaring(
+        mut row: qubitick_db::queries::SymbolRow,
+        facets: &[qubitick_model::corpus::Facet],
+    ) -> qubitick_db::queries::SymbolRow {
+        for f in facets {
+            row.facets |= f.bits();
+        }
+        row
+    }
+
+    /// The declarations a fixture corpus OWES.
+    ///
+    /// The engine classifies no mathematical glyph of its own, so a corpus that writes
+    /// `\Delta`, `\cap` or `\varnothing` declares them: one node per glyph, and the
+    /// division numbers are distinct because two nodes claiming one number is an
+    /// ingest error.
+    fn declare_ops(root: &std::path::Path) {
+        let defs = root.join("Era0/Strata0/Definitions");
+        std::fs::create_dir_all(&defs).unwrap();
+        std::fs::write(
+            defs.join("D_00_Delta.qbit"),
+            "D.X.00. Delta\na \\Delta b\nRole: nullity\n",
+        )
+        .unwrap();
+        std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\n").unwrap();
+        std::fs::write(
+            defs.join("D_03_Empty.qbit"),
+            "D.X.03. Empty\n\\varnothing\nRole: null\n",
+        )
+        .unwrap();
+    }
+
     #[test]
     fn independent_corpus_verifies() {
         if std::process::Command::new("lean")
@@ -800,6 +892,7 @@ mod tests {
         std::fs::create_dir_all(root.join("Era0/Strata0/Axioms")).unwrap();
         std::fs::create_dir_all(root.join("Era0/Strata0/Definitions")).unwrap();
         std::fs::create_dir_all(root.join("Era0/Strata0/Theorems")).unwrap();
+        declare_ops(&root);
         std::fs::write(
             root.join("Era0/Strata0/Axioms/A1_Base.qbit"),
             "A1. Base\n\\forall a b c : \\mathfrak{E}, (a \\Delta b) \\Delta c = a \\Delta (b \\Delta c)\na \\Delta \\varnothing = a\na \\Delta a = \\varnothing\na \\cap \\mathbb{1} = a\n",
@@ -820,7 +913,11 @@ mod tests {
         let files: Vec<std::path::PathBuf> = crate::walk_qbit(&root);
         let ground = crate::ground::for_check(&root).unwrap();
         let results = run_pipeline(&conn, &files, Some(&ground)).unwrap();
-        assert_eq!(results.len(), 3, "axiom + definition + theorem");
+        assert_eq!(
+            results.len(),
+            6,
+            "axiom + definition + theorem, plus the three declarations they use"
+        );
         for r in &results {
             assert!(
                 r.verified,
@@ -856,6 +953,7 @@ mod tests {
         for d in ["Axioms", "Definitions", "Theorems"] {
             std::fs::create_dir_all(root.join("Era0/Strata0").join(d)).unwrap();
         }
+        declare_ops(&root);
         std::fs::write(
             root.join("Era0/Strata0/Axioms/A1_Base.qbit"),
             "A1. Base\n\\forall a b c : \\mathfrak{E}, (a \\Delta b) \\Delta c = a \\Delta (b \\Delta c)\na \\Delta \\varnothing = a\na \\Delta a = \\varnothing\na \\cap \\mathbb{1} = a\n",
@@ -885,7 +983,7 @@ mod tests {
         let ground = crate::ground::for_check(&root).expect("the project's ground assembles");
         let results =
             run_pipeline(&conn, &crate::walk_qbit(&root), Some(&ground)).unwrap();
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.len(), 6, "three nodes plus the three declarations they use");
         for r in &results {
             assert!(
                 r.verified,
@@ -925,6 +1023,7 @@ mod tests {
         for d in ["Axioms", "Definitions", "Theorems"] {
             std::fs::create_dir_all(root.join("Era0/Strata0").join(d)).unwrap();
         }
+        declare_ops(&root);
         std::fs::write(
             root.join(format!("Era0/Strata0/Axioms/{axiom_id}_Base.qbit")),
             format!(
@@ -979,7 +1078,7 @@ mod tests {
         crate::ingest_corpus(&mut conn, &root).unwrap();
         let ground = crate::ground::for_check(&root).unwrap();
         let results = run_pipeline(&conn, &crate::walk_qbit(&root), Some(&ground)).unwrap();
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.len(), 6, "three nodes plus the three declarations they use");
         for r in &results {
             assert!(
                 r.verified,
@@ -1137,9 +1236,9 @@ mod tests {
             "Era0/Strata0",
             vec![
                 row(1, "\\mathfrak{E}"),
-                row(2, "\\Delta"),
-                row(3, "\\cap"),
-                row(4, "\\varnothing"),
+                declaring(row(2, "\\Delta"), &[qubitick_model::corpus::Facet::Nullity]),
+                declaring(row(3, "\\cap"), &[qubitick_model::corpus::Facet::BinOp]),
+                declaring(row(4, "\\varnothing"), &[qubitick_model::corpus::Facet::Null]),
             ],
         );
         let src = "A1. Realm\n\\forall a b : \\mathfrak{E}, a \\Delta b = b \\Delta a";
