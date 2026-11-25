@@ -1,0 +1,48 @@
+{
+  "id": "candy",
+  "name": "Candy",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#faf7fd",
+    "panel": "#ffffff",
+    "panel2": "#f3edfb",
+    "inset": "#efe8f7",
+    "line": "#e0d6ee",
+    "ink": "#2a1d3d",
+    "muted": "#6e5f8d",
+    "dim": "#9c8fb5",
+    "cyan": "#0e9bd8",
+    "green": "#16a34a",
+    "amber": "#d67f0e",
+    "violet": "#8b5cf6"
+  },
+  "syntax": {
+    "comment": "#9c8fb5",
+    "string": "#16a34a",
+    "keyword": "#8b5cf6",
+    "number": "#d67f0e",
+    "operator": "#0e9bd8",
+    "type": "#8b5cf6",
+    "func": "#0e9bd8",
+    "variable": "#2a1d3d",
+    "meta": "#6e5f8d",
+    "atom": "#d67f0e",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

@@ -1,0 +1,48 @@
+{
+  "id": "azurewhite",
+  "name": "Azure White",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#f0f6ff",
+    "panel": "#ffffff",
+    "panel2": "#eaf1fc",
+    "inset": "#e3edf8",
+    "line": "#d3e0f2",
+    "ink": "#14263b",
+    "muted": "#4d6b8d",
+    "dim": "#7d99b8",
+    "cyan": "#0369a1",
+    "green": "#0f766e",
+    "amber": "#b45309",
+    "violet": "#5b21b6"
+  },
+  "syntax": {
+    "comment": "#7d99b8",
+    "string": "#0f766e",
+    "keyword": "#5b21b6",
+    "number": "#b45309",
+    "operator": "#0369a1",
+    "type": "#5b21b6",
+    "func": "#0369a1",
+    "variable": "#14263b",
+    "meta": "#4d6b8d",
+    "atom": "#b45309",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

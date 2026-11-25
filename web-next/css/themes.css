@@ -1,0 +1,289 @@
+/* =====================================================================
+   themes.css — the surfaces a *theme* draws, not the shell.
+   ---------------------------------------------------------------------
+   One job: render a theme as something you can see and pick, instead of a
+   name in a dropdown. A theme card carries its own palette as local custom
+   properties (--t-*), so twenty cards each preview their own colours while
+   the page around them keeps the active theme.
+   ===================================================================== */
+
+/* ---------- the picker: a board of themes, not a menu ---------------- */
+
+.th-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+  padding: 2px;
+}
+
+.th-mode-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.th-mode-head::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--hair), transparent);
+}
+.th-mode-head i {
+  font-style: normal;
+  color: color-mix(in oklab, var(--cyan) 70%, var(--t3));
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+/* the card */
+.th-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--wash-1);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+}
+.th-card:hover {
+  border-color: color-mix(in oklab, var(--t-accent) 55%, var(--hair));
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px -14px rgba(0, 0, 0, 0.9);
+}
+.th-card:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+.th-card[aria-pressed='true'] {
+  border-color: var(--t-accent);
+  box-shadow: 0 0 0 1px var(--t-accent), 0 10px 26px -16px var(--t-accent);
+}
+.th-card[aria-pressed='true']::after {
+  content: '●';
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  font-size: 8px;
+  color: var(--t-accent);
+}
+
+/* the preview: the theme's own field, at card scale — same drawing language as
+   the real field (minor rules, a major rule, a plate edge) so the card is a
+   literal miniature of what picking it will do */
+.th-thumb {
+  position: relative;
+  display: block;
+  height: 46px;
+  background-color: var(--t-bg);
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--t-accent) 26%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--t-accent) 26%, transparent) 1px, transparent 1px),
+    radial-gradient(120% 90% at 50% -30%, color-mix(in oklab, var(--t-accent) 26%, transparent), transparent 70%);
+  background-size: 12px 12px, 12px 12px, 100% 100%;
+  background-position: 0 0, 0 0, 0 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--t-line) 80%, transparent);
+}
+.th-thumb::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px solid color-mix(in oklab, var(--t-ink) 22%, transparent);
+  border-radius: 1px;
+}
+/* the wordmark, at the size a thumbnail can carry it */
+.th-thumb::after {
+  content: var(--t-mark, '');
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font: 400 15px/1 var(--font-display);
+  letter-spacing: 0.02em;
+  color: color-mix(in oklab, var(--t-ink) 62%, var(--t-bg));
+  white-space: nowrap;
+}
+
+/* the meta row: name, mode, and the palette itself as hairline chips */
+.th-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+.th-meta b {
+  font: 500 10.5px/1.2 var(--font-sans);
+  letter-spacing: 0.02em;
+  color: var(--t-ink, var(--ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.th-meta em {
+  margin-left: auto;
+  font: 500 8px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-style: normal;
+  color: color-mix(in oklab, var(--t-ink) 40%, var(--t-bg));
+}
+.th-dots {
+  display: flex;
+  gap: 3px;
+  padding: 0 8px 8px;
+}
+.th-dots i {
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--c);
+  opacity: 0.9;
+}
+
+/* the current theme, spelled out above the board */
+.th-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 10px;
+  font: 500 9.5px/1.4 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.th-now b {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: color-mix(in oklab, var(--cyan) 82%, var(--ink));
+}
+.th-now .th-now-note {
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46%;
+}
+
+@media (max-width: 900px) {
+  .th-now .th-now-note { display: none; }
+  .th-board { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); }
+}
+/* ---------- segmented pickers (the field, and anything else with 2–6 choices) */
+/* a dropdown hides its options behind a click; a blueprint field is a thing you
+   switch between, so its choices are buttons that show their current state */
+.seg {
+  padding: 2px 7px;
+  height: 19px;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t2);
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: 0.12s ease;
+}
+.seg:hover { border-color: color-mix(in oklab, var(--cyan) 45%, var(--hair)); color: var(--ink); }
+.seg[aria-pressed='true'] {
+  border-color: color-mix(in oklab, var(--cyan) 60%, transparent);
+  background: color-mix(in oklab, var(--cyan) 16%, transparent);
+  color: color-mix(in oklab, var(--cyan) 88%, var(--ink));
+}
+.seg:focus-visible { outline: 1px solid var(--cyan); outline-offset: 1px; }
+
+/* ---------- the theme editor tile ------------------------------------- */
+
+/* the editor is a form over a data module: same fields as the JSON, in the order
+   the module is written, so what you see is what will be saved */
+.te-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  flex: none;
+}
+.te-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+}
+.te-swatches .th-sw {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 8.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.te-swatches .th-c {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+.te-in,
+.te-num {
+  min-width: 64px;
+  max-width: 150px;
+  padding: 3px 7px;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  background: var(--bg-inset, var(--wash-1));
+  color: var(--ink);
+  font: 500 10px/1.2 var(--font-mono);
+}
+.te-in:focus-visible,
+.te-num:focus-visible { outline: 1px solid var(--cyan); outline-offset: 1px; }
+/* the emitted module is the tile's output, so it gets the rest of the tile and
+   scrolls on its own — a draft is a file you can read, not a status line */
+#te-json {
+  flex: 1;
+  min-height: 80px;
+  margin: 0 12px 12px;
+  padding: 9px 11px;
+  overflow: auto;
+  font-size: 9.5px;
+  line-height: 1.55;
+  border-top: 1px solid var(--hair);
+}
+.ctl-host:has(#te-json) tr { display: table-row; }
+/* a custom theme can be dropped from the workspace */
+.th-kill {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--bg) 70%, transparent);
+  color: var(--t3);
+  font: 500 9px/1 var(--font-mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.th-card:hover .th-kill { opacity: 1; }
+.th-kill:hover { color: var(--bad); }

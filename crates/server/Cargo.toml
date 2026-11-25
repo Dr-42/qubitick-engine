@@ -1,0 +1,17 @@
+[package]
+name = "qubitick-server"
+description = "Binary: initializes the API router and binds it to a port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "qubitick-server"
+path = "src/main.rs"
+
+[dependencies]
+qubitick-api = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }

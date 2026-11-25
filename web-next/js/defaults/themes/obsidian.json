@@ -1,0 +1,48 @@
+{
+  "id": "obsidian",
+  "name": "Obsidian",
+  "mode": "dark",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#0b0b0f",
+    "panel": "#15151a",
+    "panel2": "#1e1e26",
+    "inset": "#09090d",
+    "line": "#2a2a33",
+    "ink": "#f0f0f4",
+    "muted": "#8a8a96",
+    "dim": "#5b5b66",
+    "cyan": "#6ea8fe",
+    "green": "#3fb950",
+    "amber": "#d29922",
+    "violet": "#bc8cff"
+  },
+  "syntax": {
+    "comment": "#8b949e",
+    "string": "#a5d6ff",
+    "keyword": "#ff7b72",
+    "number": "#79c0ff",
+    "operator": "#ff7b72",
+    "type": "#ffa657",
+    "func": "#d2a8ff",
+    "variable": "#c9d1d9",
+    "meta": "#d2a8ff",
+    "atom": "#79c0ff",
+    "invalid": "#f85149"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

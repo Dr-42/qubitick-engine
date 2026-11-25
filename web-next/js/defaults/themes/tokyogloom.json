@@ -1,0 +1,48 @@
+{
+  "id": "tokyogloom",
+  "name": "Tokyo Gloom",
+  "mode": "dark",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#0d0f13",
+    "panel": "#161a20",
+    "panel2": "#20242d",
+    "inset": "#0b0d11",
+    "line": "#2a2f3a",
+    "ink": "#eaeef5",
+    "muted": "#8a94a6",
+    "dim": "#5b6574",
+    "cyan": "#7aa2f7",
+    "green": "#9ece6a",
+    "amber": "#e0af68",
+    "violet": "#bb9af7"
+  },
+  "syntax": {
+    "comment": "#5b6574",
+    "string": "#9ece6a",
+    "keyword": "#bb9af7",
+    "number": "#e0af68",
+    "operator": "#7aa2f7",
+    "type": "#bb9af7",
+    "func": "#7aa2f7",
+    "variable": "#eaeef5",
+    "meta": "#8a94a6",
+    "atom": "#e0af68",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

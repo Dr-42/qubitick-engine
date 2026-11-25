@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# toolchain — run a Qubitick build command with a working toolchain.
+#
+# ── Why this is not (only) `nix develop` ─────────────────────────────────────
+# `flake.nix` obtains Rust through `rust-overlay`'s
+# `rust-bin.stable.latest.default`, which resolves to a *fixed-output
+# derivation* that downloads a prebuilt `cargo-1.99.1-*.tar.xz` and uploads it
+# into the Nix store. Every process in this sandbox starts with `CapEff = 0`
+# (no capabilities at all), so nix's post-build normalisation step —
+# `removexattr("btrfs.compression")` on the uploaded path — fails with EPERM and
+# *every* `nix develop` invocation dies with:
+#
+#     building '/nix/store/…-cargo-1.99.1-….tar.xz.drv'…
+#     error: removing extended attribute 'btrfs.compression' from
+#            '/nix/store/…-cargo-1.99.1-….tar.xz': Permission denied
+#
+# Binary-cache substitutions are unaffected (`nix-shell -p <pkg>` works), so the
+# fallback provisions the toolchain from rustup into the workspace instead
+# (`.rustup/`, `.cargo/`), pinned to the exact `rustc 1.99.1` the flake selected.
+#
+# Lean is the one tool that cannot come from the distro (the `lean` on PATH is a
+# bare `elan` shim with no toolchain) or from the pinned nixpkgs (4.7.0, while the
+# corpus targets 4.35.0), so `./toolchain lean …` borrows it from the nix package set
+# without evaluating the flake.
+#
+# Usage:
+#   ./toolchain cargo check --workspace
+#   ./toolchain cargo test --workspace
+#   ./toolchain cargo clippy --workspace --all-targets -- -D warnings
+#   ./toolchain ./target/release/qubitick build ./project
+#   ./toolchain lean <file.lean>
+#
+# Set QUBITICK_FORCE_FLAKE=1 to use the flake devShell anyway.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+export TMPDIR="${TMPDIR:-$PWD/target/tmp}"
+mkdir -p "$TMPDIR"
+
+# The corpus targets Lean 4.35.0 and its `.olean` prelude is built by it. The nix
+# *package set* only has 4.7.0, but the correct build is still in the store (the
+# devShell pins it), so a shim pointing at it is generated here.
+CORPUS_LEAN="/nix/store/2kbz20qdy9vdnc0ilrnmpnd551dk0z09-lean4-4.35.0/bin/lean"
+# NOTE: this path only exists INSIDE the nix-portable sandbox. Testing it on the
+# host always fails (no /nix/store there), so the shim must be written
+# unconditionally — otherwise `ensure_prelude` silently compiles the `.olean` files
+# with nixpkgs' 4.7.0 and every emitted module then fails to import them
+# ("incompatible header").
+if true; then
+  mkdir -p "$PWD/.devbin"
+  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "$CORPUS_LEAN" > "$PWD/.devbin/lean"
+  chmod +x "$PWD/.devbin/lean"
+  # `lake` must come from the SAME distribution as `lean`: the nix shell also
+  # provides nixpkgs' 4.7.0 lake, and a Lake build with it would check the corpus
+  # against the wrong compiler (and refuse the 4.35.0 oleans as "incompatible
+  # header"). Written unconditionally for the same reason as the lean shim — the
+  # store path only resolves inside the shell.
+  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "${CORPUS_LEAN%lean}lake" > "$PWD/.devbin/lake"
+  chmod +x "$PWD/.devbin/lake"
+fi
+
+# ── subcommand: run the corpus Lean ──────────────────────────────────────────
+if [ "${1:-}" = "lean" ]; then
+  shift
+  export PATH="$HOME/.local/bin:$PATH"
+  export LEAN_PATH="$PWD/prelude${LEAN_PATH:+:$LEAN_PATH}"
+  exec nix-portable nix-shell -p lean4 --run "$(printf '%q ' "$CORPUS_LEAN" "$@")"
+fi
+
+HERE="$PWD"
+# rustup was provisioned one level up (the session workspace root); the repo
+# itself is a checkout inside it.
+RUST_ROOT="${QUBITICK_RUST_ROOT:-$(dirname "$HERE")}"
+
+# ── flake devShell, only when explicitly requested (see note below) ──────────
+if [ "${QUBITICK_FORCE_FLAKE:-0}" = "1" ]; then
+  export PATH="$HOME/.local/bin:$PATH"
+  exec nix-portable nix develop --command "$@"
+fi
+
+# ── default: workspace-local rustup toolchain ───────────────────────────────
+if [ -x "$RUST_ROOT/.cargo/bin/cargo" ]; then
+  export RUSTUP_HOME="$RUST_ROOT/.rustup"
+  export CARGO_HOME="$RUST_ROOT/.cargo"
+  export LEAN_PATH="$HERE/prelude${LEAN_PATH:+:$LEAN_PATH}"
+  export PATH="$CARGO_HOME/bin:$HOME/.local/bin:$PATH"
+  # `check_file` shells out to `lean`, so the corpus Lean must be on PATH for the
+  # build itself — and it needs nix's shared libraries to start. A shim directory
+  # is used because `nix-shell -p lean4` prepends its own (4.7.0) lean ahead of
+  # anything this script exports; the prepend is left unexpanded so the
+  # nix-shell's environment performs it.
+  cmd="PATH=\"$HERE/.devbin:\$PATH\" $(printf '%q ' "$@")"
+  exec nix-portable nix-shell -p lean4 --run "$cmd"
+fi
+
+# ── last resort: the flake devShell (currently broken by the xattr bug) ─────
+export PATH="$HOME/.local/bin:$PATH"
+exec nix-portable nix develop --command "$@"

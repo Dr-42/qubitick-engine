@@ -1,0 +1,48 @@
+{
+  "id": "breeze",
+  "name": "Breeze",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#f4f6fa",
+    "panel": "#ffffff",
+    "panel2": "#eef1f7",
+    "inset": "#e7ecf4",
+    "line": "#d6deea",
+    "ink": "#1f2a3d",
+    "muted": "#5a6b83",
+    "dim": "#8ea0b8",
+    "cyan": "#0891b2",
+    "green": "#059669",
+    "amber": "#b45309",
+    "violet": "#6d28d9"
+  },
+  "syntax": {
+    "comment": "#8ea0b8",
+    "string": "#059669",
+    "keyword": "#6d28d9",
+    "number": "#b45309",
+    "operator": "#0891b2",
+    "type": "#6d28d9",
+    "func": "#0891b2",
+    "variable": "#1f2a3d",
+    "meta": "#5a6b83",
+    "atom": "#b45309",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

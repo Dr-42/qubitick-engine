@@ -1,0 +1,34 @@
+{
+  "_comment": "Blueprint background modules. The field behind the tiles is drawn as an engineering drawing: graph paper, scale ticks, corner registration, and the app wordmark. A blueprint module supplies the *geometry* of that drawing; a theme supplies its *ink* (blueprint.accent / blueprint.ink vary per theme), so one blueprint reads warm on a light theme and cold on a dark one. Add a module here and it appears in the view tile's field picker: nothing else needs touching.",
+  "default": "graph",
+  "spaces": {
+    "graph": {
+      "name": "Graph paper",
+      "note": "5 mm engineering squares: a hairline minor grid, a ruled major grid every five, and a long tick every twenty-five."
+    },
+    "iso": {
+      "name": "Isometric",
+      "note": "30° drafting triangles: the same rules rotated into two mirrored shears, so clusters sit on a lattice."
+    },
+    "dot": {
+      "name": "Dot matrix",
+      "note": "The quiet one: punched dots with a single ruled major grid, for reading long documents."
+    },
+    "plate": {
+      "name": "Blue plate",
+      "note": "A full drawing plate: heavier major rules, a border, corner registration marks, and a title block."
+    },
+    "void": {
+      "name": "Deep field",
+      "note": "No drawing: the field keeps only its bloom, vignette and grain."
+    }
+  },
+  "resolve": {
+    "minorDefault": 8,
+    "majorRatio": 5,
+    "tickRatio": 5,
+    "minorFloorPx": 4,
+    "minorCeilPx": 26,
+    "note": "minorDefault is the minor cell in world px at zoom 1; every other step is derived from it, so a blueprint never needs more than one number of its own."
+  }
+}

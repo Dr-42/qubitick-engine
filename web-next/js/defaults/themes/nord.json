@@ -1,0 +1,48 @@
+{
+  "id": "nord",
+  "name": "Nord",
+  "mode": "dark",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#10151f",
+    "panel": "#1a2130",
+    "panel2": "#242c3d",
+    "inset": "#0e141d",
+    "line": "#303a4b",
+    "ink": "#e5e9f0",
+    "muted": "#8194ab",
+    "dim": "#5d7087",
+    "cyan": "#88c0d0",
+    "green": "#a3be8c",
+    "amber": "#ebcb8b",
+    "violet": "#b48ead"
+  },
+  "syntax": {
+    "comment": "#616e88",
+    "string": "#a3be8c",
+    "keyword": "#b48ead",
+    "number": "#b48ead",
+    "operator": "#81a1c1",
+    "type": "#8fbcbb",
+    "func": "#88c0d0",
+    "variable": "#d8dee9",
+    "meta": "#5e81ac",
+    "atom": "#b48ead",
+    "invalid": "#bf616a"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

@@ -1,0 +1,12 @@
+[package]
+name = "qubitick-parse"
+description = "Lexes and parses .qbit LaTeX source into model types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+qubitick-ctx = { workspace = true }
+anyhow = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "qubitick-rewrite"
+description = "Compiles ProofSteps into a Lean proof term via directed rewrites, case analysis, induction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-pattern = { workspace = true }
+qubitick-ctx = { workspace = true }
+qubitick-lean = { workspace = true }
+anyhow = { workspace = true }
+[dev-dependencies]
+qubitick-db = { workspace = true }

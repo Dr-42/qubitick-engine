@@ -1,0 +1,48 @@
+{
+  "id": "nightowl",
+  "name": "Night Owl",
+  "mode": "dark",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#070f1b",
+    "panel": "#0d1827",
+    "panel2": "#142338",
+    "inset": "#0a1320",
+    "line": "#1e2f44",
+    "ink": "#e9f0ff",
+    "muted": "#8296b5",
+    "dim": "#55667e",
+    "cyan": "#22d3ee",
+    "green": "#4ade80",
+    "amber": "#facc15",
+    "violet": "#a855f7"
+  },
+  "syntax": {
+    "comment": "#55667e",
+    "string": "#4ade80",
+    "keyword": "#a855f7",
+    "number": "#facc15",
+    "operator": "#22d3ee",
+    "type": "#a855f7",
+    "func": "#22d3ee",
+    "variable": "#e9f0ff",
+    "meta": "#8296b5",
+    "atom": "#facc15",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

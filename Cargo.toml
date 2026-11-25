@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/model",
+    "crates/pattern",
+    "crates/db",
+    "crates/ctx",
+    "crates/lean",
+    "crates/palette",
+    "crates/pdf",
+    "crates/parse",
+    "crates/rewrite",
+    "crates/autocite",
+    "crates/emit",
+    "crates/build",
+    "crates/api",
+    "crates/server",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+description = "Qubitick corpus: compiler, workspace toolchain, and web IDE server"
+license = "SEE LICENSE IN LICENSE.CODE"
+
+[workspace.dependencies]
+anyhow = "1.0.104"
+thiserror = "2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+clap = { version = "4.6.7", features = ["derive"] }
+walkdir = "2.5.0"
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+futures-util = "0.3"
+
+# Local crates
+qubitick-model = { path = "crates/model" }
+qubitick-pattern = { path = "crates/pattern" }
+qubitick-db = { path = "crates/db" }
+qubitick-ctx = { path = "crates/ctx" }
+qubitick-lean = { path = "crates/lean" }
+qubitick-palette = { path = "crates/palette" }
+qubitick-pdf = { path = "crates/pdf" }
+qubitick-parse = { path = "crates/parse" }
+qubitick-rewrite = { path = "crates/rewrite" }
+qubitick-autocite = { path = "crates/autocite" }
+qubitick-emit = { path = "crates/emit" }
+qubitick-build = { path = "crates/build" }
+qubitick-api = { path = "crates/api" }

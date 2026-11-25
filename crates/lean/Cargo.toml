@@ -1,0 +1,9 @@
+[package]
+name = "qubitick-lean"
+description = "Renders Expr to Lean 4 surface text with class projections and target module paths"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "qubitick-palette"
+description = "Per-symbol color from corpus usage and ring definition"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }

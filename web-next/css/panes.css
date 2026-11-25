@@ -1,0 +1,238 @@
+/* Card LOD CSS (M2.13) */
+
+.card {
+  position: absolute;
+  inset: 0;
+  display: none;
+  overflow: hidden;
+}
+
+.card-inner {
+  width: calc(100% * var(--z));
+  height: calc(100% * var(--z));
+  transform: scale(calc(1 / var(--z)));
+  transform-origin: 0 0;
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: .3em;
+}
+
+.card-title {
+  font-size: clamp(11px, 9cqmin, 30px);
+  font-weight: 600;
+}
+
+.card-sum {
+  font-size: clamp(9px, 5cqmin, 16px);
+  opacity: .7;
+}
+
+.pane[data-lod="card"] .card {
+  display: block;
+}
+
+.pane[data-lod="card"] .pane-body {
+  content-visibility: hidden;
+}
+
+.pane[data-lod="culled"] {
+  visibility: hidden;
+}
+
+/* Pane base styles */
+.pane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #12141e;
+  border: 1px solid #2a2f3e;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pane-head {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  background: #1c2130;
+  border-bottom: 1px solid #2a2f3e;
+  font-size: 11px;
+  color: #c8d2e0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.pane-body {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Sash styles */
+.sash {
+  position: absolute;
+  background: transparent;
+  z-index: 10;
+}
+
+.sash:hover {
+  background: #3b82f6;
+}
+
+.sash[data-orientation="h"] {
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.sash[data-orientation="v"] {
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+/* Tab bar styles */
+.tabbar {
+  display: flex;
+  height: 24px;
+  border-bottom: 1px solid #2a2f3e;
+  background: #12141e;
+  z-index: 2;
+}
+
+.tab {
+  padding: 0 8px;
+  font-size: 11px;
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab[aria-selected="true"] {
+  color: #c8d2e0;
+  background: #1c2130;
+  border-bottom-color: #3b82f6;
+}
+
+.tab:hover {
+  color: #c8d2e0;
+}
+
+/* Split children */
+.split-child {
+  position: absolute;
+  overflow: hidden;
+}
+
+/* Tab panels */
+.tabpanel {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.tabpanel[aria-hidden="true"] {
+  display: none;
+}
+
+/* M5.12 Touch/pen ergonomics (pointer: coarse) */
+@media (pointer: coarse) {
+  /* Tab bar: 44px tall, tabs stretch to 48px hit area */
+  .tabbar {
+    height: 44px;
+  }
+  .tab, [role="tab"] {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  /* Pane head: 40px tall */
+  .pane-head {
+    height: 40px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+  .pane-head button {
+    min-width: 48px;
+    min-height: 48px;
+    padding: 4px 8px;
+  }
+
+  /* Sash: visual stays 2px, hit area ≥48px via ::before */
+  .sash {
+    width: 2px;
+    height: 2px;
+  }
+  .sash[data-orientation="h"]::before,
+  .sash[data-orientation="v"]::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 48px;
+    height: 48px;
+    transform: translate(-50%, -50%);
+    background: transparent;
+  }
+  .sash[data-orientation="h"] {
+    width: 100%;
+    height: 2px;
+    cursor: ns-resize;
+  }
+  .sash[data-orientation="v"] {
+    width: 2px;
+    height: 100%;
+    cursor: ew-resize;
+  }
+
+  /* All buttons ≥48px hit area */
+  button {
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  /* Pane inputs: font-size ≥16px to prevent iOS zoom */
+  .pane input,
+  .pane textarea,
+  .pane select {
+    font-size: 16px !important;
+  }
+
+  /* No hover-only affordances: :focus-visible covers tap/focus */
+  .pane-head button:hover,
+  .tab:hover,
+  .sash:hover {
+    opacity: 1;
+  }
+
+  /* Handwrite: canvas fills pane on coarse, touch-action none */
+  .handwrite-canvas {
+    width: 100% !important;
+    height: 100% !important;
+    touch-action: none;
+  }
+  .handwrite-pane button {
+    min-width: 48px;
+    min-height: 48px;
+    font-size: 14px;
+    padding: 8px 12px;
+  }
+}

@@ -1,0 +1,16 @@
+/* world.css — World and viewport styles (M2.06) */
+
+.viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  contain: strict;
+}
+
+.world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}

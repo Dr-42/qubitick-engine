@@ -1,0 +1,25 @@
+[package]
+name = "qubitick-api"
+description = "The axum HTTP server exposing every engine as /api routes, WS, and static web serving"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+qubitick-ctx = { workspace = true }
+qubitick-parse = { workspace = true }
+qubitick-rewrite = { workspace = true }
+qubitick-autocite = { workspace = true }
+qubitick-emit = { workspace = true }
+qubitick-build = { workspace = true }
+qubitick-palette = { workspace = true }
+qubitick-pdf = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+anyhow = { workspace = true }

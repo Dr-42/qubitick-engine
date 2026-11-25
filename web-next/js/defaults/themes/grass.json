@@ -1,0 +1,48 @@
+{
+  "id": "grass",
+  "name": "Grass",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#f6faee",
+    "panel": "#fffef8",
+    "panel2": "#eef6e1",
+    "inset": "#e9f2da",
+    "line": "#d7e5bd",
+    "ink": "#28320f",
+    "muted": "#5f6b43",
+    "dim": "#92a06c",
+    "cyan": "#0f766e",
+    "green": "#1a7f37",
+    "amber": "#a16207",
+    "violet": "#5b21b6"
+  },
+  "syntax": {
+    "comment": "#92a06c",
+    "string": "#1a7f37",
+    "keyword": "#5b21b6",
+    "number": "#a16207",
+    "operator": "#0f766e",
+    "type": "#5b21b6",
+    "func": "#0f766e",
+    "variable": "#28320f",
+    "meta": "#5f6b43",
+    "atom": "#a16207",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

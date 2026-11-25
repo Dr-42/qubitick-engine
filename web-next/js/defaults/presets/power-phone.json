@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "id": "power-phone",
+  "mode": "power",
+  "screen": "phone",
+  "wiring": "power",
+  "camera": {
+    "x": 0,
+    "y": 0,
+    "z": 1,
+    "lock": "free"
+  },
+  "panes": {
+    "ed1": {
+      "kind": "editor"
+    },
+    "render1": {
+      "kind": "render"
+    },
+    "goal1": {
+      "kind": "goal"
+    },
+    "ir1": {
+      "kind": "ir"
+    },
+    "lean1": {
+      "kind": "lean"
+    },
+    "nodes1": {
+      "kind": "nodes"
+    },
+    "tree1": {
+      "kind": "tree"
+    },
+    "output1": {
+      "kind": "output"
+    },
+    "diag1": {
+      "kind": "diag"
+    },
+    "graph1": {
+      "kind": "graph"
+    },
+    "ribbon": {
+      "kind": "controls",
+      "params": {
+        "compact": true
+      }
+    },
+    "slate": {
+      "kind": "slate"
+    },
+    "symbol-add": {
+      "kind": "symbol-add"
+    },
+    "settings-theme": {
+      "kind": "settings-theme"
+    },
+    "settings-typography": {
+      "kind": "settings-typography"
+    },
+    "settings-layout": {
+      "kind": "settings-layout"
+    },
+    "handwrite": {
+      "kind": "handwrite"
+    },
+    "new-node": {
+      "kind": "new-node"
+    }
+  },
+  "roots": [
+    {
+      "id": "groupA",
+      "x": 0,
+      "y": 0,
+      "w": 412,
+      "h": 830,
+      "tree": {
+        "tabs": [
+          {
+            "pane": "ed1"
+          },
+          {
+            "pane": "render1"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "id": "groupB",
+      "x": 0,
+      "y": 830,
+      "w": 412,
+      "h": 830,
+      "tree": {
+        "tabs": [
+          {
+            "pane": "goal1"
+          },
+          {
+            "pane": "ir1"
+          },
+          {
+            "pane": "lean1"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "id": "groupC",
+      "x": 0,
+      "y": 1660,
+      "w": 412,
+      "h": 830,
+      "tree": {
+        "tabs": [
+          {
+            "pane": "nodes1"
+          },
+          {
+            "pane": "tree1"
+          },
+          {
+            "pane": "output1"
+          },
+          {
+            "pane": "diag1"
+          },
+          {
+            "pane": "graph1"
+          }
+        ],
+        "active": 0
+      }
+    }
+  ],
+  "hud": [
+    {
+      "id": "ribbon",
+      "dock": "bottom",
+      "size": 72,
+      "tree": {
+        "pane": "ribbon"
+      }
+    }
+  ],
+  "modals": [
+    {
+      "id": "slate",
+      "open": [
+        "ui:slate"
+      ],
+      "close": [
+        "close:slate"
+      ],
+      "tree": {
+        "pane": "slate"
+      }
+    },
+    {
+      "id": "symbol",
+      "open": [
+        "ui:symbol"
+      ],
+      "close": [
+        "close:symbol"
+      ],
+      "tree": {
+        "pane": "symbol-add"
+      }
+    },
+    {
+      "id": "settings",
+      "open": [
+        "ui:settings"
+      ],
+      "close": [
+        "close:settings"
+      ],
+      "tree": {
+        "tabs": [
+          {
+            "pane": "settings-theme"
+          },
+          {
+            "pane": "settings-typography"
+          },
+          {
+            "pane": "settings-layout"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "id": "handwrite",
+      "open": [
+        "ui:handwrite"
+      ],
+      "close": [
+        "close:handwrite"
+      ],
+      "tree": {
+        "pane": "handwrite"
+      }
+    },
+    {
+      "id": "newnode",
+      "open": [
+        "ui:new-node"
+      ],
+      "close": [
+        "close:newnode"
+      ],
+      "tree": {
+        "pane": "new-node"
+      }
+    }
+  ]
+}

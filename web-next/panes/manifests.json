@@ -1,0 +1,27 @@
+[
+  {
+    "id": "axiom-counter",
+    "title": "Axiom Counter · data",
+    "category": "data",
+    "inputs": [{ "name": "content", "from": "editor_buffer", "type": "Text" }],
+    "render": {
+      "type": "html",
+      "view": "<div class='empty'>User data node: see the JS Program node below.</div>"
+    }
+  },
+  {
+    "id": "latex-probe",
+    "title": "LaTeX Probe · behaviour",
+    "category": "behaviour",
+    "inputs": [{ "name": "content", "from": "editor_buffer", "type": "Text" }],
+    "outputs": [{ "name": "macros", "type": "list" }],
+    "program": "function(inputs, ctx){\n\tvar t = inputs.content || \"\";\n\tvar macros = t.match(/\\\\\\\\(forall|exists|neg|land|lor|Delta|cap|mathbb\\\\w*)/g) || [];\n\tvar uniq = {}; macros.forEach(function(m){ uniq[m]=1; });\n\treturn { macro_count: macros.length, unique_macros: Object.keys(uniq).slice(0,12) };\n}"
+  },
+  {
+    "id": "accent-theme",
+    "title": "Accent Theme · settings",
+    "category": "settings",
+    "outputs": [{ "name": "theme", "type": "CSS" }],
+    "render": { "type": "html", "view": "<div class='empty'>Built-in theme node gives presets + colour pickers.</div>" }
+  }
+]

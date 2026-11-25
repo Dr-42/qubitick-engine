@@ -1,0 +1,14 @@
+/* base.css — Base styles for Qubitick Workshop */
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0f14;
+  color: #d6e2ee;
+  font: 14px system-ui, sans-serif;
+}
+
+#root {
+  position: fixed;
+  inset: 0;
+}

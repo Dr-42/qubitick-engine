@@ -1,0 +1,26 @@
+[package]
+name = "qubitick-cli"
+description = "Mirrored testing CLI: every /api route runs the same engine without HTTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "qubitick"
+path = "src/main.rs"
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+qubitick-ctx = { workspace = true }
+qubitick-parse = { workspace = true }
+qubitick-rewrite = { workspace = true }
+qubitick-autocite = { workspace = true }
+qubitick-emit = { workspace = true }
+qubitick-lean = { workspace = true }
+qubitick-build = { workspace = true }
+qubitick-pdf = { workspace = true }
+qubitick-palette = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

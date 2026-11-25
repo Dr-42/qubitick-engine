@@ -1,0 +1,15 @@
+[package]
+name = "qubitick-emit"
+description = "Produces a .lean module from Nodes by orchestrating rewrite and lean rendering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+qubitick-ctx = { workspace = true }
+qubitick-lean = { workspace = true }
+qubitick-rewrite = { workspace = true }
+qubitick-pattern = { workspace = true }
+anyhow = { workspace = true }

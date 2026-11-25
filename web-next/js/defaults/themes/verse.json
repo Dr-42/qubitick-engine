@@ -1,0 +1,48 @@
+{
+  "id": "verse",
+  "name": "Verse",
+  "mode": "dark",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#120a1f",
+    "panel": "#1b1030",
+    "panel2": "#241847",
+    "inset": "#0f0720",
+    "line": "#3b2a55",
+    "ink": "#f4ecff",
+    "muted": "#a895c9",
+    "dim": "#6f5f8a",
+    "cyan": "#67e8f9",
+    "green": "#4ade80",
+    "amber": "#fde047",
+    "violet": "#d8b4fe"
+  },
+  "syntax": {
+    "comment": "#7284b8",
+    "string": "#f1fa8c",
+    "keyword": "#ff79c6",
+    "number": "#bd93f9",
+    "operator": "#8be9fd",
+    "type": "#8be9fd",
+    "func": "#50fa7b",
+    "variable": "#f8f8f2",
+    "meta": "#50fa7b",
+    "atom": "#bd93f9",
+    "invalid": "#ff5555"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

@@ -1,0 +1,194 @@
+/* chrome.css — Design-mode chrome styles (M3.01+)
+ * All colours via CSS variables --bg --ink --acc --line --err
+ */
+
+:root {
+  --bg: #0b0f14;
+  --ink: #d6e2ee;
+  --acc: #3b82f6;
+  --line: #2a2f3e;
+  --err: #ef4444;
+}
+
+.design-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #1c2130;
+  border-top: 1px solid #2a2f3e;
+  z-index: 1500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.design-handle {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  z-index: 1600;
+}
+
+@media (pointer: coarse) {
+  .design-bar button {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+  }
+}
+
+body[data-design="1"] .root {
+  outline: 1px dashed var(--acc);
+}
+
+body[data-design="1"] .pane-head button {
+  display: inline-flex;
+}
+
+body[data-design="0"] .root-handle,
+body[data-design="0"] .root-grip,
+body[data-design="0"] .pane-head button {
+  display: none;
+}
+
+.drop-overlay {
+  position: absolute;
+  pointer-events: none;
+  border: 2px dashed var(--acc);
+  background: rgba(59, 130, 246, 0.1);
+  z-index: 1400;
+}
+
+.drop-overlay.zone-left { cursor: ew-resize; }
+.drop-overlay.zone-right { cursor: ew-resize; }
+.drop-overlay.zone-top { cursor: ns-resize; }
+.drop-overlay.zone-bottom { cursor: ns-resize; }
+.drop-overlay.zone-center { cursor: move; }
+.drop-overlay.zone-newroot { cursor: copy; }
+
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  background: #1c2130;
+  border: 1px solid var(--acc);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--ink);
+  z-index: 1700;
+}
+
+.json-error {
+  color: var(--err);
+  font-size: 11px;
+  padding: 4px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--err);
+  border-radius: 4px;
+}
+
+.outline-hl {
+  outline: 2px solid var(--acc) !important;
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  button {
+    min-width: 48px;
+    min-height: 48px;
+    padding: 8px 12px;
+  }
+  .pane-head button {
+    min-width: 48px;
+    min-height: 48px;
+    padding: 2px 8px;
+  }
+}
+
+.root-handle {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--acc);
+  border: 1px solid #fff;
+  border-radius: 2px;
+  cursor: move;
+  z-index: 1200;
+}
+
+.root-grip {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--acc);
+  border: 1px solid #fff;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  z-index: 1200;
+}
+
+.palette {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 260px;
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  z-index: 1400;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.palette input {
+  width: 100%;
+  height: 28px;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  background: #2a2f3e;
+  border: 1px solid #3b465e;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.palette-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #2a2f3e;
+  border: 1px solid #3b465e;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+

@@ -1,0 +1,15 @@
+[package]
+name = "qubitick-autocite"
+description = "Finds a cite chain bridging lhs to rhs, or the closest state plus the gap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-rewrite = { workspace = true }
+qubitick-model = { workspace = true }
+qubitick-pattern = { workspace = true }
+qubitick-ctx = { workspace = true }
+qubitick-lean = { workspace = true }
+qubitick-db = { workspace = true }
+anyhow = { workspace = true }

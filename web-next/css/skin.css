@@ -1,0 +1,1987 @@
+/* =====================================================================
+   skin.css — Qubitick Observatory.  The visual layer.
+   ---------------------------------------------------------------------
+   Everything here derives from the ten base vars each theme supplies
+   (--bg --panel --panel2 --inset --line --ink --muted --dim --cyan
+    --green --amber --violet).  Nothing hardcodes a colour that a theme
+   should own, so all 20 themes stay coherent.
+
+   Layers, back to front:
+     #viewport   deep field + vignette
+     #grid       engineering grid, parallaxed with the camera by main.js
+     #world      panes (glass instrument tiles), frames, anchors
+     #hud        console (bottom-left dock)
+   ===================================================================== */
+
+/* ---------- 1. tokens ------------------------------------------------- */
+
+:root {
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-sans: var(--font-mono);              /* labels are mono: precise, not generic */
+  --font-display: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+
+  /* ink-derived overlays: work in dark AND light themes */
+  --wash-1: color-mix(in oklab, var(--ink) 4%, transparent);
+  --wash-2: color-mix(in oklab, var(--ink) 7%, transparent);
+  --wash-3: color-mix(in oklab, var(--ink) 11%, transparent);
+  --hair: color-mix(in oklab, var(--line) 88%, transparent);
+  --hair-hi: color-mix(in oklab, var(--line) 70%, var(--ink) 30%);
+
+  /* text ladder */
+  --t1: color-mix(in oklab, var(--ink) 96%, var(--panel));
+  --t2: color-mix(in oklab, var(--ink) 62%, var(--panel));
+  --t3: color-mix(in oklab, var(--ink) 40%, var(--panel));
+
+  /* accent */
+  /* error / refusal — themes own the eight hues above, so derive this one
+     from them rather than adding a ninth that half the themes would forget */
+  --bad: color-mix(in oklab, #ff4d6d 84%, var(--amber));
+  --acc: var(--cyan);
+  --halo: color-mix(in oklab, var(--cyan) 40%, transparent);
+  --halo-soft: color-mix(in oklab, var(--cyan) 16%, transparent);
+
+  /* pane surfaces */
+  --pane-face: color-mix(in oklab, var(--panel) 84%, var(--bg));
+  --pane-head-face: color-mix(in oklab, var(--panel2) 55%, var(--panel));
+  --pane-r: 14px;
+  --pane-r-in: 9px;
+  --sheen: color-mix(in oklab, var(--ink) 5%, transparent);
+  --shadow-pane:
+    0 1px 0 color-mix(in oklab, var(--ink) 8%, transparent) inset,
+    0 -1px 0 color-mix(in oklab, var(--bg) 55%, transparent) inset,
+    0 18px 36px -18px rgba(0, 0, 0, 0.75),
+    0 48px 90px -50px rgba(0, 0, 0, 0.9);
+  --shadow-pane-lit:
+    0 0 0 1px color-mix(in oklab, var(--cyan) 42%, transparent),
+    0 0 34px -6px color-mix(in oklab, var(--cyan) 30%, transparent),
+    0 18px 36px -18px rgba(0, 0, 0, 0.75),
+    0 48px 90px -50px rgba(0, 0, 0, 0.9);
+
+  /* type scale */
+  --fs-micro: 9.5px;
+  --fs-label: 10.5px;
+  --fs-body: 12.5px;
+  --fs-code: 12px;
+  --track: 0.14em;
+}
+
+/* per-pane accent hues — set by main.js as data-kind */
+[data-kind='tree']     { --pa: var(--violet); }
+[data-kind='symbols']  { --pa: var(--amber); }
+[data-kind='editor']   { --pa: var(--cyan); }
+[data-kind='graph']    { --pa: var(--green); }
+[data-kind='stats']    { --pa: var(--cyan); }
+[data-kind='goal']     { --pa: var(--amber); }
+[data-kind='render']   { --pa: var(--violet); }
+[data-kind='lean']     { --pa: var(--violet); }
+[data-kind='ir']       { --pa: var(--violet); }
+[data-kind='output']   { --pa: var(--green); }
+[data-kind='diag']     { --pa: var(--amber); }
+[data-kind='handwrite']{ --pa: var(--amber); }
+[data-kind='palette']  { --pa: var(--violet); }
+
+/* ---------- 2. base --------------------------------------------------- */
+
+html, body {
+  background: var(--bg);
+  color: var(--t1);
+  font: var(--fs-body)/1.6 var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body { font-family: var(--font-sans); }
+::selection { background: color-mix(in oklab, var(--cyan) 30%, transparent); color: var(--t1); }
+:focus-visible { outline: 1px solid var(--halo); outline-offset: 2px; }
+
+/* thin instrument scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--hair-hi) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--line) 90%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 99px;
+}
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--cyan) 55%, var(--line)); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- 3. the field ---------------------------------------------- */
+
+#viewport {
+  background-color: var(--bg);
+  background-image:
+    /* horizon bloom — a single light source above the field */
+    radial-gradient(120% 70% at 50% -18%, color-mix(in oklab, var(--cyan) 13%, transparent), transparent 62%),
+    /* corner cooling */
+    radial-gradient(80% 60% at 100% 108%, color-mix(in oklab, var(--violet) 10%, transparent), transparent 60%),
+    /* vignette */
+    radial-gradient(130% 120% at 50% 44%, transparent 42%, color-mix(in oklab, var(--bg) 78%, #000) 100%);
+  background-size: 100% 100%, 100% 100%, 100% 100%;
+  background-repeat: no-repeat;
+}
+
+/* #grid is the blueprint layer: its rules live in field.css, because the field is
+   a drawing with its own vocabulary (minor/major/tick rules, plate, scale bar,
+   wordmark) rather than a texture this stylesheet should know about. */
+
+/* faint film grain over the field only (never over panes) */
+#viewport::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.2;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='0.35'/></svg>");
+}
+[data-mode='light'] #viewport::after { opacity: 0.12; mix-blend-mode: multiply; }
+
+/* ---------- 4. frames + anchors --------------------------------------- */
+
+.frame {
+  border: 1px dashed color-mix(in oklab, var(--cyan) 22%, transparent);
+  border-radius: 20px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bg) 40%, transparent);
+}
+.frame-label {
+  color: color-mix(in oklab, var(--cyan) 78%, var(--ink));
+  font: 600 calc(10px * var(--inv)) / 1.4 var(--font-mono);
+  letter-spacing: 0.2em;
+  opacity: 0.75;
+  text-shadow: 0 0 12px color-mix(in oklab, var(--bg) 90%, transparent);
+  padding: 2px 8px;
+  border-left: 1px solid color-mix(in oklab, var(--cyan) 45%, transparent);
+  background: linear-gradient(90deg, color-mix(in oklab, var(--cyan) 10%, transparent), transparent 85%);
+}
+/* connections are drawn by the wire canvas layer (js/live/wire) — no SVG anchors */
+
+/* ---------- 5. panes -------------------------------------------------- */
+
+.pane {
+  background:
+    linear-gradient(180deg, var(--sheen), transparent 34%),
+    var(--pane-face);
+  border: 1px solid var(--hair);
+  border-radius: var(--pane-r);
+  box-shadow: var(--shadow-pane);
+  transition: border-color 0.16s ease, box-shadow 0.22s ease, transform 0.16s ease;
+  will-change: transform;
+}
+.pane::before {
+  /* top edge catches the light */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    color-mix(in oklab, var(--pa, var(--cyan)) 55%, transparent) 22%,
+    color-mix(in oklab, var(--ink) 42%, transparent) 50%,
+    color-mix(in oklab, var(--pa, var(--cyan)) 55%, transparent) 78%,
+    transparent);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 3;
+}
+.pane:hover { border-color: var(--hair-hi); transform: translateY(-1px); }
+.pane:focus-within,
+.pane.lod-live:hover { box-shadow: var(--shadow-pane-lit); border-color: transparent; }
+.pane.lod-frozen { filter: saturate(0.86); }
+.pane.lod-frozen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--bg) 26%, transparent);
+  z-index: 2;
+}
+
+/* ---- head ---- */
+.pane-head {
+  height: 34px;
+  padding: 0 8px 0 12px;
+  gap: 9px;
+  font: 600 var(--fs-label) / 1 var(--font-mono);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--t2);
+  background: linear-gradient(180deg, var(--pane-head-face), color-mix(in oklab, var(--panel) 92%, var(--bg)));
+  border-bottom: 1px solid var(--hair);
+  cursor: grab;
+}
+.pane-head:active { cursor: grabbing; }
+.pane-head::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--pa, var(--cyan));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pa, var(--cyan)) 14%, transparent),
+              0 0 10px color-mix(in oklab, var(--pa, var(--cyan)) 80%, transparent);
+  opacity: 1;
+}
+.pane-head > span:first-of-type {
+  color: color-mix(in oklab, var(--ink) 82%, var(--panel));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  /* THE INVISIBLE CONTROLS GIVE UP THEIR WIDTH. They are hidden at rest and took 136–160 px of
+     the row anyway — seven or eight 22 px buttons plus their rules — so at the shipped 320 px
+     source tile the title had 73 px of the 121 it needs and every one of them read
+     `PROJECT ·...`: the space beside the title was the buttons' width, not a gap. They cost
+     nothing while hidden now, and the title yields again the moment the pointer (or the
+     keyboard, through `:focus-within`) brings them back. `min-width: 0` because a flex item's
+     automatic minimum size is its content's, and this content is eight buttons wide. */
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.pane:hover .pane-head .actions, .pane:focus-within .pane-head .actions {
+  opacity: 1;
+  width: auto;
+  /* `min-width: 0` above is what lets the group reach width 0; while it is UP it must not use
+     that freedom to shrink, or a 320 px header clips the last of the buttons instead of the
+     title (measured: 104 px for a 136 px group). The title is the flexible one. */
+  flex: 0 0 auto;
+}
+.pane-head button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font: 400 11px/1 var(--font-mono);
+  color: var(--t3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.14s ease;
+}
+.pane-head button:hover {
+  color: var(--ink);
+  border-color: var(--hair-hi);
+  background: var(--wash-2);
+}
+.pane-head button:active { transform: scale(0.94); }
+/* the header action groups: scope (pin/link) · view (fit/focus/full) · source/close */
+.pane-head .hsep {
+  width: 1px;
+  align-self: stretch;
+  margin: 5px 3px;
+  background: var(--hair);
+  flex: none;
+}
+.pane-head button[data-a='full'] { font-size: 12px; }
+.pane-head button[data-a='src'] { font-size: 10px; letter-spacing: -0.02em; }
+
+/* fullscreen: one tile covers the viewport and everything else steps back */
+body.solo .pane:not(.solo) { opacity: 0.16; pointer-events: none; }
+body.solo .frame, body.solo .frame-label, body.solo .sash { opacity: 0.16; }
+.pane.solo { z-index: 6; box-shadow: 0 30px 80px -30px rgba(0,0,0,.9); }
+.pane.solo .pane-head { border-bottom-color: color-mix(in oklab, var(--cyan) 30%, var(--hair)); }
+.pane-head button[data-a='del']:hover { color: var(--amber); border-color: color-mix(in oklab, var(--amber) 50%, transparent); }
+/* the pin: which file this tile shows, and whether it follows the active one.
+   Following is quiet, pinned is lit — a follower is the unremarkable state. */
+.pane-head button[data-a='pin'] { font-size: 10px; color: color-mix(in oklab, var(--t3) 82%, var(--panel)); }
+.pane-head button[data-a='pin'].on {
+  color: color-mix(in oklab, var(--amber) 88%, var(--ink));
+  background: color-mix(in oklab, var(--amber) 14%, transparent);
+  border-color: color-mix(in oklab, var(--amber) 34%, transparent);
+}
+.pane-head button[data-a='pin']:hover { color: var(--ink); }
+/* the selection link: lit means this tile's selection is the shared one */
+.pane-head button[data-a='link'] { font-size: 11px; color: color-mix(in oklab, var(--t3) 82%, var(--panel)); }
+.pane-head button[data-a='link'].on {
+  color: color-mix(in oklab, var(--cyan) 88%, var(--ink));
+  background: color-mix(in oklab, var(--cyan) 12%, transparent);
+  border-color: color-mix(in oklab, var(--cyan) 30%, transparent);
+}
+.pane-head button[data-a='link']:hover { color: var(--ink); }
+/* a switch driven by a wire says so, and does not pretend to be clickable */
+.ed-tog.wired, .ed-tog:disabled { opacity: .75; cursor: default; border-color: color-mix(in oklab, var(--cyan) 40%, transparent); }
+.ctl-row input[type='checkbox']:disabled { cursor: default; opacity: .8; }
+
+/* ---------- the pointer's pane is the active one --------------------------
+   The wheel means whatever is under the pointer, so which pane that is has to be
+   visible: this is the tile a scroll or a trackpad gesture will land in. */
+.pane[data-active] {
+  border-color: color-mix(in oklab, var(--pa, var(--cyan)) 42%, var(--hair));
+}
+.pane[data-active] .pane-head {
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--pa, var(--cyan)) 16%, transparent), transparent 52%),
+    linear-gradient(180deg, var(--pane-head-face), color-mix(in oklab, var(--panel) 92%, var(--bg)));
+}
+.pane[data-active] .pane-head > span:first-of-type {
+  color: color-mix(in oklab, var(--ink) 97%, var(--panel));
+}
+/* a hairline down the body's edge, so the marker reads even on a dark tile */
+.pane[data-active] .pane-body {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pa, var(--cyan)) 16%, transparent);
+}
+
+/* ---------- a tile nobody can see costs nothing to paint --------------------
+   Independent of the LOD preference. A tile that does not overlap the viewport at
+   all is removed from painting entirely: leaving its body hidden but its box,
+   shadow and head painted kept 50 invisible tiles in the rasteriser on every
+   frame, which is where the frame time actually went. A tile that *does* overlap
+   stays painted, so a half-visible tile still looks like a tile. */
+.pane.off { visibility: hidden; }
+.pane.off .pane-body, .pane.off .pane-card { content-visibility: hidden; }
+.pane-head .lod {
+  margin-left: 8px;
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+  padding: 3px 6px;
+  border: 1px solid var(--hair);
+  border-radius: 99px;
+  background: var(--wash-1);
+}
+.pane-head .lod:empty { display: none; }
+.pane.lod-live .pane-head .lod { color: color-mix(in oklab, var(--green) 80%, var(--ink)); border-color: color-mix(in oklab, var(--green) 35%, transparent); }
+
+/* ---- body ---- */
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: transparent;
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.pane-body > * { min-width: 0; }
+
+/* ---- LOD card ---- */
+.pane-card {
+  background:
+    radial-gradient(120% 100% at 50% 0%, color-mix(in oklab, var(--pa, var(--cyan)) 12%, transparent), transparent 70%),
+    var(--pane-face);
+}
+.pane-card b {
+  font: 600 min(calc(16px * var(--inv)), 13cqw) / 1.15 var(--font-display);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: color-mix(in oklab, var(--ink) 92%, var(--panel));
+}
+.pane-card span {
+  font: 400 min(calc(11px * var(--inv)), 8cqw) / 1.5 var(--font-mono);
+  color: var(--t3);
+  letter-spacing: 0.04em;
+}
+.pane-card::after {
+  content: '';
+  width: 26px;
+  height: 1px;
+  margin-top: 2px;
+  background: var(--pa, var(--cyan));
+  opacity: 0.8;
+}
+
+/* ---- sashes ---- */
+.qb-sash-hit, .sash { transition: background 0.15s ease; }
+.sash::after {
+  content: '';
+  position: absolute;
+  background: var(--halo);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  border-radius: 4px;
+}
+.sash.h::after { inset: 12% 50% 12% 50%; width: 2px; }
+.sash.v::after { inset: 50% 12% 50% 12%; height: 2px; }
+.sash:hover { background: transparent !important; }
+.sash:hover::after, .sash.drag::after { opacity: 0.9; }
+
+/* ---------- 6. pane content ------------------------------------------- */
+
+/* nodes / tree list */
+ul.nodes { padding: 6px; }
+ul.nodes li.item {
+  padding: 7px 9px;
+  gap: 9px;
+  font: 400 12px/1.45 var(--font-mono);
+  color: var(--t1);
+  border: 1px solid transparent;
+  border-radius: var(--pane-r-in);
+  margin-bottom: 1px;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+ul.nodes li.item + li.item { border-top: 1px solid color-mix(in oklab, var(--hair) 55%, transparent); }
+ul.nodes li.item:hover { background: var(--wash-1); border-color: var(--hair); }
+ul.nodes li.sel {
+  background: color-mix(in oklab, var(--cyan) 13%, transparent);
+  border-color: color-mix(in oklab, var(--cyan) 45%, transparent);
+  box-shadow: inset 2px 0 0 var(--cyan);
+}
+ul.nodes li .tag {
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t3);
+  padding: 3px 6px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: var(--wash-1);
+}
+ul.nodes li i { color: var(--t3); font: 500 10px/1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
+ul.nodes li .group {
+  font: 600 10px/1.6 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--cyan) 82%, var(--ink));
+  padding: 10px 8px 6px;
+}
+ul.nodes li .group .tag { color: inherit; border-color: color-mix(in oklab, var(--cyan) 30%, transparent); background: transparent; }
+
+/* log / output */
+.log {
+  padding: 11px 13px;
+  font: 400 11.5px/1.7 var(--font-mono);
+  color: var(--t2);
+  letter-spacing: 0.01em;
+}
+.log .ok { color: color-mix(in oklab, var(--green) 85%, var(--ink)); }
+.log .w { color: color-mix(in oklab, var(--amber) 90%, var(--ink)); }
+
+/* goal */
+.goal {
+  padding: 13px 14px;
+  font: 400 12.5px/1.75 var(--font-mono);
+  color: var(--t1);
+}
+.goal b { color: color-mix(in oklab, var(--cyan) 88%, var(--ink)); font-weight: 700; }
+.goal .m { color: color-mix(in oklab, var(--violet) 85%, var(--ink)); }
+/* the goal's own parts: the turnstile, a dim label, and the row's verdict chip */
+.goal .g-turn { color: var(--t3); margin-right: 4px; }
+.goal .gdim { color: var(--t3); font: 400 11px/1.6 var(--font-mono); }
+.goal .g-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  font: 600 9.5px/1.5 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.goal .g-chip.confirmed { color: color-mix(in oklab, var(--green) 85%, var(--ink)); border-color: color-mix(in oklab, var(--green) 30%, transparent); }
+.goal .g-chip.unconfirmed { color: color-mix(in oklab, var(--amber) 85%, var(--ink)); border-color: color-mix(in oklab, var(--amber) 30%, transparent); }
+.goal .g-chip.unknown-cite { color: color-mix(in oklab, var(--red, #f87171) 85%, var(--ink)); border-color: color-mix(in oklab, var(--red, #f87171) 30%, transparent); }
+.goal .g-chip.local { color: var(--t3); }
+.goal .ob { color: var(--t2); }
+
+/* stats — instrument readout */
+.stat-grid {
+  padding: 12px 15px 6px;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0 12px;
+  font: 400 12px/1.4 var(--font-mono);
+}
+.stat-grid .k {
+  color: var(--t3);
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--hair) 55%, transparent);
+  white-space: nowrap;
+}
+.stat-grid .bar {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  border-bottom: none;
+  border-bottom: none;
+  overflow: hidden;
+}
+.stat-grid .bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--cyan) 40%, transparent),
+    color-mix(in oklab, var(--cyan) 92%, var(--ink)));
+  box-shadow: 0 0 8px color-mix(in oklab, var(--cyan) 35%, transparent);
+  transition: width 0.5s cubic-bezier(0.3, 0.9, 0.2, 1);
+}
+.stat-grid > .bar { border-bottom: none; }
+.stat-grid .k + .bar, .stat-grid .bar + .v {
+  border-bottom: 1px solid color-mix(in oklab, var(--hair) 55%, transparent);
+  padding: 9px 0;
+}
+.stat-grid .v {
+  color: color-mix(in oklab, var(--ink) 96%, var(--panel));
+  text-align: right;
+  font: 600 14px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 18px color-mix(in oklab, var(--cyan) 22%, transparent);
+  min-width: 2.2em;
+}
+.stat-grid .v.z { color: var(--t3); text-shadow: none; }
+
+/* composition of the corpus, as one stacked bar */
+.stat-dist { padding: 14px 15px 4px; }
+.sd-track {
+  display: flex;
+  gap: 2px;
+  height: 7px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.sd-track i { display: block; border-radius: 2px; }
+.sd-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 9px;
+  font: 500 8.5px/1.2 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.sd-keys span { display: inline-flex; align-items: center; gap: 5px; }
+.sd-keys span::before {
+  content: '';
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--kc, var(--t3));
+}
+.sd-keys b { color: color-mix(in oklab, var(--ink) 74%, var(--panel)); font-weight: 600; }
+[data-k='axiom'] { --kc: var(--green); }
+[data-k='definition'] { --kc: var(--cyan); }
+[data-k='theorem'] { --kc: var(--violet); }
+[data-k='calibration'] { --kc: var(--amber); }
+.sd-track i[data-k] { background: var(--kc); }
+.sd-track i[data-k='axiom'] { box-shadow: 0 0 10px color-mix(in oklab, var(--green) 50%, transparent); }
+
+/* symbols */
+.symbols { padding: 11px 13px; font: 400 11.5px/1.6 var(--font-mono); color: var(--t1); }
+.sym-head {
+  font: 600 9.5px/1.4 var(--font-mono);
+  letter-spacing: 0.16em;
+  color: var(--t3);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.sym-head b { color: color-mix(in oklab, var(--amber) 80%, var(--ink)); font-weight: 600; }
+.sym-head i { font-style: normal; color: var(--t3); letter-spacing: 0.06em; }
+.sym-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 4px;
+  align-content: start;
+}
+.symbols .s {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+  border: 1px solid transparent;
+  border-left: 1px solid color-mix(in oklab, var(--amber) 26%, transparent);
+  overflow: hidden;
+  transition: 0.13s ease;
+  cursor: default;
+}
+.symbols .s u {
+  /* share-of-uses, as a faint fill behind the chip */
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 100%;
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--amber) 16%, transparent),
+    transparent);
+  border-radius: 5px;
+  pointer-events: none;
+}
+.symbols .s b {
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: color-mix(in oklab, var(--ink) 82%, var(--panel));
+}
+.symbols .s i {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.symbols .s:hover {
+  border-color: color-mix(in oklab, var(--cyan) 55%, transparent);
+  background: color-mix(in oklab, var(--cyan) 10%, transparent);
+}
+.symbols .s:hover b { color: color-mix(in oklab, var(--cyan) 85%, var(--ink)); }
+.symbols .s:hover i { color: color-mix(in oklab, var(--cyan) 70%, var(--ink)); }
+
+/* editor textarea / code */
+#world textarea.ed, textarea.ed {
+  background: transparent;
+  color: var(--t1);
+  font: 400 var(--fs-code) / 1.75 var(--font-mono);
+  padding: 13px 15px;
+  caret-color: var(--cyan);
+  tab-size: 2;
+}
+pre.code {
+  padding: 13px 15px;
+  font: 400 11.5px/1.7 var(--font-mono);
+  color: var(--t1);
+}
+.ed-bar {
+  padding: 6px 8px;
+  gap: 7px;
+  background: color-mix(in oklab, var(--panel) 70%, var(--bg));
+  border-bottom: 1px solid var(--hair);
+}
+.ed-bar select {
+  background: var(--wash-1);
+  border: 1px solid var(--hair);
+  border-radius: 7px;
+  font: 500 11px/1.5 var(--font-mono);
+  color: var(--t1);
+  padding: 5px 8px;
+}
+.ed-bar select:hover { border-color: var(--hair-hi); }
+.ed-kind {
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--pa, var(--cyan)) 80%, var(--ink));
+  padding: 4px 7px;
+  border: 1px solid color-mix(in oklab, var(--pa, var(--cyan)) 30%, transparent);
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--pa, var(--cyan)) 10%, transparent);
+}
+
+/* LaTeX render */
+.render { padding: 16px 18px 26px; }
+.render .rhead {
+  font: 600 9.5px/1.5 var(--font-mono);
+  letter-spacing: 0.2em;
+  color: var(--t3);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--hair);
+}
+.render .ltitle {
+  font: 600 15px/1.6 var(--font-display);
+  color: var(--ink);
+  margin: 14px 0 8px;
+  letter-spacing: 0.01em;
+}
+.render .lcomment { font: 400 11px/1.7 var(--font-mono); color: var(--t3); margin: 9px 0; }
+.render .lraw { font: 400 12px/1.8 var(--font-mono); color: var(--t2); }
+.render .lmath { margin: 6px 0; padding: 4px 0; display: flex; align-items: center; gap: 0; }
+.render .katex-display { margin: 0.45em 0; }
+/* a display formula is a block, so it takes the row and the citation follows it
+   instead of dropping underneath on its own line */
+.render .lmath > .katex-display { flex: 1 1 auto; min-width: 0; margin: 0; }
+.render .lmath > .lmath-inline { flex: 1 1 auto; min-width: 0; }
+/* ---- .qbit line roles (see index.html: QBIT_PROSE / QBIT_MATH) ---- */
+.render .lhead {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 0 14px; padding-bottom: 9px; border-bottom: 1px solid var(--hair);
+}
+.render .lhead .lab {
+  font: 700 10px/1 var(--font-mono); letter-spacing: 0.16em;
+  color: var(--cyan); text-transform: uppercase; flex: none;
+}
+.render .lhead .name { font: 600 15px/1.45 var(--font-display); color: var(--ink); }
+.render .lchip {
+  display: inline-block; flex: none;
+  font: 600 8.5px/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--t3); border: 1px solid var(--hair);
+  border-radius: 5px; padding: 3px 6px; margin-right: 9px; vertical-align: middle;
+}
+.render .lprose { font: 400 12.5px/1.75 var(--font-sans); color: var(--ink); margin: 7px 0; }
+.render .lprose code {
+  font: 400 11.5px/1 var(--font-mono);
+  background: color-mix(in oklab, var(--cyan) 13%, transparent);
+  border-radius: 4px; padding: 2px 4px; color: var(--cyan);
+}
+.render .lrow { display: flex; align-items: baseline; gap: 0; margin: 5px 0; overflow-x: auto; }
+.render .lrow .lval { flex: 1 1 auto; min-width: 0; }
+.render .lcite {
+  flex: none; align-self: center; margin-left: 14px;
+  font: 500 9.5px/1.3 var(--font-mono); color: var(--t3);
+  border-left: 1px solid var(--hair); padding-left: 9px; white-space: nowrap;
+}
+.render .katex { color: color-mix(in oklab, var(--ink) 94%, var(--panel)); }
+
+/* program / computed nodes */
+.bnode { gap: 9px; padding: 11px; }
+.bnode .bprog {
+  background: color-mix(in oklab, var(--inset) 70%, var(--bg));
+  border: 1px solid var(--hair);
+  border-radius: var(--pane-r-in);
+  font: 400 11px/1.6 var(--font-mono);
+  color: var(--t1);
+  padding: 10px;
+  caret-color: var(--cyan);
+  box-shadow: inset 0 1px 2px color-mix(in oklab, var(--bg) 60%, transparent);
+}
+.bnode .bprog:focus { outline: none; border-color: color-mix(in oklab, var(--cyan) 50%, transparent); }
+.bnode .bsrc {
+  font: 500 9.5px/1.4 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.bnode .brun {
+  background: color-mix(in oklab, var(--cyan) 14%, var(--panel2));
+  border: 1px solid color-mix(in oklab, var(--cyan) 45%, transparent);
+  color: color-mix(in oklab, var(--cyan) 90%, var(--ink));
+  border-radius: 7px;
+  padding: 6px 13px;
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+.bnode .brun:hover {
+  background: color-mix(in oklab, var(--cyan) 26%, var(--panel2));
+  box-shadow: 0 0 18px -4px var(--halo);
+}
+
+/* theme node */
+.th-head, .th-mode-tag { font: 600 9.5px/1.5 var(--font-mono); letter-spacing: 0.14em; color: var(--t3); text-transform: uppercase; }
+.th-count { color: color-mix(in oklab, var(--cyan) 85%, var(--ink)); }
+.th-preset {
+  background: var(--wash-1);
+  border: 1px solid var(--hair);
+  border-radius: 99px;
+  padding: 4px 11px;
+  font: 500 10px/1.5 var(--font-mono);
+  color: var(--t2);
+  cursor: pointer;
+  transition: 0.13s ease;
+}
+.th-preset:hover { border-color: color-mix(in oklab, var(--cyan) 55%, transparent); color: var(--cyan); }
+.th-c { border: 1px solid var(--hair); border-radius: 6px; height: 24px; }
+
+/* handwrite */
+.hw canvas.bd {
+  background: color-mix(in oklab, var(--inset) 76%, var(--bg));
+  border: 1px solid var(--hair);
+  border-radius: var(--pane-r-in);
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--line) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--line) 60%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.empty {
+  color: var(--t3);
+  font: 400 11.5px/1.7 var(--font-mono);
+  padding: 16px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+canvas.g3 { background: transparent; }
+
+/* ---------- 7. console (HUD) ------------------------------------------ */
+
+#hud {
+  left: 16px;
+  bottom: 16px;
+  top: auto;
+  width: auto;            /* the bar sets the width, so folding never resizes the panel */
+  border-radius: 16px;
+  border: 1px solid var(--hair);
+  background:
+    linear-gradient(180deg, var(--sheen), transparent 26%),
+    color-mix(in oklab, var(--panel) 82%, var(--bg));
+  backdrop-filter: saturate(1.25) blur(18px);
+  -webkit-backdrop-filter: saturate(1.25) blur(18px);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--ink) 9%, transparent) inset,
+    0 24px 60px -28px rgba(0, 0, 0, 0.85),
+    0 2px 10px rgba(0, 0, 0, 0.35);
+  font: 400 11px/1.65 var(--font-mono);
+  color: var(--t1);
+  transition: width 0.2s ease, box-shadow 0.2s ease;
+}
+#hud:hover {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--ink) 10%, transparent) inset,
+    0 28px 70px -28px rgba(0, 0, 0, 0.9),
+    0 0 0 1px color-mix(in oklab, var(--cyan) 14%, transparent);
+}
+#hud-head {
+  padding: 11px 12px 10px 13px;
+  gap: 9px;
+  border-bottom: 1px solid var(--hair);
+  cursor: grab;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--panel2) 70%, var(--panel)), transparent);
+}
+#hud-head .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--green) 16%, transparent), 0 0 10px var(--green);
+  animation: pulse 2.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+#hud-toggle {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--hair);
+  background: var(--wash-1);
+  color: var(--t2);
+  font: 600 12px/1 var(--font-mono);
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+#hud-toggle:hover { color: var(--ink); border-color: var(--hair-hi); background: var(--wash-2); }
+
+#hud-body { padding: 10px 13px 13px; }
+#hud .hud-sec { margin: 0 0 10px; }
+#hud .hud-sec + .hud-sec { padding-top: 9px; border-top: 1px solid color-mix(in oklab, var(--hair) 65%, transparent); }
+#hud .hud-lab {
+  display: block;
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t3);
+  margin-bottom: 7px;
+}
+#hud .row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+#hud .k {
+  color: var(--t2);
+  font: 400 10.5px/1.4 var(--font-mono);
+  letter-spacing: 0.02em;
+}
+#hud .pill {
+  background: var(--wash-1);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font: 500 10.5px/1.5 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--ink) 82%, var(--panel));
+  letter-spacing: 0.02em;
+}
+#hud select, #hud input[type='text'] {
+  background: var(--wash-1);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  color: var(--t1);
+  font: 500 10.5px/1.4 var(--font-mono);
+  padding: 4px 7px;
+  cursor: pointer;
+  max-width: 168px;
+}
+#hud select:hover, #hud input[type='text']:hover { border-color: var(--hair-hi); }
+#hud input[type='checkbox'] { accent-color: var(--cyan); width: 13px; height: 13px; }
+
+/* console keys: instrument buttons */
+#hud button {
+  background: linear-gradient(180deg, var(--wash-2), var(--wash-1));
+  border: 1px solid var(--hair);
+  border-radius: 7px;
+  color: var(--t2);
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: 0.14s ease;
+}
+#hud button:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--cyan) 46%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--cyan) 16%, transparent), color-mix(in oklab, var(--cyan) 7%, transparent));
+  box-shadow: 0 0 16px -6px var(--halo);
+}
+#hud button:active { transform: translateY(1px); }
+#hud .add { display: grid; grid-template-columns: 1fr auto; }
+#hud .add button { padding: 6px 11px; }
+#hud .row > span[style] { display: flex !important; gap: 6px; }
+
+#keys {
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in oklab, var(--hair) 65%, transparent);
+  color: var(--t3);
+  font: 400 9.5px/1.9 var(--font-mono);
+  letter-spacing: 0.01em;
+}
+#keys b {
+  color: color-mix(in oklab, var(--ink) 78%, var(--panel));
+  font-weight: 500;
+  padding: 1px 4px;
+  border: 1px solid var(--hair);
+  border-radius: 4px;
+  background: var(--wash-1);
+  white-space: nowrap;
+}
+#hud.collapsed { width: auto; }
+#hud.collapsed #hud-head { border-bottom: none; }
+
+
+/* ---------- 7b. console tiles -------------------------------------------
+   The controls that used to live in a fixed panel: same rows, same ids, but in a
+   tile body, so they move with the workspace and can be docked like anything else.
+   Only `core` refuses to be closed. */
+
+.ctl-host {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 12px;
+  font: 400 11px/1.65 var(--font-mono);
+  color: var(--t1);
+}
+/* ---- two columns, when the pane asks for them -------------------------------
+   A settings pane is a stack of sections in a two-column row grid, so on a wide tile
+   the width goes unused. renderControlColumns() in the page splits the stack into two
+   panes with a draggable boundary between them; these rules draw that and nothing
+   else. The heading and the rows inside a section are unchanged, so a split pane and
+   an unsplit one are the same pane. */
+.ctl-host > .ctl-col {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* The seam is the boundary between the columns, so what separates them is the space on
+   either side of it — and the first section of the right column is the one that has to
+   carry the rule, because a border on the left column would be a line down the inside of
+   its own content instead. */
+.ctl-host > .ctl-col + .ctl-split + .ctl-col { padding-left: 8px; }
+.ctl-host > .ctl-col .hud-sec.col-below { padding-top: 8px; border-top: 1px solid color-mix(in oklab, var(--hair) 65%, transparent); }
+/* A column is roughly half the pane, so the row grid has to give more space to the
+   value: `minmax(96px,132px)` for a label is a third of a 337px pane and half of a
+   column, which pushes the value — a pill with a sentence in it — out of the box.
+   min-width:0 is what lets the value shrink instead of overflowing its cell. The label
+   column keeps a floor of its own so a long key (`new tree / graph`) does not stack one
+   word per line, which is what a column with no floor does to it. */
+.ctl-host > .ctl-col .row { grid-template-columns: minmax(76px, 96px) minmax(0, 1fr); gap: 6px 8px; }
+.ctl-host > .ctl-col .row > *:last-child { min-width: 0; max-width: 100%; }
+.ctl-host > .ctl-col .row > *:last-child > * { max-width: 100%; }
+.ctl-host > .ctl-col .row .pill { white-space: normal; overflow-wrap: anywhere; }
+.ctl-host > .ctl-col .hud-sec > .row:first-of-type { margin-top: 0; }
+/* A tile can be narrow enough that even one column has no room for a two-column row
+   grid. `.pane` is a size container (.pane{container-type:size}), so the pane itself
+   can answer that: below 340px of pane width the rows become label-above-value.
+
+   MEASURED, AND NOT IN EFFECT: `.ctl-host .row` further down this file (the general row
+   grid, `minmax(96px,132px) 1fr`) has the same specificity and comes LATER, so it wins and
+   this block never applies to a plain control tile — a 320px project tile still measures
+   `132px 152px` two columns. Making it win restyles every narrow control tile at once
+   (and its own `justify-self: stretch` needs a decision for pills), so it is its own job;
+   what is recorded here is that the fallback below is currently unreachable. */
+@container (max-width: 340px) {
+  .ctl-host .row { grid-template-columns: minmax(0, 1fr); gap: 3px 8px; }
+  .ctl-host .row > *:last-child { justify-self: stretch; }
+}
+.ctl-host > .ctl-seed {          /* the right edge of a one-column pane offers the split */
+  position: absolute;
+  top: 0; right: var(--seed-inset, 10px); bottom: 0;
+  width: var(--seed-w, 18px);
+  cursor: ew-resize;
+  z-index: 9;                     /* a tile's own resize grips (8) sit on its boundary */
+  touch-action: none;
+}
+.ctl-host > .ctl-seed[data-room='0'] { cursor: not-allowed; }
+.ctl-host > .ctl-seed[data-room='0']:hover::before { opacity: .5; background: var(--t3); box-shadow: none; }
+.ctl-host > .ctl-seed[data-room='0']:hover::after { opacity: .6; color: var(--t3); }
+.ctl-host > .ctl-seed::before {
+  content: '';
+  position: absolute;
+  top: 8%; bottom: 8%; left: 50%;
+  width: 1px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--hair) 75%, transparent);
+  opacity: 0;
+  transition: opacity .15s, background .15s;
+}
+.ctl-host > .ctl-seed::after {    /* the dots that say a seam can be made here */
+  content: '⋮';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font: 600 10px/1 var(--font-sans);
+  color: var(--t3);
+  opacity: 0;
+  transition: opacity .15s;
+}
+.ctl-host > .ctl-seed:hover::before { opacity: 1; background: var(--cyan); box-shadow: 0 0 8px color-mix(in oklab, var(--cyan) 55%, transparent); }
+.ctl-host > .ctl-seed:hover::after { opacity: 1; color: var(--cyan); }
+.ctl-host > .ctl-split {
+  flex: none;                     /* it never shrinks: the two columns take the rest */
+  width: 11px;                    /* the hit area; the rule it draws is 1px */
+  align-self: stretch;
+  cursor: ew-resize;
+  position: relative;
+  touch-action: none;
+  border: none;
+  background: none;
+}
+.ctl-host > .ctl-split::before {
+  content: '';
+  position: absolute;
+  inset: 0 5px;                   /* a 1px rule down the middle of the band */
+  background: color-mix(in oklab, var(--hair) 80%, transparent);
+  border-radius: 1px;
+  transition: background .15s;
+}
+.ctl-host > .ctl-split:hover::before,
+.ctl-host > .ctl-split.hot::before,
+.ctl-host > .ctl-split.drag::before {
+  background: var(--cyan);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--cyan) 60%, transparent);
+}
+.ctl-host > .ctl-split::after {   /* three dots, so the band reads as a grip */
+  content: '⋮';
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  font: 600 10px/1 var(--font-sans);
+  color: var(--t3);
+  opacity: 0;
+  transition: opacity .15s;
+}
+.ctl-host > .ctl-split:hover::after { opacity: 1; }
+.ctl-host .hud-sec { margin: 0 0 9px; }
+.ctl-host .hud-sec + .hud-sec { padding-top: 8px; border-top: 1px solid color-mix(in oklab, var(--hair) 65%, transparent); }
+.ctl-host .hud-lab {
+  display: block;
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t3);
+  margin-bottom: 6px;
+}
+.ctl-host .row {
+  display: grid;
+  grid-template-columns: minmax(96px, 132px) 1fr;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 24px;
+}
+.ctl-host .row > *:last-child { justify-self: start; }
+.ctl-host .k { color: var(--t3); font-family: var(--font-sans); font-weight: 500; letter-spacing: .2px; }
+.ctl-host .row.add { grid-template-columns: auto 1fr; }
+/* A GROUPED VALUE IS ALLOWED TO SHRINK — a text field plus the button that goes with it.
+   An `<input>`'s intrinsic width comes from its `size`, and that is a floor a `1fr` track
+   will not go below: in the project tile (320px, its own path row) the field claimed more
+   than the cell, the row overflowed the pane and the button after it was cut off at the
+   tile's edge — `wire in` rendered as `w`. Shrinking the field instead is the only thing
+   that can give: the button carries a word, the field carries a path someone is typing. */
+.ctl-host .row > .ctl-group { justify-self: stretch; min-width: 0; max-width: 100%; }
+.ctl-host .row > .ctl-group > input[type='text'],
+.ctl-host .row > .ctl-group > input.te-in { min-width: 0; flex: 1 1 64px; }
+.ctl-host .row > .ctl-group > button,
+.ctl-host .row > .ctl-group > .pill { flex: 0 0 auto; }
+.ctl-host .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--wash-1);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill, 99px);
+  padding: 2px 8px;
+  font: 500 10px/1.4 var(--font-mono);
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ctl-host select, .ctl-host input[type='text'] {
+  background: var(--inset);
+  color: var(--ink);
+  border: 1px solid var(--hair);
+  padding: 4px 7px;
+  font: 500 11px/1 var(--font-mono);
+  border-radius: var(--r-btn, 8px);
+  cursor: pointer;
+  max-width: 100%;
+}
+.ctl-host input[type='checkbox'] { accent-color: var(--cyan); width: 13px; height: 13px; cursor: pointer; }
+.ctl-host button {
+  background: var(--wash-1);
+  color: var(--t1);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-btn, 8px);
+  padding: 5px 10px;
+  font: 500 10.5px/1 var(--font-mono);
+  cursor: pointer;
+}
+.ctl-host button:hover { color: var(--ink); border-color: var(--hair-hi); background: var(--wash-2); }
+.ctl-host button:active { transform: translateY(1px); }
+.ctl-host label { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-sans); cursor: pointer; }
+.ctl-host .ctl-note { color: var(--t3); font: 400 9.5px/1.5 var(--font-mono); margin-top: 6px; }
+.ctl-host .hb-num {
+  min-width: 46px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--cyan) 78%, var(--ink));
+}
+.ctl-host #keys { margin-top: 8px; border-top: 1px solid var(--hair); padding-top: 7px; color: var(--t3); font: 400 9.5px/1.8 var(--font-mono); }
+.ctl-host #keys b {
+  color: color-mix(in oklab, var(--ink) 78%, var(--panel));
+  font-weight: 500;
+  padding: 1px 4px;
+  border: 1px solid var(--hair);
+  border-radius: 4px;
+  background: var(--wash-1);
+  white-space: nowrap;
+}
+
+/* ---------- 8. toast + loadbar ---------------------------------------- */
+
+#toast {
+  left: auto;
+  right: 18px;
+  bottom: 18px;
+  top: auto;
+  transform: none;
+  background: color-mix(in oklab, var(--panel) 88%, var(--bg));
+  border: 1px solid color-mix(in oklab, var(--cyan) 38%, transparent);
+  color: color-mix(in oklab, var(--ink) 90%, var(--panel));
+  padding: 9px 15px;
+  border-radius: 10px;
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.05em;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.8), 0 0 0 1px color-mix(in oklab, var(--cyan) 10%, transparent);
+  z-index: 300;
+}
+#loadbar {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), var(--violet), transparent);
+  box-shadow: 0 0 14px var(--halo);
+}
+
+/* ---------- 9. light themes ------------------------------------------- */
+
+[data-mode='light'] {
+  --shadow-pane:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 8px 20px -12px rgba(20, 30, 55, 0.28),
+    0 24px 48px -30px rgba(20, 30, 55, 0.22);
+  --shadow-pane-lit:
+    0 0 0 1px color-mix(in oklab, var(--cyan) 40%, transparent),
+    0 10px 26px -14px rgba(20, 30, 55, 0.3);
+  --sheen: rgba(255, 255, 255, 0.7);
+  --pane-face: color-mix(in oklab, var(--panel) 96%, var(--bg));
+  --t2: color-mix(in oklab, var(--ink) 72%, var(--panel));
+  --t3: color-mix(in oklab, var(--ink) 52%, var(--panel));
+}
+[data-mode='light'] #viewport {
+  background-image:
+    radial-gradient(120% 70% at 50% -18%, color-mix(in oklab, var(--cyan) 10%, transparent), transparent 60%),
+    radial-gradient(80% 60% at 100% 108%, color-mix(in oklab, var(--violet) 8%, transparent), transparent 60%),
+    radial-gradient(130% 120% at 50% 44%, transparent 48%, color-mix(in oklab, var(--bg) 92%, #000) 100%);
+}
+[data-mode='light'] .pane { border-color: color-mix(in oklab, var(--line) 100%, transparent); }
+[data-mode='light'] #hud {
+  background: color-mix(in oklab, var(--panel) 94%, var(--bg));
+  box-shadow: 0 20px 50px -26px rgba(20, 30, 55, 0.35), 0 0 0 1px color-mix(in oklab, var(--line) 100%, transparent);
+}
+
+/* ---------- 10. motion preference ------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .pane, .pane-head button, #hud button, .th-preset, .symbols .s { transition: none; }
+  #hud-head .dot { animation: none; }
+  .pane:hover { transform: none; }
+}
+/* ---------- 11. the console bar -----------------------------------------
+   The head is the whole control bar: brand, zoom, tiling, wires, vitals, and
+   the fold. It is also the console's drag handle, so it stays this compact
+   when the console is open. */
+
+#hud {
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+#hud.flip { flex-direction: column-reverse; }
+#hud.flip #hud-head { border-bottom: none; border-top: 1px solid var(--hair); border-radius: 0 0 15px 15px; }
+#hud.flip #hud-body { border-radius: 15px 15px 0 0; }
+#hud.dragging { transition: none; box-shadow: 0 34px 80px -30px rgba(0, 0, 0, 0.95), 0 0 0 1px color-mix(in oklab, var(--cyan) 26%, transparent); }
+#hud.dragging #hud-head { cursor: grabbing; }
+
+#hud-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 7px;
+  cursor: grab;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--panel2) 62%, var(--panel)), color-mix(in oklab, var(--panel) 96%, var(--bg)));
+  border-radius: 15px 15px 0 0;
+  touch-action: none;
+}
+#hud.collapsed #hud-head { border-radius: 15px; }
+#hud-head .hb-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 0 5px;
+  flex: none;
+}
+#hud-head .hb-brand b {
+  font: 600 9.5px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--ink) 84%, var(--panel));
+  white-space: nowrap;
+}
+/* a hairline between the groups, so the bar reads as segments, not a heap */
+#hud-head .hb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  padding: 0 6px;
+  border-left: 1px solid var(--hair);
+  border-right: 1px solid var(--hair);
+}
+#hud-head .hb-group + .hb-group { border-left: none; }
+#hud-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 22px;
+  height: 23px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in oklab, var(--ink) 66%, var(--panel));
+  font: 500 13px/1 var(--font-mono);
+  cursor: pointer;
+}
+#hud-head button:hover { background: var(--wash-2); color: var(--ink); border-color: var(--hair-hi); }
+#hud-head button:active { transform: translateY(1px); }
+#hud-head button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 1px; }
+#hud-head .hb-num {
+  min-width: 44px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  font-size: 11px;
+  color: color-mix(in oklab, var(--cyan) 78%, var(--ink));
+}
+#hud-head .hb-num:hover { border-color: color-mix(in oklab, var(--cyan) 40%, transparent); }
+#hud-head #b-wires.on {
+  background: color-mix(in oklab, var(--cyan) 18%, transparent);
+  border-color: color-mix(in oklab, var(--cyan) 42%, transparent);
+  color: color-mix(in oklab, var(--cyan) 86%, var(--ink));
+}
+#hud-head #b-wires b {
+  font: 500 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t2);
+  min-width: 10px;
+}
+#hud-head #b-wires.on b { color: inherit; }
+#hud-head .hb-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 4px 0 8px;
+  border-left: 1px solid var(--hair);
+  font: 500 9.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--t3);
+  white-space: nowrap;
+}
+#hud-head .hb-stat i { font-style: normal; color: var(--t3); }
+#hud-head .hb-stat b { font-weight: 500; color: color-mix(in oklab, var(--ink) 70%, var(--panel)); }
+#hud-head .hb-stat b:last-of-type { color: color-mix(in oklab, var(--green) 82%, var(--ink)); }
+#hud-head #hud-toggle { flex: none; margin-left: auto; width: 23px; height: 23px; border-color: var(--hair); background: var(--wash-1); }
+#hud.collapsed #hud-head .hb-stat { border-left-color: transparent; }
+
+@media (max-width: 820px) {
+  #hud-head .hb-stat { display: none; }
+  #hud-head .hb-brand b { display: none; }
+}
+
+/* ---------- 12. per-kind tint + head hierarchy ------------------------ */
+
+.pane-head {
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--pa, var(--cyan)) 9%, transparent), transparent 42%),
+    linear-gradient(180deg, var(--pane-head-face), color-mix(in oklab, var(--panel) 92%, var(--bg)));
+}
+.pane-head > span:first-of-type {
+  color: color-mix(in oklab, var(--ink) 88%, var(--panel));
+  letter-spacing: 0.15em;
+}
+
+/* ---------- 13. the board: a cluster reads as a surface --------------- */
+
+.frame {
+  border: 1px dashed color-mix(in oklab, var(--cyan) 13%, transparent);
+  background:
+    radial-gradient(120% 80% at 50% 0%, color-mix(in oklab, var(--panel) 34%, transparent), transparent 70%);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.frame::before, .frame::after {
+  content: '';
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 2px solid color-mix(in oklab, var(--cyan) 48%, transparent);
+  pointer-events: none;
+}
+.frame::before { left: -1px; top: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 20px; }
+.frame::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 20px; }
+
+/* ---------- 14. kind glyphs ------------------------------------------ */
+
+.pane-head::before {
+  content: '';
+  width: 14px; height: 14px;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid color-mix(in oklab, var(--pa, var(--cyan)) 40%, transparent);
+  position: relative;
+  flex: none;
+  opacity: 1;
+}
+.pane-head::before {
+  background-image: radial-gradient(circle at 50% 50%, var(--pa, var(--cyan)) 1.5px, transparent 1.6px);
+}
+[data-kind='graph'] .pane-head::before { background-image: radial-gradient(circle at 30% 30%, var(--pa) 1.4px, transparent 1.5px), radial-gradient(circle at 70% 70%, var(--pa) 1.4px, transparent 1.5px); }
+[data-kind='editor'] .pane-head::before { background-image: linear-gradient(var(--pa), var(--pa)); background-size: 7px 1px; background-repeat: no-repeat; background-position: 2px 6px; }
+[data-kind='editor'] .pane-head::before { box-shadow: inset 0 4px 0 -3px var(--pa), inset 0 9px 0 -3px var(--pa); }
+[data-kind='stats'] .pane-head::before { background-image: linear-gradient(90deg, var(--pa) 2px, transparent 2px), linear-gradient(90deg, var(--pa) 2px, transparent 2px); background-size: 4px 6px, 4px 6px; background-position: 2px 5px, 8px 5px; background-repeat: no-repeat; }
+[data-kind='goal'] .pane-head::before { background-image: linear-gradient(90deg, var(--pa), var(--pa)); background-size: 8px 1.5px; background-repeat: no-repeat; background-position: 3px 6px; }
+[data-kind='tree'] .pane-head::before { background-image: linear-gradient(90deg, var(--pa) 4px, transparent 4px); background-size: 100% 1px; background-repeat: no-repeat; background-position: 0 5px; }
+
+@media (prefers-reduced-motion: reduce) { .frame::before, .frame::after { transition: none; } }
+
+/* the bottom of a scrolling body dissolves instead of cutting a row */
+.pane-body { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent 100%); mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent 100%); }
+
+/* =====================================================================
+   15. ergonomics: proportions, the tree view, the editor surface
+   ===================================================================== */
+
+/* --- generic content rhythm inside tiles --- */
+.pane-body { padding: 0; }
+
+/* --- corpus tree (live/tree.js) --- */
+.tv-host { height: 100%; }
+.tv { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tv-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--hair);
+}
+.tv-title {
+  font: 600 9.5px/1 var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.tv-count {
+  margin-left: auto;
+  font: 500 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--violet) 80%, var(--ink));
+  border: 1px solid color-mix(in oklab, var(--violet) 30%, transparent);
+  border-radius: 99px;
+  padding: 2px 7px;
+}
+.tv-filter {
+  flex: none;
+  margin: 9px 10px 6px;
+  padding: 6px 9px;
+  background: color-mix(in oklab, var(--inset) 70%, transparent);
+  border: 1px solid var(--hair);
+  border-radius: 7px;
+  color: var(--t1);
+  font: 400 11.5px/1.4 var(--font-mono);
+  outline: none;
+  caret-color: var(--cyan);
+}
+.tv-filter::placeholder { color: var(--t3); }
+.tv-filter:focus { border-color: color-mix(in oklab, var(--cyan) 50%, transparent); }
+.tv-body { flex: 1; min-height: 0; overflow: auto; padding: 2px 6px 14px; }
+
+.tv-dir, .tv-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: default;
+  user-select: none;
+}
+.tv-dir {
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t2);
+  margin-top: 3px;
+}
+.tv-dir:hover { background: var(--wash-1); color: var(--ink); }
+.tv-caret {
+  font-size: 8px;
+  color: var(--t3);
+  transition: transform 0.14s ease;
+  width: 9px;
+  text-align: center;
+}
+.tv-caret.open { transform: rotate(90deg); color: color-mix(in oklab, var(--violet) 80%, var(--ink)); }
+.tv-dir .tv-n {
+  margin-left: auto;
+  font: 500 9.5px/1 var(--font-mono);
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+  padding-right: 6px;
+}
+.tv-file {
+  font: 400 12px/1 var(--font-mono);
+  color: var(--t1);
+  border: 1px solid transparent;
+}
+.tv-file:hover { background: var(--wash-1); border-color: var(--hair); }
+.tv-file.sel {
+  background: color-mix(in oklab, var(--cyan) 13%, transparent);
+  border-color: color-mix(in oklab, var(--cyan) 42%, transparent);
+  box-shadow: inset 2px 0 0 var(--cyan);
+}
+.tv-dot {
+  width: 5px; height: 5px; border-radius: 50%; flex: none;
+  background: var(--violet);
+  box-shadow: 0 0 7px color-mix(in oklab, var(--violet) 70%, transparent);
+}
+.tv-file[data-kind='def'] .tv-dot { background: var(--amber); box-shadow: 0 0 7px color-mix(in oklab, var(--amber) 70%, transparent); }
+.tv-file[data-kind='thm'] .tv-dot { background: var(--green); box-shadow: 0 0 7px color-mix(in oklab, var(--green) 70%, transparent); }
+.tv-file[data-kind='cal'] .tv-dot { background: var(--cyan); box-shadow: 0 0 7px color-mix(in oklab, var(--cyan) 70%, transparent); }
+.tv-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-kind {
+  margin-left: auto;
+  font: 500 8.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--t3);
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.tv-file:hover .tv-kind, .tv-file.sel .tv-kind { opacity: 1; }
+.tv-empty { padding: 18px; text-align: center; color: var(--t3); font: 400 11.5px/1.5 var(--font-mono); }
+
+/* --- the editor surface --- */
+/* A text tile scrolls its own text. Without a bounded host the content grows to the
+   height of the file and the pane body clips it, so there is nothing to scroll and
+   the wheel has no gesture to take. Panes that carry a toolbar become a column, so
+   the host is bounded by what is left under the bar — which is why a pane's toolbar
+   belongs to the pane body and not inside the host: `.ed-host` is the row that wraps
+   the content, and a bar mounted inside it turns into a left-hand column instead of a
+   top row. */
+.pane-body:has(> .ed-bar) { display: flex; flex-direction: column; overflow: hidden; }
+.ed-host { flex: 1; min-height: 0; display: flex; }
+.ed-host > .cm-editor { flex: 1; min-width: 0; }
+/* --- a citation tag is a link (js/live/editor.js) --- */
+/* The corpus writes a citation as a reference; it should read and behave as one. No tooltip module
+   is in the vendored CodeMirror, so the hover affordance is the element's `title`. */
+.cm-cite {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in oklab, var(--cyan) 45%, transparent);
+  text-underline-offset: 2px;
+}
+.cm-cite:hover {
+  color: var(--cyan);
+  text-decoration-color: var(--cyan);
+  background: color-mix(in oklab, var(--cyan) 10%, transparent);
+  border-radius: 3px;
+}
+
+/* --- the check strip (js/live/row-check.js) --- */
+/* A row's verdict is a SENTENCE, not a squiggle: the corpus cannot refute, so it says what it
+   confirmed and what it reached instead — and "try this" has to be clickable, which a gutter
+   marker cannot be. The strip is a row of the pane, under the bar. */
+.ed-check {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px;
+  min-height: 0;
+  border-bottom: 1px solid var(--hair);
+  background: color-mix(in oklab, var(--panel) 55%, var(--bg));
+  font: 500 10.5px/1.4 var(--font-mono);
+  color: var(--t3);
+  overflow: hidden;
+}
+.ed-check:empty { display: none; }
+.ed-verdict {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.ed-verdict.confirmed { color: color-mix(in oklab, var(--green) 85%, var(--ink)); border-color: color-mix(in oklab, var(--green) 30%, transparent); }
+.ed-verdict.unconfirmed { color: color-mix(in oklab, var(--amber) 85%, var(--ink)); border-color: color-mix(in oklab, var(--amber) 30%, transparent); }
+.ed-verdict.unknown-cite { color: color-mix(in oklab, var(--red, #f87171) 85%, var(--ink)); border-color: color-mix(in oklab, var(--red, #f87171) 30%, transparent); }
+.ed-verdict.local, .ed-verdict.checking { color: var(--t4, var(--t3)); }
+.ed-try, .ed-sug {
+  flex: none;
+  background: var(--wash-1, transparent);
+  color: var(--ink);
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font: 500 10.5px/1.4 var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 45%;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.ed-try:hover, .ed-sug:hover { border-color: var(--cyan); color: var(--cyan); }
+.ed-try { color: color-mix(in oklab, var(--cyan) 85%, var(--ink)); }
+
+/* the content of a bar-carrying pane that is not CodeMirror (the render pane's document)
+   fills the host and scrolls inside it; `pre.code` does the same from canvas.css */
+.ed-host > .render { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.cm-editor { height: 100%; }
+.cm-scroller { scrollbar-width: thin; }
+.ed-bar { padding: 7px 8px; }
+.ed-bar .ed-files { flex: 1; min-width: 0; }
+
+/* ---------- 16. node graph (live/graph.js) ---------------------------- */
+
+.g-host { height: 100%; }
+.gw { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.g-plot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  /* a faint vignette gives the drawing a floor to sit on */
+  background:
+    radial-gradient(120% 90% at 50% 40%, color-mix(in oklab, var(--cyan) 7%, transparent), transparent 70%);
+  border-radius: var(--r-sm);
+}
+.ggraph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.g-node {
+  transition: opacity 0.15s ease, filter 0.15s ease;
+  opacity: 0.95;
+  cursor: pointer;
+}
+.g-node.hub { filter: drop-shadow(0 0 4px currentColor); }
+.g-node:hover { filter: drop-shadow(0 0 7px currentColor); }
+.g-edge {
+  stroke-width: 1;
+  stroke-opacity: 0.13;
+  transition: stroke-opacity 0.15s ease;
+}
+.ggraph.hover .g-edge { stroke-opacity: 0.09; }
+.ggraph.dim .g-node { opacity: 0.15; }
+.ggraph.dim .g-node.near { opacity: 0.6; }
+.ggraph.dim .g-node.self { opacity: 1; filter: drop-shadow(0 0 6px currentColor); }
+.ggraph.dim .g-edge.lit { stroke-opacity: 0.8; }
+.g-node.self { stroke: var(--ink); stroke-width: 1.4; stroke-opacity: 0.9; }
+.g-label {
+  /* halo first so hub labels stay readable over edges */
+  paint-order: stroke;
+  stroke: color-mix(in oklab, var(--panel) 92%, var(--bg));
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  fill: color-mix(in oklab, var(--kc) 62%, var(--ink));
+  font-family: var(--font-mono);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  dominant-baseline: middle;
+  opacity: 0.86;
+  pointer-events: none;
+}
+.ggraph.dim .g-label { opacity: 0.2; }
+.g-hl {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: color-mix(in oklab, var(--ink) 70%, var(--panel));
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-size: 9.5px;
+}
+.g-hl[data-empty] { visibility: hidden; }
+.g-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px 0;
+  pointer-events: none;
+  font: 500 8.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.g-key { display: inline-flex; align-items: center; gap: 5px; }
+.g-key::before {
+  content: '';
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--kc);
+  box-shadow: 0 0 6px var(--kc);
+}
+.g-meta {
+  margin-left: auto;
+  color: var(--t3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+/* the footer must stay one line in a narrow pane: drop the species keys and
+   the hover read-out before it wraps */
+.g-legend { flex-wrap: nowrap; overflow: hidden; }
+.g-key { flex: 0 0 auto; white-space: nowrap; }
+/* width steps are set from graph.js (the pane lives inside a scaled world, so a
+   container query would need containment we do not want there) */
+.gw[data-density="2"] .g-key,
+.gw[data-density="3"] .g-key { display: none; }
+.gw[data-density="3"] .g-meta { display: none; }
+
+/* ---------- 17. graph: loose nodes + toggle --------------------------- */
+
+/* one tidy row of dots: a wrapped block of them reads as a barcode, not a list */
+.g-loose-row {
+  display: none;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  height: 0;
+  padding: 0 2px;
+  overflow: hidden;
+  border-top: 1px dashed color-mix(in oklab, var(--hair) 70%, transparent);
+  border-top-width: 0;
+  -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent);
+  mask-image: linear-gradient(90deg, #000 82%, transparent);
+}
+.g-loose-row.on {
+  display: flex;
+  height: 16px;
+  padding: 5px 2px 0;
+  border-top-width: 1px;
+}
+.g-loose-row i {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--kc);
+  opacity: 0.45;
+}
+.g-loose-row i:hover { opacity: 1; transform: scale(1.8); }
+.g-toggle {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font: 500 8.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t3);
+  background: var(--wash-1);
+  border: 1px solid var(--hair);
+  border-radius: 99px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.g-toggle:hover { color: var(--ink); border-color: var(--hair-hi); }
+.g-toggle.on { color: var(--cyan); border-color: color-mix(in oklab, var(--cyan) 45%, transparent); }
+
+/* ---------- 17a. snap guides ------------------------------------------ *
+   While a tile header is dragged, the edge it is about to land on is drawn as
+   a one-screen-pixel line so the alignment is visible before the drop.       */
+#snap-guides { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; z-index: 8; }
+.snap-guide {
+  position: absolute;
+  background: var(--cyan);
+  opacity: 0.55;
+  box-shadow: 0 0 6px color-mix(in oklab, var(--cyan) 55%, transparent);
+}
+.snap-guide.v { width: calc(1px * var(--inv, 1)); }
+.snap-guide.h { height: calc(1px * var(--inv, 1)); }
+
+/* ---------- 17b. wire ports ------------------------------------------- *
+   A port is a dot on a pane's edge. The host is laid over the pane's body box
+   by js/live/wire/connect.js (flat, inside #world) rather than nested inside
+   the pane: a pane clips its content and the sashes sit on its edges, so a
+   nested dot would be both clipped and covered. The dot itself is counter-
+   scaled against the camera, so it stays 9 px at any zoom: shape says the
+   runtime kind, colour says the type.                                       */
+
+.wire-port-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  /* OVER THE RESIZE GRIPS (canvas.css `.grip`, z-index 8). That order was the other way round,
+     on the reasoning that "a port dot on a tile's edge must not swallow the grab" — but every
+     port dot IS on an edge (`.wire-port--in/--out` hang half outside the border), so the rule
+     made the dots unreachable: in the shipped workspace, all 21 of them answered `.grip` to
+     `elementFromPoint`, and a drag started on one resized the tile instead of drawing a wire.
+     The client's own fallback could not save it either: js/live/wire/connect.js::dotUnder looks
+     down the stack for a dot but skips one whose opacity is below 0.9, and dots idle at 0.5 —
+     they brighten on `.wire-ports:hover`, which the grip on top was stealing as well.
+     A dot is 9 screen px of a 16 px band, so the specific target wins here; the band above and
+     below it still resizes, the in/out dots are the only things on the vertical edges at all,
+     and a corner grip keeps its diagonal. The layer is `pointer-events: none` — only the dots
+     take the pointer, so nothing else on a tile's boundary is affected. */
+  z-index: 9;
+}
+.wire-ports {
+  position: absolute;           /* left/top/width/height set to the pane body */
+  pointer-events: none;
+}
+.wire-port {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--t2);
+  border: 1px solid color-mix(in oklab, var(--ink) 34%, transparent);
+  box-shadow: 0 0 0 0 transparent;
+  transform: scale(var(--inv, 1));
+  transform-origin: center;
+  pointer-events: auto;
+  cursor: crosshair;
+  opacity: 0.5;
+  transition: opacity 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.wire-port--in { left: 0; margin-left: -5px; }
+.wire-port--out { right: 0; margin-right: -5px; }
+/* an event port is square: you can tell the two apart without a legend */
+.wire-port.kind-event { border-radius: 2px; }
+
+.wire-ports:hover .wire-port,
+body.wire-mode .wire-port,
+body[data-wiring] .wire-port { opacity: 1; }
+body[data-wiring] .wire-port { box-shadow: 0 0 0 3px color-mix(in oklab, var(--cyan) 14%, transparent); }
+.wire-port:hover { box-shadow: 0 0 0 3px color-mix(in oklab, var(--cyan) 30%, transparent); }
+.wire-port.hot {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--cyan) 34%, transparent);
+  opacity: 1;
+}
+/* the dot the pointer is on, which would refuse this wire: said before the
+   release, not after it */
+.wire-port.bad {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--bad) 40%, transparent);
+  opacity: 1;
+}
+
+.wire-port.tone-cyan { background: var(--cyan); }
+.wire-port.tone-green { background: var(--green); }
+.wire-port.tone-amber { background: var(--amber); }
+.wire-port.tone-violet { background: var(--violet); }
+.wire-port.tone-t2 { background: var(--t2); }
+
+#wire-canvas {
+  /* inside #viewport and before #world, so wires run behind the panes: a wire
+     crossing a pane disappears under it instead of printing over its content */
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;         /* clicks belong to the panes; picking is opt-in */
+}
+/* over the panes on purpose: a connection to a tile across the world has to be
+   visible where it crosses something, not only in the gaps. Work mode dims it. */
+#wire-canvas { z-index: 6; }
+#wire-canvas.picking { pointer-events: auto; cursor: pointer; }
+#world { z-index: 2; }
+
+/* ---------- 18. status rail ------------------------------------------- */
+
+#rail {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 10px;
+  z-index: 60;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--t3);
+  background: color-mix(in oklab, var(--bg) 82%, var(--panel));
+  border-top: 1px solid var(--hair);
+  backdrop-filter: saturate(1.2) blur(14px);
+  -webkit-backdrop-filter: saturate(1.2) blur(14px);
+  pointer-events: none;
+  background-image: linear-gradient(180deg, color-mix(in oklab, var(--ink) 5%, transparent), transparent 60%);
+}
+#rail .r-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  height: 15px;
+  border-right: 1px solid color-mix(in oklab, var(--hair) 80%, transparent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#rail .r-seg:first-child { padding-left: 2px; }
+#rail .r-seg i {
+  font-style: normal;
+  color: color-mix(in oklab, var(--ink) 34%, var(--panel));
+  text-transform: uppercase;
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+}
+#rail .r-seg b { font-weight: 600; color: color-mix(in oklab, var(--ink) 78%, var(--panel)); }
+#rail .r-spacer { flex: 1; }
+#rail .r-mode {
+  color: color-mix(in oklab, var(--cyan) 85%, var(--ink));
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+#rail .r-file { color: var(--t2); max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+/* the check chip is the one part of the status bar you can press: a whole-corpus
+   check is a deliberate act, so the rail states the last result and re-runs it */
+#rail .r-check { pointer-events: auto; cursor: pointer; letter-spacing: 0.06em; text-transform: none; }
+#rail .r-check:hover { background: color-mix(in oklab, var(--ink) 8%, transparent); }
+#rail .r-check.good { color: #4ade80; }
+#rail .r-check.warn { color: #fbbf24; }
+#rail .r-check.bad { color: #f87171; }
+#rail .r-check.busy { color: var(--cyan); }
+#rail .r-dirty { color: var(--amber); }
+#rail .r-check {
+  border-right: none;
+  color: color-mix(in oklab, var(--green) 80%, var(--ink));
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+#hud { bottom: 40px; }
+#toast { bottom: 42px; }
+
+/* ---------- 19. symbols: per-line glyph density ----------------------- */
+
+.sym-hist { margin-top: 14px; }
+.sym-hist .sh-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font: 500 8.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+  margin-bottom: 7px;
+}
+.sym-hist .sh-head i { font-style: normal; letter-spacing: 0.06em; opacity: 0.75; }
+.sym-hist .sh-track {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 64px;
+  padding: 5px 0px 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--hair) 70%, transparent);
+}
+.sym-hist .sh-track i {
+  flex: 1;
+  min-width: 1px;
+  border-radius: 1px 1px 0 0;
+  background: color-mix(in oklab, var(--amber) 30%, transparent);
+  transition: 0.15s ease;
+}
+.sym-hist .sh-track i[data-z='0'] {
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+.sym-hist .sh-track i:hover {
+  background: color-mix(in oklab, var(--cyan) 85%, transparent);
+}
+
+/* ---------- 20. graph: layout switch ---------------------------------- */
+
+.g-seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  pointer-events: auto;
+  border: 1px solid var(--hair);
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--wash-1);
+}
+.g-mbtn {
+  font: 500 8.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t3);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid color-mix(in oklab, var(--hair) 80%, transparent);
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: 0.13s ease;
+}
+.g-mbtn:last-child { border-right: 0; }
+.g-mbtn:hover { color: var(--ink); }
+.g-mbtn.on {
+  color: color-mix(in oklab, var(--cyan) 92%, var(--ink));
+  background: color-mix(in oklab, var(--cyan) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--cyan) 28%, transparent);
+}
+.ggraph.force .g-edge { stroke-opacity: 0.1; }
+
+/* the projects tile: what the engine can serve, and a way to wire in a path */
+.pj-list{ display:flex; flex-direction:column; gap:4px; margin:6px 0; }
+.pj-row{ display:flex; align-items:center; gap:8px; padding:4px 6px; border:1px solid var(--line);
+  border-radius:4px; overflow:hidden; }
+.pj-row.is-active{ border-color:var(--cyan); }
+/* THE TEXT GIVES WAY, THE BUTTONS DO NOT. Measured at the shipped 320 px tile before this rule: a row
+   352 px wide held 422 px of content, the PATH was squeezed to 0 px (so the directory — the one thing
+   this pane exists to show — was invisible) and both buttons sat outside the row (371 → 435). The name
+   is a charter's title, which is LaTeX and can be long, and `flex: 0 0 auto` on it took the whole row;
+   `min-width: 0` is what lets either text item shrink below its content, which is the same trap the
+   pane head's action group had. */
+.pj-row b{ flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-row button{ flex: 0 0 auto; }
+.pj-path{ flex:1 1 auto; min-width: 0; color:var(--muted); font-family:var(--mono,monospace); font-size:11px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

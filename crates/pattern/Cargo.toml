@@ -1,0 +1,9 @@
+[package]
+name = "qubitick-pattern"
+description = "Structural pattern-matching primitives shared by rewrite and autocite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }

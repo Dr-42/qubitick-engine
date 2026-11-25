@@ -1,0 +1,17 @@
+[package]
+name = "qubitick-build"
+description = "Orchestrates the build: parse, write, hash, index, emit, lean check/build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+qubitick-parse = { workspace = true }
+qubitick-emit = { workspace = true }
+qubitick-ctx = { workspace = true }
+qubitick-rewrite = { workspace = true }
+qubitick-pattern = { workspace = true }
+rusqlite = { workspace = true }
+anyhow = { workspace = true }

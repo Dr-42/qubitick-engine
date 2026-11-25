@@ -1,0 +1,26 @@
+{
+  "_comment": "The theme index. A theme is one JSON file under js/defaults/themes/ plus one entry here; the loader reads this list and lazily pulls the files it names, so a 40-theme install costs nothing until a theme is used. `default` is the theme the workspace ships with, and the only one that is never treated as a user choice.",
+  "default": "midnight",
+  "themes": [
+    { "id": "midnight", "path": "midnight.json" },
+    { "id": "aurora", "path": "aurora.json" },
+    { "id": "verse", "path": "verse.json" },
+    { "id": "slate", "path": "slate.json" },
+    { "id": "deepsea", "path": "deepsea.json" },
+    { "id": "nord", "path": "nord.json" },
+    { "id": "tokyogloom", "path": "tokyogloom.json" },
+    { "id": "obsidian", "path": "obsidian.json" },
+    { "id": "aquagambit", "path": "aquagambit.json" },
+    { "id": "nightowl", "path": "nightowl.json" },
+    { "id": "paper", "path": "paper.json" },
+    { "id": "dawn", "path": "dawn.json" },
+    { "id": "breeze", "path": "breeze.json" },
+    { "id": "solarizedlight", "path": "solarizedlight.json" },
+    { "id": "candy", "path": "candy.json" },
+    { "id": "cream", "path": "cream.json" },
+    { "id": "minimal", "path": "minimal.json" },
+    { "id": "azurewhite", "path": "azurewhite.json" },
+    { "id": "peach", "path": "peach.json" },
+    { "id": "grass", "path": "grass.json" }
+  ]
+}

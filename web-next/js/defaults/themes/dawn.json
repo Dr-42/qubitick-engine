@@ -1,0 +1,48 @@
+{
+  "id": "dawn",
+  "name": "Dawn",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#f6f8fb",
+    "panel": "#ffffff",
+    "panel2": "#edf1f7",
+    "inset": "#e9eef5",
+    "line": "#d8e0ec",
+    "ink": "#202a3c",
+    "muted": "#5f7189",
+    "dim": "#90a0b6",
+    "cyan": "#0e7490",
+    "green": "#15803d",
+    "amber": "#b45309",
+    "violet": "#6d28d9"
+  },
+  "syntax": {
+    "comment": "#90a0b6",
+    "string": "#15803d",
+    "keyword": "#6d28d9",
+    "number": "#b45309",
+    "operator": "#0e7490",
+    "type": "#6d28d9",
+    "func": "#0e7490",
+    "variable": "#202a3c",
+    "meta": "#5f7189",
+    "atom": "#b45309",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

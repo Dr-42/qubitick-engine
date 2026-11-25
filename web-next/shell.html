@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Qubitick — Workshop</title>
+<!--
+  The shell. This file is meant to stay this small: the workspace is a module tree
+  (web-next/js), and this is the page that hands it a #root and gets out of the way.
+
+  What lives where:
+    js/main.js            boots the shell: bus, frame governor, layout store, pane
+                          registry, wire, endpoints, camera, panes, debug surface
+    js/panes/*.js         one module per pane kind — the thing "edit source" shows
+    js/layout/*.js        the workspace as data: schema, store, split tree, renderer
+    js/engine/*.js        camera, drag, sashes, tabs, LOD, HUD — the canvas skeleton
+    js/defaults/*.js      endpoints and presets: the only place route strings live
+
+  Any pane behaviour added here rather than in a module is a pane nobody can open
+  and read, which is the thing this shape exists to avoid.
+-->
+<link rel="stylesheet" href="/css/base.css" />
+<link rel="stylesheet" href="/css/themes.css" />
+<link rel="stylesheet" href="/css/chrome.css" />
+<link rel="stylesheet" href="/css/world.css" />
+<link rel="stylesheet" href="/css/panes.css" />
+<link rel="stylesheet" href="/css/field.css" />
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{
+  "id": "cream",
+  "name": "Cream",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#fbf7ef",
+    "panel": "#fffdf8",
+    "panel2": "#f4eddd",
+    "inset": "#efe8d6",
+    "line": "#e0d5bc",
+    "ink": "#3d3a34",
+    "muted": "#7a7264",
+    "dim": "#a89f8d",
+    "cyan": "#0f766e",
+    "green": "#3f6212",
+    "amber": "#a16207",
+    "violet": "#6d28d9"
+  },
+  "syntax": {
+    "comment": "#a89f8d",
+    "string": "#3f6212",
+    "keyword": "#6d28d9",
+    "number": "#a16207",
+    "operator": "#0f766e",
+    "type": "#6d28d9",
+    "func": "#0f766e",
+    "variable": "#3d3a34",
+    "meta": "#7a7264",
+    "atom": "#a16207",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

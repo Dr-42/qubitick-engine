@@ -1,0 +1,48 @@
+{
+  "id": "solarizedlight",
+  "name": "Solarized Light",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#fdf6e3",
+    "panel": "#fefbf0",
+    "panel2": "#f2eacb",
+    "inset": "#f6f0d8",
+    "line": "#d9cfb8",
+    "ink": "#586e75",
+    "muted": "#6d8a90",
+    "dim": "#93a1a1",
+    "cyan": "#268bd2",
+    "green": "#859900",
+    "amber": "#b58900",
+    "violet": "#6c71c4"
+  },
+  "syntax": {
+    "comment": "#93a1a1",
+    "string": "#859900",
+    "keyword": "#6c71c4",
+    "number": "#b58900",
+    "operator": "#268bd2",
+    "type": "#6c71c4",
+    "func": "#268bd2",
+    "variable": "#586e75",
+    "meta": "#6d8a90",
+    "atom": "#b58900",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

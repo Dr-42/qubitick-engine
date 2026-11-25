@@ -1,0 +1,48 @@
+{
+  "id": "deepsea",
+  "name": "Deep Sea",
+  "mode": "dark",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#04131c",
+    "panel": "#0a222f",
+    "panel2": "#0f3142",
+    "inset": "#061a24",
+    "line": "#16475c",
+    "ink": "#e6f7ff",
+    "muted": "#7fb8cf",
+    "dim": "#4e7d90",
+    "cyan": "#00e5ff",
+    "green": "#2dd4bf",
+    "amber": "#ffd166",
+    "violet": "#818cf8"
+  },
+  "syntax": {
+    "comment": "#637777",
+    "string": "#ecc48d",
+    "keyword": "#c792ea",
+    "number": "#f78c6c",
+    "operator": "#7fdbca",
+    "type": "#ffcb8b",
+    "func": "#82aaff",
+    "variable": "#d6deeb",
+    "meta": "#addb67",
+    "atom": "#f78c6c",
+    "invalid": "#ef5350"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

@@ -1,0 +1,36 @@
+{
+  "_comment": "Wordmark modules. `tex` is the typeset form (kept so the mark has an authority to point at); `plain` is what the app draws — the same expression without LaTeX commands, because the field's wordmark is composed from glyphs rather than typeset, so it costs no library and no reflow. Themes opt in by naming a wordmark in their `brand` field: a theme without one is quiet, not broken.",
+  "default": "qubitick",
+  "marks": {
+    "qubitick": {
+      "name": "QuBit·Tick",
+      "tex": "\\left\\langle\\,\\mathrm{qu}\\bigl(b(\\mathrm{i}(t\\mid t)\\mathrm{ick})\\bigr)\\,\\right\\rangle",
+      "word": "qubitick",
+      "left": "\\left\\langle\\,\\mathrm{qu}",
+      "right": "\\mathrm{ick})\\bigr)\\,\\right\\rangle",
+      "note": "The product, written the way the product is written: a qubit that ticks. Nested application, one level per surface — container, module, input, state.",
+      "plain": "⟨qu(b(i(t|t)ick))⟩",
+      "short": "⟨qu⟩"
+    },
+    "plain": {
+      "name": "QuBit·Tick (plain)",
+      "tex": "\\mathrm{QuBit\\cdot Tick}",
+      "word": "qubitick",
+      "left": "\\mathrm{QuBit}",
+      "right": "\\mathrm{Tick}",
+      "note": "For surfaces too small to read the nested form.",
+      "plain": "QuBit·Tick",
+      "short": "QuBit·Tick"
+    },
+    "none": {
+      "name": "No mark",
+      "tex": "",
+      "word": "qubitick",
+      "left": "",
+      "right": "",
+      "note": "A theme with no wordmark.",
+      "plain": "",
+      "short": ""
+    }
+  }
+}

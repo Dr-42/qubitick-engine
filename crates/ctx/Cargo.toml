@@ -1,0 +1,11 @@
+[package]
+name = "qubitick-ctx"
+description = "Symbol context: scope-aware lookup, D-block IR access, event-type resolution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qubitick-model = { workspace = true }
+qubitick-db = { workspace = true }
+anyhow = { workspace = true }

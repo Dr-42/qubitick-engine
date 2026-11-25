@@ -1,0 +1,325 @@
+{
+  "version": 1,
+  "id": "power-desktop",
+  "mode": "power",
+  "screen": "desktop",
+  "wiring": "power",
+  "camera": {
+    "x": 0,
+    "y": 0,
+    "z": 1,
+    "lock": "free"
+  },
+  "panes": {
+    "nodes1": {
+      "kind": "nodes"
+    },
+    "tree1": {
+      "kind": "tree"
+    },
+    "goal1": {
+      "kind": "goal"
+    },
+    "lean1": {
+      "kind": "lean"
+    },
+    "ir1": {
+      "kind": "ir"
+    },
+    "ed1": {
+      "kind": "editor"
+    },
+    "ed2": {
+      "kind": "editor"
+    },
+    "render1": {
+      "kind": "render"
+    },
+    "output1": {
+      "kind": "output"
+    },
+    "diag1": {
+      "kind": "diag"
+    },
+    "stats1": {
+      "kind": "stats"
+    },
+    "ribbon": {
+      "kind": "controls"
+    },
+    "logo": {
+      "kind": "logo"
+    },
+    "controls": {
+      "kind": "controls"
+    },
+    "graph": {
+      "kind": "graph"
+    },
+    "slate": {
+      "kind": "slate"
+    },
+    "symbol-add": {
+      "kind": "symbol-add"
+    },
+    "settings-theme": {
+      "kind": "settings-theme"
+    },
+    "settings-typography": {
+      "kind": "settings-typography"
+    },
+    "settings-layout": {
+      "kind": "settings-layout"
+    },
+    "handwrite": {
+      "kind": "handwrite"
+    },
+    "new-node": {
+      "kind": "new-node"
+    },
+    "ir1b": {
+      "kind": "ir"
+    },
+    "render1b": {
+      "kind": "render"
+    }
+  },
+  "roots": [
+    {
+      "id": "main",
+      "x": 0,
+      "y": 0,
+      "w": 1400,
+      "h": 820,
+      "tree": {
+        "split": "h",
+        "sizes": [
+          0.17,
+          0.58,
+          0.25
+        ],
+        "children": [
+          {
+            "tabs": [
+              {
+                "pane": "nodes1"
+              },
+              {
+                "pane": "tree1"
+              }
+            ],
+            "active": 0
+          },
+          {
+            "split": "v",
+            "sizes": [
+              0.3,
+              0.7
+            ],
+            "children": [
+              {
+                "tabs": [
+                  {
+                    "pane": "goal1"
+                  },
+                  {
+                    "pane": "lean1"
+                  },
+                  {
+                    "pane": "ir1"
+                  }
+                ],
+                "active": 0
+              },
+              {
+                "tabs": [
+                  {
+                    "pane": "ed1"
+                  },
+                  {
+                    "pane": "render1"
+                  }
+                ],
+                "active": 0
+              }
+            ]
+          },
+          {
+            "tabs": [
+              {
+                "pane": "output1"
+              },
+              {
+                "pane": "diag1"
+              }
+            ],
+            "active": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "ed2root",
+      "x": 700,
+      "y": 400,
+      "w": 600,
+      "h": 400,
+      "tree": {
+        "pane": "ed2"
+      }
+    },
+    {
+      "id": "irroot",
+      "x": 200,
+      "y": 200,
+      "w": 500,
+      "h": 300,
+      "tree": {
+        "pane": "ir1b"
+      }
+    },
+    {
+      "id": "renderroot",
+      "x": 800,
+      "y": 200,
+      "w": 500,
+      "h": 300,
+      "tree": {
+        "pane": "render1b"
+      }
+    }
+  ],
+  "anchors": [
+    {
+      "root": "irroot",
+      "to": "main",
+      "edge": "left",
+      "toEdge": "right",
+      "dx": 20,
+      "dy": 20
+    },
+    {
+      "root": "renderroot",
+      "to": "main",
+      "edge": "right",
+      "toEdge": "left",
+      "dx": -20,
+      "dy": 20
+    }
+  ],
+  "hud": [
+    {
+      "id": "ribbon",
+      "dock": "top",
+      "size": 72,
+      "tree": {
+        "split": "h",
+        "sizes": [
+          0.8,
+          0.2
+        ],
+        "children": [
+          {
+            "pane": "ribbon"
+          },
+          {
+            "pane": "logo"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stats",
+      "dock": "right",
+      "size": 200,
+      "tree": {
+        "pane": "stats1"
+      }
+    }
+  ],
+  "modals": [
+    {
+      "id": "graph",
+      "open": [
+        "ui:graph"
+      ],
+      "close": [
+        "close:graph"
+      ],
+      "tree": {
+        "pane": "graph"
+      }
+    },
+    {
+      "id": "slate",
+      "open": [
+        "ui:slate"
+      ],
+      "close": [
+        "close:slate"
+      ],
+      "tree": {
+        "pane": "slate"
+      }
+    },
+    {
+      "id": "symbol",
+      "open": [
+        "ui:symbol"
+      ],
+      "close": [
+        "close:symbol"
+      ],
+      "tree": {
+        "pane": "symbol-add"
+      }
+    },
+    {
+      "id": "settings",
+      "open": [
+        "ui:settings"
+      ],
+      "close": [
+        "close:settings"
+      ],
+      "tree": {
+        "tabs": [
+          {
+            "pane": "settings-theme"
+          },
+          {
+            "pane": "settings-typography"
+          },
+          {
+            "pane": "settings-layout"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "id": "handwrite",
+      "open": [
+        "ui:handwrite"
+      ],
+      "close": [
+        "close:handwrite"
+      ],
+      "tree": {
+        "pane": "handwrite"
+      }
+    },
+    {
+      "id": "newnode",
+      "open": [
+        "ui:new-node"
+      ],
+      "close": [
+        "close:newnode"
+      ],
+      "tree": {
+        "pane": "new-node"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "id": "peach",
+  "name": "Peach",
+  "mode": "light",
+  "note": "",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#fef6f3",
+    "panel": "#fffdfb",
+    "panel2": "#f8e9e2",
+    "inset": "#f4e2d9",
+    "line": "#ead4c8",
+    "ink": "#3c2621",
+    "muted": "#7d5c51",
+    "dim": "#a98d82",
+    "cyan": "#b45309",
+    "green": "#3f6212",
+    "amber": "#c2410c",
+    "violet": "#7e22ce"
+  },
+  "syntax": {
+    "comment": "#a98d82",
+    "string": "#3f6212",
+    "keyword": "#7e22ce",
+    "number": "#c2410c",
+    "operator": "#b45309",
+    "type": "#7e22ce",
+    "func": "#b45309",
+    "variable": "#3c2621",
+    "meta": "#7d5c51",
+    "atom": "#c2410c",
+    "invalid": "#ff5f6d"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.1,
+    "majorAlpha": 0.15,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.2,
+    "hatch": 0.04,
+    "border": 0.16,
+    "label": 0.24,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": null
+}

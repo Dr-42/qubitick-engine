@@ -1,0 +1,48 @@
+{
+  "id": "midnight",
+  "name": "Midnight",
+  "mode": "dark",
+  "note": "The theme the app ships with: cold, deep, and the least ink on the field.",
+  "source": "qubitick",
+  "vars": {
+    "bg": "#060b14",
+    "panel": "#0c1525",
+    "panel2": "#111e33",
+    "inset": "#0a1120",
+    "line": "#1c2c47",
+    "ink": "#f1f5f9",
+    "muted": "#7a8c9e",
+    "dim": "#5d6b7e",
+    "cyan": "#38bdf8",
+    "green": "#34d399",
+    "amber": "#fbbf24",
+    "violet": "#c4a7ff"
+  },
+  "syntax": {
+    "comment": "#5c6370",
+    "string": "#98c379",
+    "keyword": "#c678dd",
+    "number": "#d19a66",
+    "operator": "#56b6c2",
+    "type": "#e5c07b",
+    "func": "#61afef",
+    "variable": "#abb2bf",
+    "meta": "#e06c75",
+    "atom": "#d19a66",
+    "invalid": "#e06c75"
+  },
+  "blueprint": {
+    "preset": "plate",
+    "minor": 16,
+    "minorAlpha": 0.07,
+    "majorAlpha": 0.11,
+    "tickAlpha": 0.2,
+    "dotAlpha": 0.16,
+    "hatch": 0.035,
+    "border": 0.12,
+    "label": 0.2,
+    "accent": "cyan",
+    "ink": "ink"
+  },
+  "brand": "qubitick"
+}

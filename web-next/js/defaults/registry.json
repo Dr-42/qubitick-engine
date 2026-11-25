@@ -1,0 +1,70 @@
+{
+  "_comment": "Registry data. Anything the UI used to spell out inline as an array or a literal range lives here: what order tiles appear in a picker, which levels of detail exist, which tab widths an editor offers. The renderers keep the behaviour; this file keeps the vocabulary, so adding a kind or a tab width is a data edit rather than a hunt through the app.",
+  "kinds": {
+    "order": [
+      "tree",
+      "graph",
+      "stats",
+      "symbols",
+      "editor",
+      "goal",
+      "output",
+      "render",
+      "ir",
+      "lean",
+      "js-node",
+      "constant",
+      "palette",
+      "theme-editor",
+      "projects",
+      "clock",
+      "track",
+      "handwrite",
+      "project",
+      "corpus"
+    ],
+    "default": "editor",
+    "console": [
+      "core",
+      "view",
+      "prefs"
+    ]
+  },
+  "lod": {
+    "order": [
+      "live",
+      "frozen",
+      "card",
+      "culled"
+    ],
+    "note": "live draws, frozen keeps its last frame, card shows a summary, culled is not built until seen."
+  },
+  "editor": {
+    "tabSizes": [
+      2,
+      4,
+      8
+    ],
+    "fontRange": {
+      "min": 11,
+      "max": 20,
+      "step": 1
+    },
+    "lineHeightRange": {
+      "min": 1.2,
+      "max": 2,
+      "step": 0.05
+    }
+  },
+  "selection": {
+    "note": "the item taxonomy the selection pane counts, in reading order"
+  },
+  "atoms": {
+    "order": [
+      "axiom",
+      "definition",
+      "theorem",
+      "calibration"
+    ]
+  }
+}
