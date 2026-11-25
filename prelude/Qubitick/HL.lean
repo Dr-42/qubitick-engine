@@ -1,41 +1,81 @@
 prelude
-import Qubitick.Core
 
 -- ═══════════════════════════════════════════════════════════════════
--- Qubitick.HL — the high-level surface ground (directive #29).
+-- Qubitick.HL — THE GROUND: the one file a project's Lean needs before
+-- anything the engine emits can compile.
 --
--- "The Core should depend on AND, XOR, the nullity equality and tick as
---  the → mechanism. That is it. No and or, etc etc. Rest all is HL surface."
+-- It is `prelude` and nothing else: no Init, no Std, no Mathlib. The root
+-- namespace a bare prelude starts with is empty, which is what lets these
+-- declarations take the ROOT names the emitter references (`Eq`, `rfl`,
+-- `Not`, `And`, `Exists`, `lcErased`, `lcAny`, ...). Import a library that
+-- already owns those names instead and every declaration below collides.
 --
--- This file is the Lean-side PLUMBING of the HL layer: the Prop toolkit
--- (False/True/Not/And/Or/Exists/Iff) at ROOT names — the bare-prelude root
--- is empty, so these names are free, and artifacts reference them bare
--- (Not (Eq …), Exists (fun p : Vtx => …), Px motives over False/True).
--- Moved VERBATIM out of the pre-reduction Core.lean: same inductives and
--- structures, same root-marker discipline (lcErased/lcAny arrive via
--- import Qubitick.Core), zero safe axioms.
+-- What it satisfies is the emitter's contract, stated once in
+-- crates/build/src/prelude_contract.rs::REQUIRED — 16 names in three tiers:
 --
--- Layering doctrine (dir#29 + canon symbol table):
---   Core  = Eq machinery only (nullity equality; kernel-native; cite
---           license) — the four mechanisms ∩ Δ ∅ τ are corpus A1 content.
---   HL    = everything else. Two kinds:
---     (a) THIS file — Prop-level toolkit plumbing (Lean connective shapes
---         that statements need: ¬∃τ⁻¹, ∃-registration, Iff in the union
---         form). Recursors (False.rec, Or.rec, Exists.intro) stay available
---         to the emitter's discrimination/registration machinery.
---     (b) CORPUS defs — the event-level connectives on 𝔈, DB-driven and
---         audited: ¬ a = 𝟙 Δ a (D.BT.1), a ∧ b = a ∩ b (D.BT.2),
---         a ∨ b = 𝟙 Δ ((𝟙 Δ a) ∩ (𝟙 Δ b)) (D.BT.3), X ⟹ Y = 𝟙 Δ (X ∩ (𝟙 Δ Y))
---         (D.BT.4), a ⟺ b = 𝟙 Δ (a Δ b) (D.BT.5 — "equivalence is the
---         nullity of the difference"). Canon declares ¬ ∧ ⟹ ⟺ at A3.
+--   kernel   Eq, Eq.refl, Eq.symm, Eq.trans
+--   logic    False, True, Not, And, Or, Exists, Iff, Bool, Decidable, DecidableEq
+--   codegen  lcErased, lcAny
 --
--- Name-collision law: root names here must never clash with corpus root
--- names (neg/andm/orm/impl/iffm/iffp/subset/mem/Px/Tick-namespace/…).
--- Audit: build_audit_manifest scans this file like any emitted module —
--- its 12 decls (7 Prop toolkit + 5 P3) carry the same #print-axioms
--- footprint gate as the corpus.
+-- ZERO SAFE AXIOMS: no propext, no funext, no Classical.choice, no
+-- Quot.sound. Only `unsafe axiom` codegen markers, at ROOT, exactly as
+-- Init/Prelude.lean declares them. `qubitick print-axioms` reports the
+-- footprint per theorem; this ground's is empty.
+--
+-- NO CORPUS VOCABULARY. Nothing here is a mathematical operator: no `\Delta`,
+-- no `\cap`, no `\varnothing`, no `\times`. A project declares the glyphs its
+-- rows use, or imports a library that has them. This file carries only what
+-- Lean needs to read `Eq` and the connectives.
+--
+-- ONE FILE, DELIBERATELY. A project's own ground replaces `Qubitick/HL.lean`
+-- when the engine assembles a ground for checking (crates/build/src/ground.rs
+-- ::assemble), so a single file makes that replacement exact — with two, a
+-- project shipping only `HL.lean` would silently keep the engine's other half.
+--
+-- A project that wants Init or Mathlib does not extend this file: it imports
+-- the library and declares none of the names below, because those names are
+-- already there (measured: `prelude` + `import Init` satisfies the contract
+-- with nothing declared).
 -- ═══════════════════════════════════════════════════════════════════
 
+-- ── the codegen tier: the two `unsafe axiom` markers, at ROOT ───────
+-- Codegen markers at ROOT, exactly as Init/Prelude.lean declares them
+-- (parameterized inductives + structures + classes resolve them at root;
+--  namespaced placement fails — probed 2026-11-03). `unsafe axiom : Type`
+--  only: audit policy (directive #22) permits exactly this shape.
+/-- Marker for information that has been erased by the code generator. -/
+unsafe axiom lcErased : Type
+/-- Marker for type dependency that has been erased by the code generator. -/
+unsafe axiom lcAny : Type
+
+-- ─── root Eq: kernel-recognized equality — the nullity-equality machinery
+--     (∅-anchoring lands as A1 corpus rows; the cite license is Eq.refl) ───
+inductive Eq {α : Sort u} : α → α → Prop
+  | refl (a : α) : Eq a a
+
+theorem rfl {α : Sort u} {a : α} : Eq a a := Eq.refl a
+
+theorem Eq.symm {α : Sort u} {a b : α} (h : Eq a b) : Eq b a :=
+  Eq.rec (motive := fun x _ => Eq x a) (Eq.refl a) h
+
+theorem Eq.trans {α : Sort u} {a b c : α} (h₁ : Eq a b) (h₂ : Eq b c) : Eq a c :=
+  Eq.rec (motive := fun x _ => Eq a x) h₁ h₂
+
+theorem Eq.subst {α : Sort u} {motive : α → Prop} {a b : α} (h₁ : Eq a b) (h₂ : motive a) : motive b :=
+  Eq.rec (motive := fun x _ => motive x) h₂ h₁
+
+theorem congrArg {α : Sort u} {β : Sort v} {a₁ a₂ : α} (f : α → β) (h : Eq a₁ a₂) : Eq (f a₁) (f a₂) :=
+  Eq.rec (motive := fun x _ => Eq (f a₁) (f x)) (Eq.refl (f a₁)) h
+
+theorem congr {α : Sort u} {β : Sort v} {f₁ f₂ : α → β} {a₁ a₂ : α} (h₁ : Eq f₁ f₂) (h₂ : Eq a₁ a₂) : Eq (f₁ a₁) (f₂ a₂) :=
+  @Eq.trans _ _ _ _
+    (@congrArg (α → β) β f₁ f₂ (fun f => f a₁) h₁)
+    (@congrArg α β a₁ a₂ f₂ h₂)
+
+-- ── the logic tier: the Prop toolkit the emitter names ──────────────
+-- Lean connective SHAPES that statements need; the event-level connectives a
+-- corpus defines (`¬`, `∧`, `∨`, `⟹`, `⟺` as cited definitions) are the
+-- corpus's own business, not this file's.
 inductive False : Prop
 inductive True : Prop
   | intro : True

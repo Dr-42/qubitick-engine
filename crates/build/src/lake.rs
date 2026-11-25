@@ -154,10 +154,7 @@ pub fn write_package(
     // prerequisite for imports-as-dependency-graph, and it is the next step; until
     // then this package is a faster way to check the same thing, not a different
     // way to check it.
-    std::fs::write(
-        src.join("Qubitick.lean"),
-        "prelude\nimport Qubitick.Core\nimport Qubitick.HL\n",
-    )?;
+    std::fs::write(src.join("Qubitick.lean"), "prelude\nimport Qubitick.HL\n")?;
     // The glob `Qubitick.Corpus.*` names a prefix, and Lake insists the prefix
     // module itself exist; an empty one is enough.
     std::fs::write(src.join("Qubitick").join("Corpus.lean"), "prelude\n")?;
@@ -564,11 +561,8 @@ fn write_meshed(
         written.push((module.clone(), format!("{scope_id}: {} files", members.len())));
     }
 
-    // ── the library: Core and HL, then each era module as its own target ─────
-    write_if_changed(
-        &src.join("Qubitick.lean"),
-        "prelude\nimport Qubitick.Core\nimport Qubitick.HL\n",
-    )?;
+    // ── the library: the ground, then each era module as its own target ──────
+    write_if_changed(&src.join("Qubitick.lean"), "prelude\nimport Qubitick.HL\n")?;
     // the prefix the era modules live under
     write_if_changed(&src.join("Qubitick").join("Corpus.lean"), "prelude\n")?;
     let mut lakefile = String::from("name = \"corpus\"\nversion = \"0.1.0\"\nsrcDir = \"src\"\n");

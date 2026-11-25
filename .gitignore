@@ -54,3 +54,6 @@ project/.lake/
 
 # runtime: per-corpus web UI settings written by /api/settings
 web-settings.json
+
+# the compiled charter a build writes beside Canon.qbit (the templates are source, canon.bit is output)
+canon.bit

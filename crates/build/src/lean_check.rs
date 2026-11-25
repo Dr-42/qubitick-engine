@@ -209,11 +209,11 @@ fn ground_cache() -> Option<PathBuf> {
         .clone()
 }
 
-/// Compile the `prelude/Qubitick/{Core,HL}.olean` files if they are missing, so
-/// an emitted module's `import Qubitick.HL` resolves without a manual build step.
+/// Compile `prelude/Qubitick/HL.olean` if it is missing, so an emitted module's
+/// `import Qubitick.HL` resolves without a manual build step.
 pub fn ensure_prelude(prelude: &std::path::Path) -> Result<()> {
     // Absolute, because the compiler is run IN this directory: a relative ground
-    // would have its own path applied twice (`<rel>/<rel>/Qubitick/Core.olean`) and
+    // would have its own path applied twice (`<rel>/<rel>/Qubitick/HL.olean`) and
     // the write would fail for a directory that does not exist.
     let prelude = prelude.canonicalize().unwrap_or_else(|_| prelude.to_path_buf());
     let prelude = prelude.as_path();
@@ -243,9 +243,6 @@ pub fn ensure_prelude(prelude: &std::path::Path) -> Result<()> {
             )
         }
     };
-    if !q.join("Core.olean").is_file() {
-        run("Core.lean", "Core.olean")?;
-    }
     if !q.join("HL.olean").is_file() {
         run("HL.lean", "HL.olean")?;
     }

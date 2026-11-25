@@ -1,0 +1,6 @@
+P. Algebra — the starter corpus
+Id: algebra
+Kind: project
+Module: Qubitick.HL
+Note: The engine's tutorial ship. Its vocabulary is its own: +, × and R are
+Note: declared here, not by the engine.

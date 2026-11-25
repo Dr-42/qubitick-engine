@@ -628,6 +628,44 @@ fn remark_arg_sorts(
     }
 }
 
+/// Is this RENDERED Lean type the plain `Prop` carrier — `Prop`, or a function whose arguments and
+/// result are all `Prop`?
+///
+/// A characterising axiom (`{op}_def : ∀ params, Eq (op params) body`) binds its parameters at
+/// `Prop`, so it may only be emitted when everything its equation names is Prop-SORTED — no `tau`,
+/// no `mathbb_Z`, no `mathfrak_E`. This is a string test for exactly that question, not a type
+/// checker: `Prop`, `(Prop → Prop)` and `(Prop) → (Prop) → Prop` all pass it, and a sort in any
+/// position fails it.
+/// The test is a string test because these types are strings, and it must not care HOW the renderer
+/// parenthesised them: `Prop → Prop → Prop`, `(Prop) → (Prop) → Prop` and `(Prop → Prop)` are the
+/// same type three ways. Reading only the first spelling silently dropped every `_def` line for a
+/// module whose frame rendered the second — the theorem then cited `otimes_def` and nothing declared
+/// it, and the tutorial ship failed with `Unknown identifier otimes_def`.
+fn prop_only_type(ty: &str) -> bool {
+    /// One balanced pair of parens around the WHOLE string comes off; a pair around part of it stays.
+    fn unparen(s: &str) -> &str {
+        let t = s.trim();
+        let Some(inner) = t.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else {
+            return t;
+        };
+        let mut depth = 0i32;
+        for (i, c) in t.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 && i + c.len_utf8() != t.len() {
+                        return t; // the first pair closed before the end: not wrapping
+                    }
+                }
+                _ => {}
+            }
+        }
+        unparen(inner)
+    }
+    unparen(ty).split('→').all(|part| unparen(part) == "Prop")
+}
+
 /// What a symbol frame produced, for the module body that follows it.
 pub(crate) struct Frame {
     /// The declarations themselves.
@@ -1533,12 +1571,7 @@ fn symbol_declarations(
             // Lean type is built purely of `Prop` (so `Eq (op …) …` is well-typed).
             let prop_ok: std::collections::HashSet<String> = declared_types
                 .iter()
-                .filter(|(_, ty)| {
-                    ty.split('→').all(|part| {
-                        let p = part.trim();
-                        p == "Prop" || p == "(Prop → Prop)" || p.is_empty()
-                    })
-                })
+                .filter(|(_, ty)| prop_only_type(ty))
                 .map(|(nm, _)| nm.clone())
                 .collect();
             let all_idents_prop = |t: &str| {
@@ -2892,6 +2925,43 @@ mod tests {
             statements: vec![qubitick_model::Expr::Var("a".into()); n],
             tag: qubitick_model::PhysOrMath::Math,
             falsify: None,
+        }
+    }
+
+    /* THE RENDERER'S PARENTHESES ARE NOT PART OF THE TYPE.
+     *
+     * A characterising axiom binds its parameters at `Prop`, so it may only be emitted when
+     * everything its equation names lives on that one carrier — and the test for that used to be a
+     * string equal against two spellings, `Prop` and `(Prop → Prop)`. A frame that rendered the same
+     * type as `(Prop) → (Prop) → Prop` therefore disqualified ITS OWN operators, every `_def` line
+     * was dropped, and a theorem still cited `{op}_def`: the tutorial ship failed with `Unknown
+     * identifier otimes_def` while a differently-parenthesised frame of the same corpus verified.
+     * Three spellings of one type, and two that are genuinely not `Prop`. */
+    #[test]
+    fn prop_only_type_reads_the_type_not_its_parens() {
+        for ty in [
+            "Prop",
+            "Prop → Prop",
+            "Prop → Prop → Prop",
+            "(Prop)",
+            "(Prop) → (Prop) → Prop",
+            // Prop-SORTED, which is the question this predicate answers: no tau/Z/E sort appears
+            "(Prop → Prop)",
+            "  Prop  ",
+        ] {
+            assert!(prop_only_type(ty), "{ty} is the Prop carrier");
+        }
+        for ty in [
+            "",
+            "Type",
+            "tau → Prop",
+            "mathbb_Z → Prop",
+            "Prop → tau",
+            // a function INTO Prop from a function is not flat `Prop`: the Eq would be over a
+            // higher-order value, and the `∀ (v : Prop)` binder shape would not fit it
+            "(Prop → Prop) → Prop",
+        ] {
+            assert!(!prop_only_type(ty), "{ty} is not the Prop carrier");
         }
     }
 

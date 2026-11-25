@@ -308,7 +308,7 @@ async fn autocite_answers_with_the_citations_that_bridge_two_expressions() {
 ///
 /// A theorem whose `Proof:` block says `\sorry` (or is empty, or is absent) carries no steps.
 /// The emitter writes it as an `axiom` of the node's OWN module — which is the answer to "how do
-/// we express sorry in a ground with no axioms": `Core.lean`/`HL.lean` stay axiom-free (they
+/// we express sorry in a ground with no axioms": the ground stays axiom-free (it
 /// declare no `sorryAx`, no prove-anything axiom), the assumption is local and named, and
 /// `#print axioms` points straight at it — so the file still checks against Lean.
 ///

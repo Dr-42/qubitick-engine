@@ -1343,7 +1343,7 @@ mod tests {
         // Parse the REAL corpus file rather than a hand-written snippet: it is the
         // input the parser must actually handle, and it keeps this test honest when
         // the chain grammar evolves.
-        let src = include_str!("../../../project/Era0/Strata0/Theorems/T_BT_01_DeltaComm.qbit");
+        let src = include_str!("../../../corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit");
         let nodes = parse_content(&glyph_ctx(), src).unwrap();
         assert_eq!(nodes.len(), 1);
         if let Node::Theorem(t) = &nodes[0] {
@@ -1445,7 +1445,7 @@ mod tests {
             "Era0/Strata0",
             vec![row(1, "\\mathfrak{E}"), row(2, "\\Delta"), row(3, "\\cap")],
         );
-        let src = include_str!("../../../project/Era0/Strata0/Theorems/T_BT_01_DeltaComm.qbit");
+        let src = include_str!("../../../corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit");
         let nodes = parse_content(&rich, src).unwrap();
         let Node::Theorem(t) = &nodes[0] else {
             panic!("expected theorem");

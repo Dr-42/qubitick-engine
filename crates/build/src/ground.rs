@@ -22,9 +22,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// `Qubitick/Core.lean` as shipped, compiled into the engine.
-pub const CORE_LEAN: &str = include_str!("../../../prelude/Qubitick/Core.lean");
-/// `Qubitick/HL.lean` as shipped, compiled into the engine.
+/// `Qubitick/HL.lean` as shipped — THE ground, compiled into the engine. One file carries the whole
+/// contract (crates/build/src/prelude_contract.rs::REQUIRED); a project's own ground replaces exactly
+/// this file when `assemble` lays it over the base, which is why there is one and not two.
 pub const HL_LEAN: &str = include_str!("../../../prelude/Qubitick/HL.lean");
 
 /// Assemble the package's ground into `src`: the engine's BASE, then the project's own OVER it.
@@ -121,7 +121,6 @@ fn key_of(path: &Path) -> u64 {
 fn stamp_of(corpus: &Path, canon: Option<&crate::canon::Canon>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    CORE_LEAN.hash(&mut h);
     HL_LEAN.hash(&mut h);
     std::env::var("QUBITICK_PRELUDE").ok().hash(&mut h);
     canon.map(|c| c.lean_module.clone()).hash(&mut h);
@@ -221,7 +220,6 @@ pub fn materialise(src: &Path) -> Result<Source> {
         copy_tree(&dir, src)?;
         return Ok(Source::Checkout(dir));
     }
-    std::fs::write(src.join("Qubitick").join("Core.lean"), CORE_LEAN)?;
     std::fs::write(src.join("Qubitick").join("HL.lean"), HL_LEAN)?;
     Ok(Source::Embedded)
 }
@@ -290,16 +288,10 @@ mod tests {
             .parent()
             .unwrap()
             .join("prelude/Qubitick");
-        if repo.join("Core.lean").is_file() {
-            assert_eq!(
-                CORE_LEAN,
-                std::fs::read_to_string(repo.join("Core.lean")).unwrap()
-            );
-            assert_eq!(
-                HL_LEAN,
-                std::fs::read_to_string(repo.join("HL.lean")).unwrap()
-            );
-        }
+        assert_eq!(
+            HL_LEAN,
+            std::fs::read_to_string(repo.join("HL.lean")).unwrap()
+        );
     }
 
     #[test]
@@ -309,7 +301,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let source = materialise(&dir).unwrap();
         assert!(dir.join("Qubitick").join("HL.lean").is_file(), "{source:?}");
-        assert!(dir.join("Qubitick").join("Core.lean").is_file(), "{source:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -359,9 +350,13 @@ mod tests {
             src.join("Qubitick/Frame/Shape.lean").is_file(),
             "a nested module of the ground came along"
         );
+        /* THE GROUND IS ONE FILE, so laying a project's ground over the base REPLACES it outright:
+           nothing of the base survives beside the project's own `HL.lean`. With two files a project
+           that shipped only `HL.lean` silently kept the engine's other half — the case this asserts
+           cannot happen. */
         assert!(
-            src.join("Qubitick/Core.lean").is_file(),
-            "and the base is still under it: the contract ours, everything above it theirs"
+            !src.join("Qubitick/Core.lean").exists(),
+            "one ground file: the project's HL.lean is the ground, not one half of it"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -443,7 +438,8 @@ mod tests {
                 "the base is the shipped ground when the project names none"
             ),
         }
-        assert!(src.join("Qubitick/Core.lean").is_file());
+        /* one file, and it is the shipped ground (asserted above) */
+        assert!(!src.join("Qubitick/Core.lean").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
