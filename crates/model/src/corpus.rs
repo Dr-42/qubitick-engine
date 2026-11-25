@@ -77,7 +77,10 @@ pub enum Facet {
 }
 
 impl Facet {
-    const fn bits(self) -> u32 {
+    /// The single-bit mask for this facet. Public so callers outside the crate
+    /// (e.g. `Ctx::has_facet`) can test stored facet bitmasks without depending
+    /// on the private `PUBLIC_SYMBOL_CLASSES` table.
+    pub const fn bits(self) -> u32 {
         1u32 << (self as u8)
     }
 }
@@ -171,7 +174,7 @@ pub fn is_any_class(tex: &str) -> bool {
 /// quotes `'"`, and backslash `\` — is EXCLUDED because it is GRAMMAR, not notation.
 /// Registering a bracket as a symbol would let the parser treat grouping syntax as
 /// a declarable operator, which breaks expression structure.
-pub const OPERATOR_PUNCT: &[char] = &['+', '-', '*', '/', '=', '<', '>', '!', '%', '&', '|', '~', '^', ':'];
+pub const OPERATOR_PUNCT: &[char] = &['+', '-', '*', '/', '=', '<', '>', '!', '%', '&', '|', '~', '^', ':', '×'];
 
 /// Check if a character is a valid operator punctuation.
 #[inline]

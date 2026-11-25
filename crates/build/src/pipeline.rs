@@ -325,7 +325,17 @@ pub fn emit_file_with(
                     match context.iter_mut().find(|n| {
                         matches!(n, qubitick_model::Node::Definition(e) if e.base.name == d.base.name)
                     }) {
-                        Some(slot) => *slot = node,
+                        Some(slot) => {
+                            // Transfer the division from the old definition to the new
+                            // one's symbol.primary so def_index stays correct.
+                            if let qubitick_model::Node::Definition(old_def) = slot {
+                                let old_primary = old_def.symbol.primary;
+                                if let Some(division) = def_index.remove(&old_primary) {
+                                    def_index.insert(d.symbol.primary, division);
+                                }
+                            }
+                            *slot = node;
+                        }
                         None => context.push(node),
                     }
                 }
@@ -343,7 +353,17 @@ pub fn emit_file_with(
             match context.iter_mut().find(|n| {
                 matches!(n, qubitick_model::Node::Definition(e) if e.base.name == d.base.name)
             }) {
-                Some(slot) => *slot = node,
+                Some(slot) => {
+                    // Transfer the division from the old definition to the new
+                    // one's symbol.primary so def_index stays correct.
+                    if let qubitick_model::Node::Definition(old_def) = slot {
+                        let old_primary = old_def.symbol.primary;
+                        if let Some(division) = def_index.remove(&old_primary) {
+                            def_index.insert(d.symbol.primary, division);
+                        }
+                    }
+                    *slot = node;
+                }
                 None => context.push(node),
             }
         }

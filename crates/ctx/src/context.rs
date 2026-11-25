@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use qubitick_db::queries::SymbolRow;
+use qubitick_model::corpus::Facet;
 
 /// The symbol context. Built once per corpus/scope snapshot and shared across
 /// engines as `&Ctx`.
@@ -95,6 +96,27 @@ impl Ctx {
     /// the DB — the single source of truth for how a binder operator binds.
     pub fn binder_kind_of(&self, id: i64) -> Option<&str> {
         self.by_id.get(&id).and_then(|r| r.binder_kind.as_deref())
+    }
+
+    /// Check if a symbol (by its tex) has a given facet.
+    ///
+    /// PROJECT DECLARATIONS TAKE PRECEDENCE: the corpus's stored facet bitmask is
+    /// the primary source, but it ADDS TO (not replaces) the builtin table.
+    /// This means a project declaring `+` as BinOp gets that facet, while builtin
+    /// symbols like `\varnothing` keep their Null facet from PUBLIC_SYMBOL_CLASSES
+    /// even if the corpus doesn't redeclare them. This implements D9/D13.
+    pub fn has_facet(&self, tex: &str, facet: Facet) -> bool {
+        let stored = if let Some(rows) = self.by_tex.get(tex) {
+            rows[0].facets
+        } else {
+            0
+        };
+        let builtin = if qubitick_model::corpus::is_class(tex, facet) {
+            facet.bits()
+        } else {
+            0
+        };
+        (stored | builtin) & facet.bits() != 0
     }
 }
 

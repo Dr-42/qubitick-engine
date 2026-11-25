@@ -1,6 +1,6 @@
 T.A.01. MulTwo
-\forall a b : \mathfrak{R}, (a \oplus b) \otimes a = (a \oplus b) \oplus (a \oplus b)
+\forall a b : \mathfrak{R}, (a + b) × a = (a + b) + (a + b)
 Proof:
-(a \oplus b) \otimes a
-  = (a \oplus b) \oplus (a \oplus b) [D.A.02]
+(a + b) × a
+  = (a + b) + (a + b) [D.A.02]
 Math: Expanding by the definition of multiplication.

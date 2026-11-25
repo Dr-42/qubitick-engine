@@ -5,6 +5,7 @@
 
 use qubitick_ctx::Ctx;
 use qubitick_model::{AtomicComposite, BinderKind, EQ_SYM};
+use qubitick_model::corpus::Facet;
 
 // While parsing a Definition's own `Sema:`, the connective being DEFINED
 // (`\leftrightarrow`, `\land`, `\lor`, …) must bind TIGHT — not via the global
@@ -664,7 +665,7 @@ fn is_logic_connective(ctx: &Ctx, id: u32) -> bool {
 /// level and the flat connective loop folds them left.
 fn is_relation(ctx: &Ctx, id: u32) -> bool {
     ctx.by_id(id as i64)
-        .map(|r| qubitick_model::corpus::is_class(&r.tex, qubitick_model::corpus::Facet::Relation))
+        .map(|r| ctx.has_facet(&r.tex, Facet::Relation))
         .unwrap_or(false)
 }
 
@@ -707,7 +708,7 @@ fn is_sym_pair_glyph(ctx: &Ctx, id: u32) -> bool {
     // own to derive a role from, e.g. `\ulcorner`/`\urcorner` in citations):
     // the compiled collector facet.
     ctx.by_id(id as i64)
-        .map(|r| qubitick_model::corpus::is_class(&r.tex, qubitick_model::corpus::Facet::Collector))
+        .map(|r| ctx.has_facet(&r.tex, Facet::Collector))
         .unwrap_or(false)
 }
 

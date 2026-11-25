@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use qubitick_ctx::Ctx;
-use qubitick_model::corpus::{is_class, texes_with, Facet};
+use qubitick_model::corpus::{texes_with, Facet};
 use qubitick_model::{AtomicComposite, EQ_SYM, Expr, Theorem};
 /// The idents an expression uses WITHOUT binding them.
 ///
@@ -345,7 +345,7 @@ pub fn emit_theorem(
         Some(qubitick_model::ProofStep::Chain { rows }) => rows.last().is_some_and(|r| {
             if let Expr::Sym(ac) = &r.rhs {
                 ctx.by_id(ac.primary as i64)
-                    .is_some_and(|row| is_class(&row.tex, Facet::Null))
+                    .is_some_and(|row| ctx.has_facet(&row.tex, Facet::Null))
             } else {
                 false
             }

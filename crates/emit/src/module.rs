@@ -4,7 +4,7 @@ use crate::imports::assemble_imports;
 use anyhow::Result;
 use qubitick_ctx::Ctx;
 use qubitick_lean::LeanTarget;
-use qubitick_model::corpus::{is_class, texes_with, Facet};
+use qubitick_model::corpus::{texes_with, Facet};
 use qubitick_model::{Axiom, EQ_SYM, Expr, FormBody, Node, NodeBase};
 use qubitick_rewrite::RuleTable;
 use std::collections::{HashMap, HashSet};
@@ -361,7 +361,7 @@ fn defines_its_glyph(ctx: &Ctx, d: &qubitick_model::Definition) -> bool {
 fn is_operand_postulate(ctx: &Ctx, e: &Expr) -> bool {
     qubitick_model::corpus::is_operand_postulate(e, |id| {
         ctx.by_id(id as i64)
-            .map(|r| is_class(&r.tex, Facet::BinOp))
+            .map(|r| qubitick_model::corpus::is_class(&r.tex, Facet::BinOp))
             .unwrap_or(false)
     })
 }
@@ -485,7 +485,7 @@ fn render_head_name(e: &Expr) -> String {
 pub fn render_type_expr(ctx: &Ctx, e: &Expr) -> String {
     let is_tau = |id: u32| {
         ctx.by_id(id as i64)
-            .map(|r| is_class(&r.tex, Facet::SortTau))
+            .map(|r| ctx.has_facet(&r.tex, Facet::SortTau))
             .unwrap_or(false)
     };
     match e {
@@ -499,7 +499,7 @@ pub fn render_type_expr(ctx: &Ctx, e: &Expr) -> String {
         Expr::Apply(h, args) => {
             let is_arrow = ctx
                 .by_id(h.primary as i64)
-                .map(|r| is_class(&r.tex, Facet::Arrow))
+                .map(|r| ctx.has_facet(&r.tex, Facet::Arrow))
                 .unwrap_or(false);
             if is_arrow && args.len() == 2 {
                 return format!(
@@ -723,7 +723,7 @@ fn glyph_type(
         // its τ mod says what its ARGUMENTS are, not what it returns.
         let is_relation = ctx
             .by_id(id as i64)
-            .is_some_and(|r| is_class(&r.tex, Facet::Relation));
+            .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Relation));
         s.res_tau = !is_relation;
     }
     // Result-sort inference: operators whose result feeds a tau-consuming head

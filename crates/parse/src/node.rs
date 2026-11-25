@@ -7,7 +7,7 @@ use qubitick_model::{
     ElabRule, ApplyForm, FormBody, JustRef, Node, NodeBase, NodeKind, PhysOrMath, ProofStep,
     StepRel, Strata, SymbolKind, Theorem,
 };
-use qubitick_model::corpus::is_operator_punct;
+use qubitick_model::corpus::{Facet, is_operator_punct};
 
 /// Parse `.qbit` source into a `Vec<model::Node>`.
 ///
@@ -651,7 +651,7 @@ fn definition_symbol_id(ctx: &Ctx, glyph: Option<&str>, sema: Option<&Expr>) -> 
 /// Whether the symbol `id` is the linking connective in this context.
 fn is_left_iff(ctx: &Ctx, id: u32) -> bool {
     ctx.by_id(id as i64).is_some_and(|r| {
-        qubitick_model::corpus::is_class(&r.tex, qubitick_model::corpus::Facet::LeftIff)
+        ctx.has_facet(&r.tex, Facet::LeftIff)
     })
 }
 

@@ -11,6 +11,7 @@ use qubitick_db::cache::ExprCache;
 use qubitick_db::hash::hash_symbol;
 use qubitick_db::read::{get_node_list, reconstruct_expr};
 use qubitick_model::{Axiom, Era, Node, NodeBase, NodeKind, PhysOrMath, Scope, Strata};
+use qubitick_model::corpus::Facet;
 
 use std::collections::HashMap;
 
@@ -138,7 +139,12 @@ fn is_compound_definiendum_operator(ctx: &Ctx, sema: &qubitick_model::Expr) -> b
     // one also refuses a `\land`-joined Sema (`D.BT.56`'s recursive tick operators),
     // whose head is `\land`, because `definiendum_head` cannot name a definiendum for
     // them and would answer `\land` — the operator the whole corpus is written with.
-    qubitick_model::corpus::is_class(&tex, qubitick_model::corpus::Facet::BinOp)
+    // Use the hardcoded PUBLIC_SYMBOL_CLASSES table only: this function is meant to
+    // skip definitions for BUILTIN operators (like \cap, \times) that are already in
+    // the frame. Project-declared operators (like +, ×) must NOT be skipped here,
+    // even if they have BinOp facet in the database, because they ARE the operator
+    // being defined.
+    qubitick_model::corpus::is_class(&tex, Facet::BinOp)
 }
 
 /// The head symbol of a definition's definiendum.
@@ -153,7 +159,7 @@ fn definiendum_head(ctx: &Ctx, sema: &qubitick_model::Expr) -> u32 {
     // rebuilt from the DB or parsed from its file.
     qubitick_model::corpus::definiendum_head(sema, |id| {
         ctx.by_id(id as i64).is_some_and(|r| {
-            qubitick_model::corpus::is_class(&r.tex, qubitick_model::corpus::Facet::LeftIff)
+            ctx.has_facet(&r.tex, Facet::LeftIff)
         })
     })
 }

@@ -1,5 +1,5 @@
 D.A.02. Mul
-a \otimes b
+a × b
 Sema:
-a \otimes b = a \oplus a
+a × b = a + a
 Math: Multiplication by repeated addition.

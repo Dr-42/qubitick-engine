@@ -50,7 +50,7 @@ fn compute_facets(tex: &str, _kind: &str) -> u32 {
     // Nullity / empty carrier
     if tex == r"\varnothing" { bits |= 1 << (Facet::Null as u8); }
     // Binary operator heads
-    if matches!(tex, r"\cap" | r"\cup" | r"\land" | r"\lor" | r"\cdot" | r"\subseteq" | r"\in" | r"\ne" | r"\le" | r"\times" | r"\Delta") { bits |= 1 << (Facet::BinOp as u8); }
+    if matches!(tex, r"\cap" | r"\cup" | r"\land" | r"\lor" | r"\cdot" | r"\subseteq" | r"\in" | r"\ne" | r"\le" | r"\times" | r"\Delta" | "+" | "×") { bits |= 1 << (Facet::BinOp as u8); }
     // Delta is also Nullity
     if tex == r"\Delta" { bits |= 1 << (Facet::Nullity as u8); }
     bits
@@ -1413,7 +1413,9 @@ fn lean_name(tex: &str) -> String {
     // The match on the first char gives us the base name; the tail (rest of the
     // punctuation run) is sanitized and appended. This covers `+` -> `plus`,
     // `=` -> `eq`, `**` -> `star_star`, `!=` -> `bang_eq`, etc.
-    if let Some((word, tail_start)) = match tex.chars().next() {
+    // Use char indices to handle multi-byte UTF-8 like `×`.
+    let first_char = tex.chars().next();
+    if let Some((word, tail_char_count)) = match first_char {
         Some('+') => Some(("plus", 1)),
         Some('-') => Some(("minus", 1)),
         Some('*') => Some(("star", 1)),
@@ -1427,10 +1429,12 @@ fn lean_name(tex: &str) -> String {
         Some('|') => Some(("bar", 1)),
         Some('^') => Some(("caret", 1)),
         Some('~') => Some(("tilde", 1)),
+        Some('×') => Some(("times", 1)),
         _ => None,
     } {
         // `-` followed by digits was already returned as `neg_<n>` above.
-        let tail = sanitize(&tex[tail_start..]);
+        let tail: String = tex.chars().skip(tail_char_count).collect();
+        let tail = sanitize(&tail);
         return if tail.is_empty() {
             word.to_string()
         } else {

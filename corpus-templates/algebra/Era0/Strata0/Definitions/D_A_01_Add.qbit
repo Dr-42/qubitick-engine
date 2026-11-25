@@ -1,4 +1,4 @@
 D.A.01. Add
-a \oplus b
+a + b
 Type: \mathfrak{R} \to \mathfrak{R} \to \mathfrak{R}
 Math: Addition on the carrier. A primitive: the engine is told its signature.

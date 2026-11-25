@@ -210,12 +210,27 @@ pub fn lex(src: &str, ctx: &Ctx) -> Result<Vec<Token>, LexError> {
             }
             continue;
         }
-        // Non-ASCII → error (allowed only inside comments, already skipped), but
-        // say WHICH glyph and which control word it should have been: the usual
-        // case is a query written in Unicode against a corpus written in LaTeX.
+        // Non-ASCII that doesn't match a registered symbol → error.
+        // But first check if it matches a registered symbol (for Unicode operators like `×`).
         if !b.is_ascii() {
+            let mut best_match: Option<(usize, u32)> = None;
+            for row in ctx.symbols() {
+                let tex = &row.tex;
+                if !tex.is_empty()
+                    && src[i..].starts_with(tex)
+                    && best_match.is_none_or(|(len, _)| tex.len() > len)
+                {
+                    best_match = Some((tex.len(), row.id as u32));
+                }
+            }
+            if let Some((len, id)) = best_match {
+                tokens.push(Token::Symbol(id, Span::new(i, i + len)));
+                i += len;
+                continue;
+            }
             return Err(unexpected_at(src, i));
         }
+        // ASCII: try specific structural tokens first, then registered symbols.
         match b {
             b'(' => {
                 tokens.push(Token::LParen(Span::new(i, i + 1)));
@@ -492,7 +507,6 @@ pub fn lex(src: &str, ctx: &Ctx) -> Result<Vec<Token>, LexError> {
                     i += len;
                     continue;
                 }
-
                 return Err(unexpected_at(src, i));
             }
         }

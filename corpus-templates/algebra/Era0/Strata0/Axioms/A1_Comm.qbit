@@ -1,3 +1,3 @@
 A1. Comm
-\forall a b : \mathfrak{R}, a \oplus b = b \oplus a
+\forall a b : \mathfrak{R}, a + b = b + a
 Math: Addition commutes.
