@@ -49,13 +49,48 @@ pub struct CiteTarget {
 /// where the two would part company.
 pub fn label_of(header: &NodeHeader) -> String {
     let number = header.authored.unwrap_or(header.id) as u32;
+    /* WITH THE DIVISION TAG THE FILENAME CARRIES.
+     *
+     * A corpus numbers its nodes `D.<tag>.<nn>` (`D.A.02`, `D.BT.04`, `D.S.01`) and cites them
+     * that way — `[D.A.02]` is what the author writes and what the corpus text says. A label
+     * without the tag (`D.2`) is a different string from the citation it names, so every
+     * surface that PRINTS a label disagreed with the text it was reporting on: the row check
+     * said `one step of D.2`, the render tile said `D.A.02`, and both were describing one
+     * citation. A corpus that tags nothing (`D_00_Delta.qbit`) labels as before. */
+    let tag = division_tag(&header.filename);
+    let dotted = |kind: &str, number: u32| match &tag {
+        Some(t) => format!("{kind}.{t}.{number:02}"),
+        None => format!("{kind}.{number}"),
+    };
     match header.node_type {
         NodeKind::Axiom => format!("A{number}"),
-        NodeKind::Definition => format!("D.{number}"),
-        NodeKind::Theorem => format!("T.{number}"),
-        NodeKind::Calibration => format!("S.{number}"),
-        NodeKind::Census => format!("FT.{number}"),
+        NodeKind::Definition => dotted("D", number),
+        NodeKind::Theorem => dotted("T", number),
+        NodeKind::Calibration => dotted("S", number),
+        NodeKind::Census => dotted("FT", number),
     }
+}
+
+/// The division tag a node's filename carries: `D_A_02_Mul.qbit` -> `A`, `T_BT_01_Comm.qbit`
+/// -> `BT`, `D_00_Delta.qbit` -> none.
+///
+/// The tag is the middle field of the name the corpus walk made — `<kind>[_<tag>]_<nn>_<Name>`.
+/// It is decoration for resolution (the number is what resolves) and load-bearing for display:
+/// it is the difference between the label and the citation.
+fn division_tag(filename: &str) -> Option<String> {
+    let stem = filename.rsplit('/').next().unwrap_or(filename);
+    let stem = stem.strip_suffix(".qbit").unwrap_or(stem);
+    let mut fields = stem.split('_');
+    let kind = fields.next()?;
+    if !matches!(kind, "D" | "T" | "A" | "S" | "FT") {
+        return None;
+    }
+    let second = fields.next()?;
+    // A tag is a word; the number is digits. `D_00_Delta` has no tag.
+    if second.is_empty() || second.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(second.to_string())
 }
 
 /// The label of one statement of an axiom: `A1.4`.
@@ -110,7 +145,17 @@ fn resolve<'a>(
         if header.node_type != kind {
             continue;
         }
-        if header.authored.unwrap_or(header.id) as u32 != number {
+        /* BY THE NUMBER THE AUTHOR WROTE, AND BY NOTHING ELSE.
+         *
+         * This fell back to the ledger ordinal when a node carried no authored number
+         * (`authored.unwrap_or(header.id)`), and the fallback made a citation resolve to the
+         * WRONG node: the ship's `D.A.00. Carrier` is the 2nd node of the walk and declares
+         * no number, so `[D.A.02]` — number 2 — resolved to the carrier. The build went on to
+         * look up the carrier's division (0), found no such definition, and the row checker
+         * reported `unknown-cite` for a citation the emitter compiles perfectly.
+         *
+         * A node that declares no number declares no number: nothing addresses it. */
+        if header.authored.map(|a| a as u32) != Some(number) {
             continue;
         }
         if !crate::axioms::node_visible(scope, &header.era, header.strata) {
@@ -122,6 +167,41 @@ fn resolve<'a>(
         inherited.get_or_insert(header);
     }
     inherited
+}
+
+/// The label a citation PRINTS as: the cited node's own label, which carries the division
+/// tag the corpus numbers with (`D.A.02`), or the shape the author wrote when nothing resolves
+/// (`\equiv`, `^i`, a name no node claims).
+///
+/// A row check that printed `D.2` for a citation the corpus writes `[D.A.02]` was describing
+/// the right citation with the wrong string — and the reader has to be able to match what the
+/// report says against what the file says.
+pub fn printed_label(ctx: &Ctx, headers: &[NodeHeader], name: &qubitick_model::CiteName) -> String {
+    use qubitick_model::CiteName;
+    let (kind, number) = match name {
+        CiteName::AxiomLine { node, .. } => (NodeKind::Axiom, *node),
+        CiteName::TheoremId(n) => (NodeKind::Theorem, *n),
+        CiteName::DefId(n) => (NodeKind::Definition, *n),
+        CiteName::Local(s) => return s.clone(),
+    };
+    match resolve(headers, ctx.scope(), kind, number) {
+        Some(header) => match name {
+            CiteName::AxiomLine { line, .. } => label_of_line(header, *line),
+            _ => label_of(header),
+        },
+        None => label_of_shape(name),
+    }
+}
+
+/// The authored shape of a citation, when nothing resolves: `D.2`, `T.1`, `A1.4`.
+fn label_of_shape(name: &qubitick_model::CiteName) -> String {
+    use qubitick_model::CiteName;
+    match name {
+        CiteName::AxiomLine { node, line } => format!("A{node}.{line}"),
+        CiteName::TheoremId(n) => format!("T.{n}"),
+        CiteName::DefId(n) => format!("D.{n}"),
+        CiteName::Local(s) => s.clone(),
+    }
 }
 
 /// The equation a citation licenses — the same rule `cite_rules` hands to the autocite search,
@@ -217,10 +297,12 @@ mod tests {
             label_of_line(&header(NodeKind::Axiom, 1, "Realm", "A1_Realm.qbit"), 4),
             "A1.4"
         );
-        // a definition's number is the digits in its filename, which is what cite_rules labels it
-        // with — and what a written `D.2` extracts
-        assert_eq!(label_of(&header(NodeKind::Definition, 2, "Neg", "D_BT_02_Neg.qbit")), "D.2");
-        assert_eq!(label_of(&header(NodeKind::Theorem, 1, "DeltaComm", "T_BT_01_DeltaComm.qbit")), "T.1");
+        // A LABEL PRINTS THE DIVISION TAG THE FILENAME CARRIES, because that is what the corpus
+        // writes and cites: `D.BT.02`, not `D.2`. A corpus that tags nothing labels as before.
+        assert_eq!(label_of(&header(NodeKind::Definition, 2, "Neg", "D_BT_02_Neg.qbit")), "D.BT.02");
+        assert_eq!(label_of(&header(NodeKind::Theorem, 1, "DeltaComm", "T_BT_01_DeltaComm.qbit")), "T.BT.01");
+        assert_eq!(label_of(&header(NodeKind::Definition, 0, "Delta", "D_00_Delta.qbit")), "D.0");
+        assert_eq!(label_of(&header(NodeKind::Theorem, 1, "Self", "T_01_Self.qbit")), "T.1");
     }
 
     #[test]

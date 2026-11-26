@@ -112,9 +112,17 @@ fn check_row(
     to: &Expr,
     just: &ChainJust,
 ) -> RowCheck {
+    /* THE LABEL A CITE PRINTS AS IS THE CITED NODE'S OWN — `D.A.02`, not `D.2`.
+       The row check once rebuilt the label from the parsed name, which drops the division tag
+       the corpus numbers with, so a report described a citation with a string the file does
+       not contain. Resolution is by the number; printing is by the node. */
+    let headers = qubitick_db::read::get_node_list(conn).unwrap_or_default();
+    let printed = |name: &qubitick_model::CiteName| {
+        crate::cite_target::printed_label(ctx, &headers, name)
+    };
     let refs: Vec<String> = match just {
-        ChainJust::Rewrite { refs } => refs.iter().map(|r| cite_label(&r.name)).collect(),
-        ChainJust::Sym(reference) => vec![cite_label(&reference.name)],
+        ChainJust::Rewrite { refs } => refs.iter().map(|r| printed(&r.name)).collect(),
+        ChainJust::Sym(reference) => vec![printed(&reference.name)],
         ChainJust::Exact { .. } | ChainJust::Rfl => Vec::new(),
     };
     if refs.is_empty() {
@@ -137,7 +145,13 @@ fn check_row(
        regroups and then rewrites), and the compiler composes them into one step — so the check
        composes them too. Checking only the first and calling the row unjustified would be an
        over-claim about a row that is fine. */
-    let cite = refs[0].clone();
+    /* EVERY LAW THE ROW NAMES, not the first of them.
+       A row may cite several (`[\ulcornerA1.4 a\urcorner, A1.1]` regroups and then rewrites),
+       and the render tile prints this string beside the row — so a row that cites two laws
+       showed one. Joined with `, `, which is the shape the client's citation renderer already
+       normalises (web-next/js/app/math.js::citeTex, which splits on the comma and typesets each
+       corner-quoted name). `refs` still carries the count. */
+    let cite = refs.join(", ");
     if refs.iter().any(|c| is_local_cite(c)) {
         /* a local law among the citations (`^i`, `\equiv`) has no equation to compose with */
         return RowCheck {
@@ -204,12 +218,3 @@ fn is_local_cite(cite: &str) -> bool {
     crate::cite_target::is_local(cite)
 }
 
-/// A parsed citation's written label (`A1.4`, `T.1`, `D.2`, `\equiv`).
-fn cite_label(name: &qubitick_model::CiteName) -> String {
-    match name {
-        qubitick_model::CiteName::AxiomLine { node, line } => format!("A{node}.{line}"),
-        qubitick_model::CiteName::TheoremId(n) => format!("T.{n}"),
-        qubitick_model::CiteName::DefId(n) => format!("D.{n}"),
-        qubitick_model::CiteName::Local(s) => s.clone(),
-    }
-}
