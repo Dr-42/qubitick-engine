@@ -573,7 +573,7 @@ pub async fn post_build(
     // with `Unknown identifier Realm`, and 82 of 329 files "did not build". The
     // old endpoint could not show that: it reported `ok`, never `verified`.
     if let Err(e) = qubitick_build::ingest_corpus(&mut conn, &state.corpus()) {
-        return internal("build.ingest-failed", e.to_string());
+        return internal("build.ingest-failed", format!("{e:#}"));
     }
     let files = qubitick_build::walk_qbit(&state.corpus());
     // THE GROUND IS THE PROJECT'S, not ours: the engine's base with the charter's `LeanDir` laid
@@ -592,7 +592,7 @@ pub async fn post_build(
     // implies, so a project organised in any stratum is emitted against the symbols visible THERE
     let results = match qubitick_build::run_pipeline(&conn, &files, Some(&ground)) {
         Ok(r) => r,
-        Err(e) => return internal("build.pipeline-failed", e.to_string()),
+        Err(e) => return internal("build.pipeline-failed", format!("{e:#}")),
     };
     let warnings: Vec<Value> = results
         .iter()
