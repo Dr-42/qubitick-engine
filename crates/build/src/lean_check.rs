@@ -543,6 +543,7 @@ fn parse_lean_errors(path: &Path, output: &str) -> Vec<Diagnostic> {
                         file: Some(file.clone()),
                         line: None,
                         col: None,
+                        len: None,
                         lean_line: Some(line),
                         lean_col: Some(col),
                     }),

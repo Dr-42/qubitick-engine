@@ -139,9 +139,13 @@ fn an_undeclared_operator_fails_and_names_the_glyph() {
         "a corpus using an undeclared operator must not verify: {said:?}"
     );
     assert!(
-        said.iter()
-            .any(|m| m.contains("`\\Delta` is used as an operator, but this corpus never declares it")),
+        said.iter().any(|m| m.contains("`\\Delta`")),
         "the failure must NAME the glyph, not leak a Lean token error: {said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|m| m.contains("is not declared in Era0/Strata0") || m.contains("nothing declares it")),
+        "and say where a home would go: {said:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

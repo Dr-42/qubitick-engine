@@ -26,7 +26,7 @@ pub mod proof;
 pub mod symbol;
 pub mod tag;
 
-pub use diag::{Diagnostic, Phase, Severity, Span};
+pub use diag::{Diagnostic, Phase, Severity, SourceLookup, Span};
 pub use expr::{AtomicComposite, Binder, BinderKind, EQ_SYM, Expr, Mods, Pattern};
 pub use ids::{Era, NodeId, Scope, Strata, SymbolId, VarName};
 pub use node::{

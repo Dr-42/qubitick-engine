@@ -23,6 +23,7 @@ pub mod lean_build;
 pub mod pdf_doc;
 pub mod pipeline;
 pub mod prelude_contract;
+pub mod report;
 pub mod presets;
 pub mod project;
 

@@ -86,12 +86,19 @@ fn a_glyph_an_a_block_writes_and_no_d_node_homes_is_refused_by_name() {
         "the refusal names the stratum whose D nodes are silent: {said:?}"
     );
     assert!(
-        said.iter().any(|(_, m)| m.contains("A1_Comm.qbit")),
-        "the refusal names the A block the glyph appears in: {said:?}"
+        said.iter().any(|(_, m)| m.contains("`\\mathfrak{R}` is not declared")),
+        "the refusal names the glyph: {said:?}"
+    );
+    /* AND THE CORPUS STOPS THERE. A glyph with no home is declared by every module that
+       mentions it — now that modules import each other, that is a duplicate declaration,
+       and a cascade of Lean errors that all mean the one thing this error already says. */
+    assert!(
+        said.iter().any(|(code, _)| code == "coverage.blocked"),
+        "the rest of the corpus is not emitted, and says why: {said:?}"
     );
     assert!(
-        results.iter().any(|r| !r.path.ends_with("A1_Comm.qbit") && r.verified),
-        "a coverage hole is reported PER FILE: the rest of the corpus still builds"
+        results.iter().all(|r| !r.verified),
+        "nothing is verified while the corpus has a hole"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -153,16 +160,16 @@ fn a_line_that_resolves_to_nothing_names_the_glyphs_it_writes() {
         .map(|g| g.sentence())
         .collect();
     assert!(
-        said.iter().any(|m| m.contains("`\\Delta`")),
+        said.iter().any(|m| m.contains("`\\Delta` is not declared")),
         "the operator the corpus never declares is named: {said:?}"
     );
     assert!(
-        said.iter().any(|m| m.contains("`\\mathfrak{E}`")),
+        said.iter().any(|m| m.contains("`\\mathfrak{E}` is not declared")),
         "and so is the carrier: {said:?}"
     );
     assert!(
-        said.iter().all(|m| m.contains("never declares it")),
-        "each names the glyph and says the line resolves to nothing: {said:?}"
+        said.iter().all(|m| m.contains("is not declared in Era0/Strata0")),
+        "each names the glyph and the stratum that would home it: {said:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

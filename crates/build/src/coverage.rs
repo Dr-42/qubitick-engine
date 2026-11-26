@@ -42,45 +42,72 @@ pub enum GapKind {
 /// One glyph an A block writes that no D node in its stratum homes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gap {
-    /// The A file the glyph appears in, corpus-relative.
+    /// The file the glyph appears in, as the walk named it — the renderer opens this.
     pub file: PathBuf,
     /// The glyph as the corpus writes it (`\Delta`).
     pub glyph: String,
     /// The era/stratum both sides are read in (`Era0/Strata0`).
     pub sector: String,
     pub kind: GapKind,
+    /// Where the glyph sits, when the pass could locate it: 1-based line and column, and
+    /// the width of the run to underline. A statement that resolved to nothing is found by
+    /// its own text, so this is exact; a resolved statement has no positions yet, and the
+    /// diagnostic points at the file instead of guessing.
+    pub line: Option<u32>,
+    pub col: Option<u32>,
+    pub len: Option<u32>,
 }
 
 impl Gap {
-    /// The sentence the build reports.
+    /// The diagnostic, in the shape rustc and Lean print: a title that says what is
+    /// wrong, a position, and a `= help:` line that says what to do about it.
+    pub fn diagnostic(&self) -> qubitick_model::Diagnostic {
+        use qubitick_model::{Diagnostic, Phase, Span};
+        let mut span = Span::file(self.file.display().to_string());
+        if let (Some(line), Some(col)) = (self.line, self.col) {
+            span.line = Some(line);
+            span.col = Some(col);
+            span.len = self.len;
+        }
+        let (title, help) = match self.kind {
+            GapKind::Unresolved => (
+                format!("`{}` is not declared in {}", self.glyph, self.sector),
+                "add a D node whose glyph line is that glyph, with a `Type:` or `Sema:` \
+                 — nothing resolves it today, so this line means nothing"
+                    .to_string(),
+            ),
+            GapKind::NoGroundName => (
+                format!("`{}` has a `Type:` signature and no home", self.glyph),
+                "write `Type: <ground name>` (e.g. `Type: ISA.Tick : \\mathsf{Type}`), \
+                 or give the node a `Sema:`"
+                    .to_string(),
+            ),
+            GapKind::Unhomed => (
+                format!("`{}` is not declared in {}", self.glyph, self.sector),
+                format!(
+                    "add a D node whose glyph line is `{}`, with a `Type:` or `Sema:`",
+                    self.glyph
+                ),
+            ),
+        };
+        Diagnostic::error(Phase::Scope, "coverage.unhomed", title)
+            .at(span)
+            .label(match self.kind {
+                GapKind::Unresolved => "used here".to_string(),
+                GapKind::NoGroundName => "signature with no name".to_string(),
+                GapKind::Unhomed => "written here".to_string(),
+            })
+            .hint(help)
+    }
+
+    /// The one-line form, for a caller that prints a sentence rather than a block.
     pub fn sentence(&self) -> String {
-        if self.kind == GapKind::Unresolved {
-            return format!(
-                "`{}` is used in {}\n  but this corpus never declares it, so the line it is \
-                 in resolves to nothing and nothing can be emitted for it.\n  \
-                 Declare it with a D node whose glyph line is that glyph, and a `Type:` or \
-                 `Sema:`.",
-                self.glyph,
-                self.file.display()
-            );
+        let d = self.diagnostic();
+        let mut out = d.message.clone();
+        for hint in &d.hints {
+            out.push_str(&format!("\n  = help: {hint}"));
         }
-        if self.kind == GapKind::NoGroundName {
-            return format!(
-                "`Type:` requires a ground name (e.g. `Type: ISA.Tick : \\mathsf{{Type}}`)\n  \
-                 or a `Sema:` body. A glyph with no home cannot be emitted.\n  \
-                 (`{}` in {} is declared with a signature and no name.)",
-                self.glyph,
-                self.file.display()
-            );
-        }
-        format!(
-            "`{}` appears in {}\n  but no D node in {} declares it.\n\
-             Add a D node whose glyph line is `{}` with `Type:` or `Sema:`.",
-            self.glyph,
-            self.file.display(),
-            self.sector,
-            self.glyph
-        )
+        out
     }
 }
 
@@ -99,7 +126,8 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
     // and no `Sema:`. A constructor is exempt — its home is the formation that declares it.
     let mut undared: Vec<(String, PathBuf, u32)> = Vec::new();
     // Statements that resolved to nothing, paired with the sector and file they are in.
-    let mut unresolved: Vec<(String, PathBuf, Vec<String>)> = Vec::new();
+    // (sector, file, the line as written, the glyphs it carries)
+    let mut unresolved: Vec<(String, PathBuf, String, Vec<String>)> = Vec::new();
     let mut ctors: BTreeSet<u32> = BTreeSet::new();
     for path in files {
         let sector = crate::pipeline::scope_of_path(path);
@@ -156,7 +184,7 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
                     && d.d_block.ground_name.is_none()
                     && d.d_block.form.is_none()
                 {
-                    undared.push((sector.clone(), relative_to_corpus(path), d.symbol.primary));
+                    undared.push((sector.clone(), path.to_path_buf(), d.symbol.primary));
                 }
             }
             _ => {}
@@ -182,29 +210,50 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
                 continue;
             }
             let gap = Gap {
-                file: relative_to_corpus(&file),
+                file: file.clone(),
                 glyph: row.tex.clone(),
                 sector: sector.clone(),
                 kind: GapKind::Unhomed,
+                line: None,
+                col: None,
+                len: None,
             };
             if !out.contains(&gap) {
                 out.push(gap);
             }
         }
     }
-    for (sector, file, words) in unresolved {
+    for (sector, absolute, raw, words) in unresolved {
         let declared = homed.get(&sector);
+        let file = absolute.clone();
+        // The line the statement was written on, so the caret lands under the glyph
+        // rather than beside a file name.
+        let located = locate(&absolute, &raw);
         for word in words {
             let (id, tex) = word.split_once(GLYPH_SEP).unwrap_or(("-1", word.as_str()));
             let id: i64 = id.parse().unwrap_or(-1);
             if id >= 0 && declared.is_some_and(|d| d.contains(&(id as u32))) {
                 continue;
             }
+            let (line, col, len) = match &located {
+                Some((line, text)) => match text.find(tex) {
+                    Some(at) => (
+                        Some(*line),
+                        Some(text[..at].chars().count() as u32 + 1),
+                        Some(tex.chars().count() as u32),
+                    ),
+                    None => (Some(*line), None, None),
+                },
+                None => (None, None, None),
+            };
             let gap = Gap {
                 file: file.clone(),
                 glyph: tex.to_string(),
                 sector: sector.clone(),
                 kind: GapKind::Unresolved,
+                line,
+                col,
+                len,
             };
             if !out.contains(&gap) {
                 out.push(gap);
@@ -225,6 +274,9 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
             glyph,
             sector,
             kind: GapKind::NoGroundName,
+            line: None,
+            col: None,
+            len: None,
         });
     }
     Ok(out)
@@ -291,7 +343,7 @@ fn unresolved_stmt(
     sector: &str,
     path: &Path,
     e: &Expr,
-    out: &mut Vec<(String, PathBuf, Vec<String>)>,
+    out: &mut Vec<(String, PathBuf, String, Vec<String>)>,
 ) {
     let Expr::Var(raw) = e else { return };
     // A real metavariable is one identifier. A whole line of source is not a variable.
@@ -311,11 +363,25 @@ fn unresolved_stmt(
         words.push(format!("{id}{GLYPH_SEP}{tex}"));
     }
     if !words.is_empty() {
-        let entry = (sector.to_string(), relative_to_corpus(path), words);
+        let entry = (sector.to_string(), path.to_path_buf(), raw.clone(), words);
         if !out.contains(&entry) {
             out.push(entry);
         }
     }
+}
+
+/// The line a statement was written on, and its text.
+///
+/// The statement arrives as the parser's opaque `Var(<whole line>)`, so its text IS the
+/// source line: the first line of the file whose trimmed text equals it. That is exact
+/// for the case this exists for, and it returns `None` rather than a guess otherwise.
+fn locate(file: &Path, raw: &str) -> Option<(u32, String)> {
+    let src = std::fs::read_to_string(file).ok()?;
+    let want = raw.trim();
+    src.lines()
+        .enumerate()
+        .find(|(_, line)| line.trim() == want)
+        .map(|(i, line)| (i as u32 + 1, line.to_string()))
 }
 
 /// The LaTeX control words a line writes, with a font command's braced group glued on

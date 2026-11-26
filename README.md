@@ -7,7 +7,7 @@ and it knows no mathematical glyph of any corpus. Everything a symbol means arri
 declaration the corpus writes.
 
 ```
-cargo test --workspace          44 targets · 301 tests · 2 ignored
+cargo test --workspace          45 targets · 309 tests · 2 ignored
 qubitick build <corpus>         5 files, verified 5, error_count 0   (the starter ship)
 qubitick axioms <corpus> <file> "axioms": []    (the ship's theorem stands on nothing)
 ```
@@ -338,10 +338,53 @@ means someone edited the ground or the corpus. Both are git-tracked; both are vi
 
 A theorem's footprint includes its **type**, not only its proof term.
 
-## 8. Gates
+## 8. Diagnostics
+
+Every face reports the same [`Diagnostic`] with the same discipline, and the CLI renders
+it the way rustc and Lean print one — title, arrow to the position, the source line with
+the offending run underlined, `= help:` underneath, one summary line at the end:
+
+```console
+$ qubitick build my-corpus
+error[coverage.unhomed]: `\Delta` is not declared in Era0/Strata0
+ --> my-corpus/Era0/Strata0/Axioms/A1_Base.qbit:2:29
+  |
+2 | \forall a b : \mathfrak{E}, a \Delta b = b \Delta a
+  |                              ^^^^^^ used here
+   = help: add a D node whose glyph line is `\Delta`, with a `Type:` or `Sema:`
+
+error: could not build 1 of 1 file (2 errors found)
+```
+
+The rules, which are rustc's and Lean's:
+
+- **the title says what is wrong, once, lowercase, no full stop.** A title that explains
+  and advises is three sentences where a reader wanted one;
+- **the advice goes in `= help:`**, and it is a thing to DO (`qubitick scaffold <corpus>`
+  writes the chain), never an apology;
+- **a position, when there is one**: `file:line:col`, and a caret run under the token. A
+  Lean error's line is in the *emitted module*, and the diagnostic says so rather than
+  sending a reader to a `.qbit` line that does not exist;
+- **a code per kind of refusal**, so a client acts on it without reading prose:
+  `parse.header`, `parse.type-and-sema`, `parse.not-notation`, `parse.operator.undeclared`,
+  `coverage.unhomed`, `coverage.blocked`, `cite.dangling`, `build.lean-error`,
+  `build.import-cycle`, `proof.admitted`, `corpus.duplicate`, `corpus.definition-cycle`;
+- **one sentence per defect.** The emit failure and the parse diagnostic for one bad file
+  used to report twice; the generic one is dropped when the specific one is there;
+- **a cascade is not a report.** A glyph with no home is declared by every module that
+  mentions it, so a corpus with a coverage hole stops emitting — one error that says what
+  to fix, rather than a Lean duplicate-declaration error per module.
+
+`crates/model/src/diag.rs` owns the shape and the renderer; `crates/build/src/report.rs`
+renders a whole build; the CLI prints it on stderr (stdout is the JSON a tool parses) and
+the API puts the same block in a refusal's `error` alongside the structured `diagnostics`.
+
+---
+
+## 9. Gates
 
 ```
-./toolchain cargo test --workspace        # 44 targets, 301 tests, 2 ignored
+./toolchain cargo test --workspace        # 45 targets, 309 tests, 2 ignored
 ./toolchain cargo clippy --workspace --all-targets
 ./toolchain cargo build -p qubitick-cli
 ./toolchain ./target/debug/qubitick build corpus-templates/algebra   # built 5, verified 5
@@ -371,7 +414,7 @@ Lean 4.35.0 (see its header for why `nix develop` cannot be used in this sandbox
 
 ---
 
-## 9. Layout
+## 10. Layout
 
 | crate | what it is |
 |---|---|
@@ -396,7 +439,7 @@ corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
 
 ---
 
-## 10. Known limits
+## 11. Known limits
 
 - **Induction** in the proof rewriter takes the induction hypothesis when the compiled
   body uses it; the declaration-side recursion is not reachable from that crate.

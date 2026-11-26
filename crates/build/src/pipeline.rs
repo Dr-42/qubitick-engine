@@ -65,31 +65,169 @@ fn refused_row_diagnostics(ctx: &Ctx, path: &Path) -> Result<Vec<Diagnostic>> {
     let file = path.display().to_string();
     qubitick_parse::tolerate_prose(false);
     match qubitick_parse::parse_content(ctx, &src) {
-        Ok(nodes) => {
-            let _ = nodes;
-            Ok(Vec::new())
-        }
-        Err(e) => {
-            let said = format!("{e:#}");
-            /* ONE CODE PER KINDS OF REFUSAL, so a client can act on it without reading the
-               sentence: an undeclared operator is a missing D node, a bad header is a typo in
-               the first line, and `Type:`+`Sema:` on one node is a node that says two things. */
-            let code = if said.contains("is used as an operator") {
-                "parse.operator.undeclared"
-            } else if said.contains("unknown node header") {
-                "parse.header"
-            } else if said.contains("cannot carry both") {
-                "parse.type-and-sema"
-            } else if said.contains("is not notation") {
-                "parse.not-notation"
-            } else {
-                "parse.refused"
-            };
-            Ok(vec![
-                Diagnostic::error(Phase::Parse, code, said).in_file(file)
-            ])
-        }
+        Ok(_) => Ok(Vec::new()),
+        Err(e) => Ok(vec![refusal(&format!("{e:#}"), &file, &src)]),
     }
+}
+
+/// A Lean error, with the advice the corpus can act on.
+///
+/// Lean's own words are the standard and stay the title. What Lean cannot know is WHY:
+/// `Unknown identifier \`Comm\`` in a corpus module means the ground does not carry the
+/// class the corpus's A blocks imply — and the fix is `qubitick scaffold`, not reading
+/// Lean's note about `autoImplicit`. A diagnostic that names the wrong fix is worse than
+/// one that names none.
+fn explain_lean_error(
+    conn: &qubitick_db::Db,
+    file: &Path,
+    ctxs: &mut std::collections::HashMap<String, qubitick_ctx::Ctx>,
+    d: &Diagnostic,
+) -> Diagnostic {
+    let Some(name) = d.message.strip_prefix("Unknown identifier `") else {
+        return d.clone();
+    };
+    let Some(name) = name.split('`').next() else {
+        return d.clone();
+    };
+    let Ok(ctx) = scope_ctx(conn, file, ctxs) else {
+        return d.clone();
+    };
+    let is_a_class = crate::axioms::load_axiom_nodes(conn, ctx, ctx.scope())
+        .map(|nodes| nodes.iter().any(|n| n.base().name == name))
+        .unwrap_or(false);
+    if !is_a_class && name != "ISA" {
+        return d.clone();
+    }
+    let mut out = d.clone();
+    out.hints.clear();
+    out.hint(format!(
+        "`{name}` is the class this corpus's A blocks imply, and the ground is where a chain \
+         like it lives: `qubitick scaffold <corpus>` writes one, and `LeanDir:` names the \
+         directory it goes in"
+    ))
+}
+
+/// The width of a file's `line`, so a diagnostic can underline a whole header.
+fn header_width(src: &str, line: u32) -> u32 {
+    src.lines()
+        .nth(line.saturating_sub(1) as usize)
+        .map(|l| l.chars().count().max(1) as u32)
+        .unwrap_or(1)
+}
+
+/// A dangling citation, located in the file it is written in.
+///
+/// The sentence already names the label (`[D.99] names no definition`); what a reader
+/// cannot do is FIND it. The label is in the file, so the caret goes under it.
+fn cite_diagnostic(said: &str, file: &str, src: &str) -> Diagnostic {
+    let label = said
+        .split(']')
+        .next()
+        .map(|s| format!("{s}]"))
+        .unwrap_or_default();
+    let mut d = Diagnostic::error(Phase::Cite, "cite.dangling", said.to_string());
+    match src
+        .lines()
+        .enumerate()
+        .find(|(_, l)| !label.is_empty() && l.contains(&label))
+    {
+        Some((line, text)) => {
+            let col = text.find(&label).map(|c| c as u32 + 1);
+            let mut span = qubitick_model::Span::file(file.to_string());
+            span.line = Some(line as u32 + 1);
+            span.col = col;
+            span.len = Some(label.chars().count() as u32);
+            d = d.at(span).label("names nothing");
+        }
+        None => d = d.in_file(file.to_string()),
+    }
+    d.hint(
+        "a citation names the number the node's own header carries, in this era or an \
+         earlier one",
+    )
+}
+
+/// The parser's refusal, in the shape a compiler prints one.
+///
+/// The parser speaks in sentences because it is also what a person reads in the editor's
+/// status line; a REPORT wants a title, a position and a `= help:`. So the sentence is
+/// split here, once, by the code it already maps to — and the quoted text it names (a
+/// header, a row) is located in the file, so the caret lands on what it is about.
+fn refusal(said: &str, file: &str, src: &str) -> Diagnostic {
+    /* ONE CODE PER KIND OF REFUSAL, so a client can act on it without reading the sentence. */
+    let code = if said.contains("is used as an operator") {
+        "parse.operator.undeclared"
+    } else if said.contains("unknown node header") {
+        "parse.header"
+    } else if said.contains("cannot carry both") {
+        "parse.type-and-sema"
+    } else if said.contains("is not notation") {
+        "parse.not-notation"
+    } else {
+        "parse.refused"
+    };
+    // The quoted run the sentence names — a header, a row, a glyph.
+    let quoted = said
+        .split('`')
+        .nth(1)
+        .map(str::to_string)
+        .or_else(|| said.split_once(": ").map(|(_, rest)| rest.trim().to_string()))
+        .unwrap_or_default();
+    let (title, label, help) = match code {
+        "parse.operator.undeclared" => (
+            format!("`{quoted}` is used as an operator, but nothing declares it"),
+            "used as an operator".to_string(),
+            "declare it with a glyph line `a {quoted} b` and a `Type:` or `Sema:`".replace(
+                "{quoted}",
+                &quoted,
+            ),
+        ),
+        "parse.header" => (
+            "this file's first line is not a node header".to_string(),
+            "not a header".to_string(),
+            "a header is `<kind>.<division>.<n>. <Name>` — `A.` for an axiom, `D.` for a \
+             definition, `T.` for a theorem"
+                .to_string(),
+        ),
+        "parse.type-and-sema" => (
+            "a node cannot carry both `Type:` and `Sema:`".to_string(),
+            "two homes".to_string(),
+            "a glyph has one home: `Type:` when the ground declares it, `Sema:` when the \
+             corpus does"
+                .to_string(),
+        ),
+        "parse.not-notation" => (
+            format!("`{quoted}` is not a proof row"),
+            "not a proof row".to_string(),
+            "a proof row is `= <term> [cite]`, `⊢ <term>` (the term that closes the goal), \
+             or `∎`"
+                .to_string(),
+        ),
+        _ => (said.to_string(), String::new(), String::new()),
+    };
+    let mut d = Diagnostic::error(Phase::Parse, code, title);
+    // Where the quoted run sits, so the caret points at it rather than at the file.
+    if let Some((line, text)) = src
+        .lines()
+        .enumerate()
+        .find(|(_, l)| !quoted.is_empty() && l.contains(quoted.as_str()))
+    {
+        let col = text.find(quoted.as_str()).map(|c| c as u32 + 1);
+        let mut span = qubitick_model::Span::file(file.to_string());
+        span.line = Some(line as u32 + 1);
+        span.col = col;
+        span.len = Some(quoted.chars().count() as u32);
+        d = d.at(span);
+    } else {
+        d = d.in_file(file.to_string());
+    }
+    if !label.is_empty() {
+        d = d.label(label);
+    }
+    if !help.is_empty() {
+        d = d.hint(help);
+    }
+    d
 }
 
 /// How many diagnostics in a build are warnings rather than errors.
@@ -133,14 +271,17 @@ fn admitted_diagnostics(nodes: &[qubitick_model::Node], src: &str, file: &str) -
                 Diagnostic::warning(
                     Phase::Build,
                     "proof.admitted",
-                    format!(
-                        "{} is admitted: it is stated and not proved",
-                        t.base.name
-                    ),
+                    format!("`{}` is admitted", t.base.name),
                 )
-                .in_file(file)
-                .at_line(line)
-                .hint("write its `Proof:` rows (each `= … [cite]`), or leave it admitted knowingly"),
+                .at(
+                    qubitick_model::Span::at(file, line, Some(1))
+                        .with_len(header_width(src, line)),
+                )
+                .label("stated, not proved")
+                .hint(
+                    "write its `Proof:` rows (each `= ... <cite>`), or leave it admitted \
+                     knowingly",
+                ),
             )
         })
         .collect()
@@ -277,7 +418,7 @@ fn file_diagnostics_cached(
     let file = path.display().to_string();
     let mut out: Vec<Diagnostic> = crate::cites::dangling(conn, ctx, headers, &nodes)?
         .into_iter()
-        .map(|m| Diagnostic::error(Phase::Cite, "cite.dangling", m).in_file(file.clone()))
+        .map(|m| cite_diagnostic(&m, &file, &src))
         .collect();
     out.extend(refused_row_diagnostics(ctx, path)?);
     out.extend(crate::latex::LatexLint::new(ctx).lint(path, &src));
@@ -803,7 +944,13 @@ pub fn run_pipeline(
         Failed(String),
         /// An A block writes a glyph no D node in its stratum homes: the corpus has a
         /// hole, and nothing is emitted for the file until it is filled.
-        Uncovered(String),
+        Uncovered(Vec<qubitick_model::Diagnostic>),
+        /// Not emitted because the CORPUS has a coverage hole somewhere. A glyph with no
+        /// home is declared by every module that mentions it (the frame has nothing else
+        /// to write), and now that modules import each other that is a duplicate
+        /// declaration — a cascade of Lean errors that all mean the one thing the hole
+        /// already says.
+        Blocked(String),
     }
     // PHASE 0 — COVERAGE, before a line of Lean exists.
     //
@@ -814,13 +961,15 @@ pub fn run_pipeline(
     // `axiom` nobody chose.
     /* EVERY HOLE A FILE HAS, not the last one the pass found: a HashMap keyed by file kept
        one sentence per file, so an A block with three undeclared glyphs named one of them. */
-    let mut uncovered: std::collections::HashMap<PathBuf, Vec<String>> =
+    /* THE DIAGNOSTIC ITSELF, not a sentence built from it: a rendered report needs the
+       position, the label and the `= help:` separately. */
+    let mut uncovered: std::collections::HashMap<PathBuf, Vec<qubitick_model::Diagnostic>> =
         std::collections::HashMap::new();
     for gap in crate::coverage::gaps(conn, files)? {
-        let said = gap.sentence();
+        let d = gap.diagnostic();
         let slot = uncovered.entry(gap.file.clone()).or_default();
-        if !slot.contains(&said) {
-            slot.push(said);
+        if !slot.iter().any(|x| x.message == d.message) {
+            slot.push(d);
         }
     }
     let mut cache = EmitCache::default();
@@ -829,8 +978,15 @@ pub fn run_pipeline(
     let prepared: Vec<Prepared> = files
         .iter()
         .map(|f| {
-            if let Some(sentences) = uncovered.get(&crate::coverage::relative_to_corpus(f)) {
-                return Prepared::Uncovered(sentences.join("\n\n"));
+            if let Some(diagnostics) = uncovered.get(f) {
+                return Prepared::Uncovered(diagnostics.clone());
+            }
+            if let Some((hole, _)) = uncovered.iter().next() {
+                return Prepared::Blocked(format!(
+                    "not emitted: the corpus has a coverage hole in {} (reported there, and \
+                     nothing is emitted until it is filled)",
+                    crate::coverage::relative_to_corpus(hole).display()
+                ));
             }
             match scope_ctx(conn, f, &mut scope_ctxs) {
                 Ok(ctx) => match emit_file_cached(ctx, conn, f, &mut cache) {
@@ -892,11 +1048,22 @@ pub fn run_pipeline(
     for (i, f) in files.iter().enumerate() {
         let path = f.display().to_string();
         match &prepared[i] {
-            Prepared::Uncovered(sentence) => {
+            Prepared::Uncovered(found) => {
                 let mut diagnostics = file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
-                diagnostics.insert(
-                    0,
-                    Diagnostic::error(Phase::Scope, "coverage.unhomed", sentence.clone())
+                let mut found = found.clone();
+                found.append(&mut diagnostics);
+                let diagnostics = found;
+                results.push(BuildFileResult {
+                    path: path.clone(),
+                    ok: false,
+                    verified: false,
+                    diagnostics,
+                })
+            }
+            Prepared::Blocked(said) => {
+                let mut diagnostics = file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
+                diagnostics.push(
+                    Diagnostic::error(Phase::Scope, "coverage.blocked", said.clone())
                         .in_file(path.clone()),
                 );
                 results.push(BuildFileResult {
@@ -915,7 +1082,10 @@ pub fn run_pipeline(
                 /* ONE SENTENCE PER DEFECT. The file's own diagnostics already carry the
                    parser's refusal, with the specific code for it; the emit failure is the
                    same sentence again, so it is added only when it says something new. */
-                if !diagnostics.iter().any(|d| d.message == *e) {
+                if !diagnostics
+                    .iter()
+                    .any(|d| d.message == *e || (d.phase == Phase::Parse && d.is_error()))
+                {
                     diagnostics.insert(
                         0,
                         Diagnostic::error(Phase::Emit, "emit.failed", e.clone())
@@ -933,7 +1103,9 @@ pub fn run_pipeline(
                 let mut diagnostics =
                     file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
                 if let Some(ds) = &checks[i] {
-                    diagnostics.extend(ds.iter().cloned());
+                    for d in ds {
+                        diagnostics.push(explain_lean_error(conn, f, &mut scope_ctxs, d));
+                    }
                 }
                 let verified = !diagnostics.iter().any(Diagnostic::is_error);
                 results.push(BuildFileResult {

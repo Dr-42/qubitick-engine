@@ -167,15 +167,26 @@ fn a_type_with_no_ground_name_and_no_sema_is_refused() {
     let results =
         qubitick_build::run_pipeline(&db, &qubitick_build::walk_qbit(&dir), ground.as_deref())
             .unwrap();
+    // Titles AND the advice under them: a refusal is judged by both.
     let said = results
         .iter()
         .flat_map(|r| r.diagnostics.iter())
-        .map(|d| d.message.clone())
+        .map(|d| {
+            let mut t = d.message.clone();
+            for h in &d.hints {
+                t.push_str(&format!("\n  = help: {h}"));
+            }
+            t
+        })
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        said.contains("`Type:` requires a ground name"),
-        "the refusal is the one the corpus can act on: {said}"
+        said.contains("has a `Type:` signature and no home"),
+        "the refusal names the glyph and what is missing: {said}"
+    );
+    assert!(
+        said.contains("write `Type: <ground name>`"),
+        "and says what to write instead: {said}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

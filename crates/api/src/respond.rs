@@ -19,25 +19,38 @@ use qubitick_model::{Diagnostic, Phase};
 use serde_json::json;
 
 /// Refuse with `status`, in the diagnostic shape.
+///
+/// The `error` string is the RENDERED form — the same block the CLI prints, with the
+/// position, the underlined run and the `= help:` line — so a person reading a curl
+/// answer or a server log sees what a compiler would have told them. `diagnostics`
+/// carries the same content as structure, for a client that renders it itself.
 pub fn refuse(
     status: StatusCode,
     phase: Phase,
     code: &str,
     message: impl Into<String>,
 ) -> Response {
-    let message = message.into();
-    let diagnostic = Diagnostic::error(phase, code, message.clone());
+    let diagnostic = Diagnostic::error(phase, code, message);
+    let rendered = diagnostic.render(&NoSources);
     (
         status,
         Json(json!({
-            // `ok`/`error` are kept so an older client still reads the sentence;
-            // `diagnostics` is the part that carries structure.
             "ok": false,
-            "error": message,
+            "error": rendered,
             "diagnostics": [serde_json::to_value(&diagnostic).unwrap_or_default()],
         })),
     )
         .into_response()
+}
+
+/// A route has no source file in hand: the refusal is about the REQUEST, not a corpus
+/// line, so the renderer prints the title and the help and nothing else.
+struct NoSources;
+
+impl qubitick_model::SourceLookup for NoSources {
+    fn source(&self, _file: &str) -> Option<String> {
+        None
+    }
 }
 
 /// 400 — the request is malformed (a missing or illegal path).
@@ -87,7 +100,8 @@ mod tests {
             body_of(bad_request(Phase::Parse, "server.missing-path", "missing `path`")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["ok"], false);
-        assert_eq!(body["error"], "missing `path`");
+        // The rendered block, not the bare sentence: a curl answer reads like a compiler.
+        assert_eq!(body["error"], "error[server.missing-path]: missing `path`");
         let d = &body["diagnostics"][0];
         assert_eq!(d["severity"], "error");
         assert_eq!(d["phase"], "parse");

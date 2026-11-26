@@ -320,6 +320,15 @@ fn main() -> anyhow::Result<()> {
             let ground = qubitick_build::ground::for_check(&root_path)?;
             // no context: the pipeline builds each file's own, from the scope its path implies
             let results = qubitick_build::run_pipeline(&db, &files, Some(&ground))?;
+            /* THE REPORT A PERSON READS, rendered the way rustc and Lean print: a title,
+               an arrow to the position, the source line with the offending run underlined,
+               `= help:` underneath, then one summary line. It goes to stderr because stdout
+               is the JSON a tool parses — and it is printed whether the build is green or
+               red, because a red build is exactly when a person needs it. */
+            eprint!(
+                "{}",
+                qubitick_build::report::render(&results, &qubitick_build::report::DiskSources)
+            );
             let verified_files: Vec<&str> = results
                 .iter()
                 .filter(|r| r.verified)
@@ -412,22 +421,47 @@ fn main() -> anyhow::Result<()> {
             let cycles = qubitick_build::definition_cycles(&db, &root_path)?;
             if !cycles.is_empty() {
                 for c in &cycles {
-                    eprintln!("error: definition cycle: {}", c.message());
+                    let mut d = qubitick_model::Diagnostic::error(
+                        qubitick_model::Phase::Scope,
+                        "corpus.definition-cycle",
+                        format!("definitions use each other's glyphs in {}", c.era),
+                    );
+                    for m in &c.members {
+                        d = d.hint(format!(
+                            "D.{} {} ({})",
+                            m.division, m.name, m.path
+                        ));
+                    }
+                    eprintln!(
+                        "{}",
+                        d.hint(
+                            "one of them is circular: a package cannot import a cycle, so \
+                             decide which definition is load-bearing"
+                        )
+                        .render(&qubitick_build::report::DiskSources)
+                    );
                 }
                 eprintln!(
-                    "{} definition cycle(s): two definitions that use each other's glyphs — \
-                     one of them is circular, and a package cannot import a cycle",
+                    "error: could not build: {} definition cycle(s) found",
                     cycles.len()
                 );
                 std::process::exit(2);
             }
             if !report.is_clean() {
-                for d in &report.duplicates {
-                    eprintln!("duplicate: {}", d.message());
+                for duplicate in &report.duplicates {
+                    let d = qubitick_model::Diagnostic::error(
+                        qubitick_model::Phase::Store,
+                        "corpus.duplicate",
+                        duplicate.message(),
+                    )
+                    .hint(
+                        "number each node once per era, and name each one once per scope: \
+                         a citation and a name lookup both have to agree on what they mean",
+                    );
+                    eprintln!("{}", d.render(&qubitick_build::report::DiskSources));
                 }
                 eprintln!(
-                    "{} ambiguous reference(s): one kind in one scope cannot claim a \
-                     number or a name twice",
+                    "error: could not build: {} ambiguous reference(s) found",
                     report.duplicates.len()
                 );
                 std::process::exit(2);
