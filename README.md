@@ -378,3 +378,9 @@ corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
   the inductive lives in its node's module, and the ground is compiled before it.
 - The freeze covers the ground file, not the charter: `Canon.qbit` stays editable while
   `--frozen` holds.
+- **`seed --preset mathlib` writes `import Mathlib`; fetching Mathlib is Lake's job**, not
+  the engine's. Build the corpus as a package (`qubitick lake`) in an environment where
+  Mathlib is on `LEAN_PATH` — `prelude-check` on a bare `lean` reports `unknown module
+  prefix 'Mathlib'`, which is the truth about that environment, not about the corpus. A
+  ground name is one Lean name (`Set.inter`, `Nat`): a name that needs an argument
+  (`Set Nat`) belongs in the ground, under a name the corpus can write.
