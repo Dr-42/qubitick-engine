@@ -73,20 +73,20 @@ fn corpus(dir: &Path, declared: bool) {
     wit(
         dir,
         "Era0/Strata0/Definitions/D_03_Empty.qbit",
-        "D.X.03. Empty\n\\varnothing\nType: R.varnothing\nRole: null\n",
+        "D.X.03. Empty\n\\varnothing\nType: R.varnothing : \\mathfrak{E}\nRole: null\n",
     );
     // The carrier: the axiom writes `\mathfrak{E}` as a binder sort, so the stratum must
     // home it — every glyph an A block writes needs a D node (crates/build/src/coverage.rs).
     wit(
         dir,
         "Era0/Strata0/Definitions/D_04_Carrier.qbit",
-        "D.X.04. Carrier\n\\mathfrak{E}\nType: R.E : Type\n",
+        "D.X.04. Carrier\n\\mathfrak{E}\nType: E\n",
     );
     // ...and the unit, which the axiom and the wedge both write.
     wit(
         dir,
         "Era0/Strata0/Definitions/D_05_Unit.qbit",
-        "D.X.05. Unit\n\\mathbb{1}\nType: R.unit\n",
+        "D.X.05. Unit\n\\mathbb{1}\nType: R.unit : \\mathfrak{E}\n",
     );
     // The ground those homes live in: the contract, plus the chain the axiom implies.
     let mut db = qubitick_db::open_in_memory().unwrap();

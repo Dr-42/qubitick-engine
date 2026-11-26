@@ -45,6 +45,21 @@ pub fn resolver_with_sorts<'a>(
     sorts: &'a std::collections::HashSet<u32>,
 ) -> impl Fn(u32) -> String + 'a {
     move |id| {
+        /* A GLYPH THE GROUND NAMES IS THE GROUND'S, CARRIER INCLUDED.
+         *
+         * Collapsing a sort glyph to `Prop` is for a corpus that declares a carrier and
+         * leaves it uninterpreted: the engine then has nothing better than `Prop`, and one
+         * carrier for the whole corpus keeps the corpus's own arithmetic typechecking.
+         * A `Type: E` glyph says otherwise — the ground says what `E` IS — so its name is
+         * rendered as written. Collapsing it made a scaffolded ground read
+         * `plus : (Prop) → (Prop) → Prop` for a corpus whose carrier is its own `Type`,
+         * which is proof-irrelevant and not what the corpus says.
+         */
+        if let Some(row) = ctx.by_id(id as i64)
+            && row.kind == "bound"
+        {
+            return fn_names.get(&id).cloned().unwrap_or_else(|| row.lean_name.clone());
+        }
         // Only the CARRIER is collapsed to `Prop`. A GENERATED sort (`\tau`) is its
         // own inductive type, so collapsing it would make the quantification in a
         // `\mu` theorem unrelated to the cases the corpus proves.

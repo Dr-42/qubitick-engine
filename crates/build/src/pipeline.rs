@@ -1216,13 +1216,13 @@ mod tests {
         .unwrap();
         std::fs::write(
             defs.join("D_03_Empty.qbit"),
-            "D.X.03. Empty\n\\varnothing\nType: R.varnothing\nRole: null\n",
+            "D.X.03. Empty\n\\varnothing\nType: R.varnothing : \\mathfrak{E}\nRole: null\n",
         )
         .unwrap();
         // The carrier and the unit: `A1. Base` writes both, and every glyph an A block
         // writes needs a D node in its stratum (crates/build/src/coverage.rs).
-        std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\nType: R.E : Type\n").unwrap();
-        std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\nType: R.unit\n").unwrap();
+        std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\nType: E\n").unwrap();
+        std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\nType: R.unit : \\mathfrak{E}\n").unwrap();
     }
 
     /// The ground such a corpus needs: the contract, plus the class chain its A block

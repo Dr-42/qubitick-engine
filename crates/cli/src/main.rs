@@ -680,12 +680,25 @@ fn main() -> anyhow::Result<()> {
             qubitick_build::ingest_corpus(&mut db, &root_path)?;
             let text = qubitick_build::scaffold::scaffold(&db, &root_path, &namespace)?;
             if write {
+                /* APPENDED, NOT REPLACED. The ground already holds the contract preset
+                   (`import Init`, or the bare prelude); the scaffold is the corpus's own
+                   part of it. Overwriting the file dropped `import Init` and every name
+                   the contract needs — the ground then failed before the chain could be
+                   read. Appending after the preset is exactly what a person does by hand. */
                 let path = qubitick_build::presets::ground_file(&root_path, "prelude");
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                std::fs::write(&path, format!("{text}\n"))?;
-                eprintln!("scaffold: wrote {}", path.display());
+                let existing = std::fs::read_to_string(&path).unwrap_or_default();
+                let mut next = existing.clone();
+                if !next.is_empty() && !next.ends_with('\n') {
+                    next.push('\n');
+                }
+                next.push_str("\n-- the corpus's own vocabulary (qubitick scaffold)\n");
+                next.push_str(&text);
+                next.push('\n');
+                std::fs::write(&path, next)?;
+                eprintln!("scaffold: appended to {}", path.display());
             } else {
                 println!("{text}");
             }

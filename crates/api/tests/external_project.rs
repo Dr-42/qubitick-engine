@@ -56,9 +56,9 @@ fn declare_ops(dir: &Path) {
        which is the fallback this architecture removes. */
     std::fs::write(defs.join("D_00_Delta.qbit"), "D.X.00. Delta\na \\Delta b\nType: R.Delta : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\nRole: nullity\n").unwrap();
     std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\nType: R.cap : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\n").unwrap();
-    std::fs::write(defs.join("D_03_Empty.qbit"), "D.X.03. Empty\n\\varnothing\nType: R.varnothing\nRole: null\n").unwrap();
-    std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\nType: R.E : Type\n").unwrap();
-    std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\nType: R.unit\n").unwrap();
+    std::fs::write(defs.join("D_03_Empty.qbit"), "D.X.03. Empty\n\\varnothing\nType: R.varnothing : \\mathfrak{E}\nRole: null\n").unwrap();
+    std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\nType: E\n").unwrap();
+    std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\nType: R.unit : \\mathfrak{E}\n").unwrap();
 }
 
 fn corpus(dir: &Path) {

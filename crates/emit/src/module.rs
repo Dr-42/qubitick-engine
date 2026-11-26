@@ -484,6 +484,10 @@ impl GlyphSig {
 struct AuthoredType {
     args: Vec<Option<u32>>,
     res: Option<u32>,
+    /// The whole signature, when it is a SORT WORD rather than a glyph: `Type: R.E : Type`
+    /// says the carrier's type is `Type`, and `Type` is a literal of Lean's, not a symbol
+    /// of the corpus's. Rendering it through a symbol table gives `Prop` by accident.
+    verbatim: Option<String>,
 }
 
 /// The sorts a module's corpus DECLARES, and the constructors of each.
@@ -568,9 +572,17 @@ fn head_id(e: &Expr) -> Option<u32> {
 
 /// Render an arrow chain over carriers with `name_of`; a position that names no
 /// declared sort is the `Prop` carrier.
+/// `Type`, `Prop`, `Sort u` — the sort words Lean owns (README §2.6).
+fn is_sort_word(word: &str) -> bool {
+    word == "Type" || word == "Prop" || word == "Sort" || word.starts_with("Sort ")
+}
+
 fn arrow_ty(args: &[Option<u32>], res: Option<u32>, name_of: &impl Fn(u32) -> String) -> String {
     let one = |c: Option<u32>| match c {
         Some(id) => name_of(id),
+        // A missing component is a component the corpus did not write — `Type: R.E : Type`
+        // and `Type: R.x : Prop` are literals, and they arrive as `verbatim` below. `Prop`
+        // is the carrier the rest of the format writes over.
         None => "Prop".to_string(),
     };
     let mut ty = one(res);
@@ -594,14 +606,36 @@ fn read_type_arrow(ctx: &Ctx, e: &Expr) -> AuthoredType {
             AuthoredType {
                 args: sorted,
                 res: rhs.res,
+                verbatim: None,
             }
         }
-        Expr::Sym(ac) if ctx.is_declared_sort(ac.primary as i64) => AuthoredType {
+        /* A COMPONENT OF A SIGNATURE IS A TYPE, whether the corpus declares it or the
+         * GROUND does. A `Type: E` carrier is kind `bound` — the ground says what `E` is —
+         * and reading it as "not a sort" collapsed every signature over it to `Prop`:
+         * a scaffolded ground came out `plus : (Prop) → (Prop) → Prop` for a corpus whose
+         * carrier is a `Type`. The glyph is named inside an arrow chain, which is where a
+         * type belongs; rendering its name is the whole answer. */
+        /* EVERY SYMBOL IN A SIGNATURE IS PART OF THE TYPE.
+         *
+         * This used to keep only a `Sym` the corpus DECLARED as a sort, and write
+         * everything else over `Prop` — so `Type: R.plus : \mathfrak{R} \to \mathfrak{R}`
+         * lost its carrier twice over: once for a ground-named carrier (kind `bound`), and
+         * once for the literal `Type` in `Type: R.E : Type`. A signature is a type
+         * expression; a glyph in it is a type. Whether that glyph HAS a home is the
+         * coverage pass's question, and it answers it before any of this runs. */
+        Expr::Sym(ac) => AuthoredType {
             args: Vec::new(),
             res: Some(ac.primary),
+            verbatim: None,
         },
-        // A space the corpus does not declare as a sort is written over the `Prop`
-        // carrier the corpus identifies its events with.
+        // A SORT WORD IS LEAN'S, NOT THE CORPUS'S: `Type: R.E : Type` says the carrier's
+        // type is `Type`. There is no symbol for it to resolve, and `Prop` would be a
+        // different claim.
+        Expr::Var(word) if is_sort_word(word) => AuthoredType {
+            args: Vec::new(),
+            res: None,
+            verbatim: Some(word.clone()),
+        },
         _ => AuthoredType::default(),
     }
 }
@@ -613,7 +647,9 @@ fn read_type_arrow(ctx: &Ctx, e: &Expr) -> AuthoredType {
 /// Lean function type.
 pub fn render_type_expr(ctx: &Ctx, e: &Expr) -> String {
     let auth = read_type_arrow(ctx, e);
-    arrow_ty(&auth.args, auth.res, &|id| crate::lean_name_of(ctx, id))
+    auth.verbatim
+        .clone()
+        .unwrap_or_else(|| arrow_ty(&auth.args, auth.res, &|id| crate::lean_name_of(ctx, id)))
 }
 
 /// Re-mark an operator's argument positions from the ARGUMENTS themselves.
@@ -797,6 +833,9 @@ fn glyph_type(
     name_of: &impl Fn(u32) -> String,
 ) -> String {
     if let Some(auth) = authored.get(&id) {
+        if let Some(text) = &auth.verbatim {
+            return text.clone();
+        }
         return arrow_ty(&auth.args, auth.res, name_of);
     }
     sigs.get(&id).cloned().unwrap_or_default().ty(name_of)
@@ -1484,7 +1523,12 @@ fn symbol_declarations(
     // written for a glyph a definition owns, then what it wrote.
     let mut known_types: HashMap<String, String> = HashMap::new();
     for (id, auth) in &authored {
-        known_types.insert(resolver(*id), arrow_ty(&auth.args, auth.res, &name_of));
+        known_types.insert(
+            resolver(*id),
+            auth.verbatim
+                .clone()
+                .unwrap_or_else(|| arrow_ty(&auth.args, auth.res, &name_of)),
+        );
     }
     known_types.extend(inferred_types.clone());
     known_types.extend(declared_types.clone());
@@ -2763,6 +2807,30 @@ pub fn emit_ground_chain(
     let mut out = String::new();
     if !namespace.trim().is_empty() {
         out.push_str(&format!("namespace {namespace}\n\n"));
+    }
+    /* THE CARRIERS THE CORPUS NAMES ARE THE GROUND'S TO DECLARE.
+     *
+     * `Type: E` says the glyph IS the ground's `E`. A scaffold that writes the classes and
+     * not the carrier produces a ground that does not compile — and one where a bare name
+     * in a class field would be `Prop` by accident rather than by anyone's decision. The
+     * stub is the smallest model that typechecks; the corpus's carrier is whatever the
+     * author replaces it with. */
+    let mut carriers: Vec<String> = Vec::new();
+    for row in ctx.symbols().filter(|r| r.kind == "bound") {
+        // A `R.<field>` name is a field of the instance, not a carrier.
+        if row.lean_name.contains('.') || row.lean_name.trim().is_empty() {
+            continue;
+        }
+        if !carriers.contains(&row.lean_name) {
+            carriers.push(row.lean_name.clone());
+        }
+    }
+    carriers.sort();
+    for name in &carriers {
+        out.push_str(&format!(
+            "/-- The carrier the corpus names (`Type: {name}`). A `Prop` model is the \
+             smallest that typechecks; yours may be anything. -/\ndef {name} : Type := Prop\n\n"
+        ));
     }
     out.push_str("class ISA where\n-- the symbols the corpus names but does not define (Type: R.<field>)\n");
     let mut fields: Vec<String> = Vec::new();
