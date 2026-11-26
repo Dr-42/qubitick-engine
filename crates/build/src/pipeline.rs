@@ -42,7 +42,7 @@ pub fn build_file(
     let ctx = qubitick_ctx::build_ctx(conn, &scope_of_path(path))?;
     let emitted = emit_file(&ctx, conn, path)?;
     let mut diagnostics = dangling_diagnostics(conn, path)?;
-    diagnostics.extend(refused_operator_diagnostics(&ctx, path)?);
+    diagnostics.extend(refused_row_diagnostics(&ctx, path)?);
     diagnostics.extend(latex_warnings(&ctx, path)?);
     diagnostics.extend(check_file_diagnostics(path, &emitted, ground)?);
     let verified = !diagnostics.iter().any(Diagnostic::is_error);
@@ -54,60 +54,33 @@ pub fn build_file(
     })
 }
 
-/// Every row a node states, as stored: an axiom's statement rows, a definition's
-/// body, a theorem's statement.
-fn rows_of(node: &qubitick_model::Node) -> Vec<&qubitick_model::Expr> {
-    use qubitick_model::{FormBody, Node};
-    match node {
-        Node::Axiom(a) => a.statements.iter().collect(),
-        Node::Theorem(t) => vec![&t.statement],
-        Node::Definition(d) => match &d.d_block.form {
-            Some(FormBody::MacroExpr(e)) => vec![e],
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
-    }
-}
-
-/// A row the parser REFUSED because it uses a glyph the corpus never declares.
+/// A file's rows that are NOT notation, with the parser's own sentence.
 ///
-/// A row the strict parser cannot read is stored as raw LaTeX (`Expr::Var` holding
-/// the source text) so one exotic row does not stop the rest of a corpus from
-/// building. For this refusal that tolerance is the wrong answer: the row is text
-/// Lean cannot read, and Lean's "expected token" says nothing about the cause. So
-/// the row is parsed again — strictly — and the parser's own sentence becomes the
-/// build error, naming the glyph and what a declaration looks like.
-fn refused_operator_diagnostics(ctx: &Ctx, path: &Path) -> Result<Vec<Diagnostic>> {
+/// The parser owns the judgement (its retry ladder, the operator gate, the words), and it
+/// refuses a row it cannot read. This asks it once, strictly, against the file's real
+/// context: the tolerant passes elsewhere in the build exist so a corpus can be OPENED and
+/// its problems REPORTED, which is only honest if the refusal still reaches the report.
+fn refused_row_diagnostics(ctx: &Ctx, path: &Path) -> Result<Vec<Diagnostic>> {
     let src = std::fs::read_to_string(path)?;
-    let nodes = qubitick_parse::parse_content(ctx, &src)?;
     let file = path.display().to_string();
-    let mut out: Vec<Diagnostic> = Vec::new();
-    for node in &nodes {
-        for row in rows_of(node) {
-            let qubitick_model::Expr::Var(text) = row else {
-                continue;
+    qubitick_parse::tolerate_prose(false);
+    match qubitick_parse::parse_content(ctx, &src) {
+        Ok(nodes) => {
+            let _ = nodes;
+            Ok(Vec::new())
+        }
+        Err(e) => {
+            let said = format!("{e:#}");
+            let code = if said.contains("is used as an operator") {
+                "parse.operator.undeclared"
+            } else {
+                "parse.not-notation"
             };
-            // A row that parsed has plain metavariables; the raw text of a refused
-            // row is the only Var that still carries a control word.
-            if !text.contains('\\') {
-                continue;
-            }
-            if let Err(qubitick_parse::ParseError::Elab(d)) =
-                qubitick_parse::semantic::parse_expr(text, ctx)
-                && d.code == "operator.undeclared"
-            {
-                let said = Diagnostic::error(Phase::Parse, "parse.operator.undeclared", d.message)
-                    .in_file(file.clone())
-                    .of_node(node.base().name.clone());
-                // One error per glyph, not per row that uses it: the fix is the same
-                // declaration for all of them.
-                if !out.iter().any(|d| d.message == said.message) {
-                    out.push(said);
-                }
-            }
+            Ok(vec![
+                Diagnostic::error(Phase::Parse, code, said).in_file(file)
+            ])
         }
     }
-    Ok(out)
 }
 
 /// How many diagnostics in a build are warnings rather than errors.
@@ -251,13 +224,17 @@ fn file_diagnostics_cached(
 ) -> Result<Vec<Diagnostic>> {
     let ctx = scope_ctx(conn, path, ctxs)?;
     let src = std::fs::read_to_string(path)?;
+    // TOLERANT: this is the pass that REPORTS a file's problems, so it must survive them.
+    // A row the parser refuses is reported below, with the parser's own sentence.
+    qubitick_parse::tolerate_prose(true);
     let nodes = qubitick_parse::parse_content(ctx, &src)?;
+    qubitick_parse::tolerate_prose(false);
     let file = path.display().to_string();
     let mut out: Vec<Diagnostic> = crate::cites::dangling(conn, ctx, headers, &nodes)?
         .into_iter()
         .map(|m| Diagnostic::error(Phase::Cite, "cite.dangling", m).in_file(file.clone()))
         .collect();
-    out.extend(refused_operator_diagnostics(ctx, path)?);
+    out.extend(refused_row_diagnostics(ctx, path)?);
     out.extend(crate::latex::LatexLint::new(ctx).lint(path, &src));
     out.extend(admitted_diagnostics(&nodes, &src, &file));
     Ok(out)
@@ -761,14 +738,23 @@ pub fn run_pipeline(
     for (i, f) in files.iter().enumerate() {
         let path = f.display().to_string();
         match &prepared[i] {
-            Prepared::Failed(e) => results.push(BuildFileResult {
-                path: path.clone(),
-                ok: false,
-                verified: false,
-                diagnostics: vec![
-                    Diagnostic::error(Phase::Emit, "emit.failed", e.clone()).in_file(path)
-                ],
-            }),
+            Prepared::Failed(e) => {
+                // A file that could not be EMITTED still gets its own diagnostics: the
+                // reason the emit failed is often a row or a citation the rest of the
+                // report can name precisely, and a build that says only "emit failed"
+                // hides the sentence the corpus needs.
+                let mut diagnostics = file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
+                diagnostics.insert(
+                    0,
+                    Diagnostic::error(Phase::Emit, "emit.failed", e.clone()).in_file(path.clone()),
+                );
+                results.push(BuildFileResult {
+                    path: path.clone(),
+                    ok: false,
+                    verified: false,
+                    diagnostics,
+                })
+            }
             Prepared::Emitted(_) => {
                 let outcome = checks[i]
                     .lock()

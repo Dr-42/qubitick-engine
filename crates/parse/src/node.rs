@@ -903,8 +903,39 @@ fn symbol_id_for_glyph(ctx: &Ctx, glyph: Option<&str>) -> u32 {
 /// declares plus the format's own tokens. A row the parser cannot read is prose that
 /// slipped in, and it is refused HERE, naming the row, rather than stored as raw text
 /// that no later stage can make sense of.
-fn parse_row_expr(ctx: &Ctx, src: &str, _line: &str) -> anyhow::Result<Expr> {
-    Ok(parse_expr_ok(ctx, src).unwrap_or_else(|| Expr::Var(src.trim().to_string())))
+/// The sentence a proof row earns when it is NOT notation, or `None` when it parses.
+///
+/// The parser owns this judgement — the retry ladder, the operator gate, the words — so
+/// a caller that reports a corpus's problems (the build's per-file diagnostics) asks here
+/// instead of re-deriving it.
+pub fn row_refusal(ctx: &Ctx, text: &str) -> Option<String> {
+    match parse_row_expr(ctx, text, text) {
+        Ok(_) => None,
+        Err(e) => Some(format!("{e:#}")),
+    }
+}
+
+fn parse_row_expr(ctx: &Ctx, src: &str, line: &str) -> anyhow::Result<Expr> {
+    if let Some(e) = parse_expr_retry(ctx, src) {
+        return Ok(e);
+    }
+    // A STRUCTURAL PASS cannot read any of the corpus's notation; the same row is read
+    // strictly once its declarations exist.
+    if crate::pros_are_tolerated() {
+        return Ok(Expr::Var(src.trim().to_string()));
+    }
+    // The parser may have a far better sentence than "not notation": a row that uses a
+    // glyph the corpus never declares is refused BY THE GATE, and that sentence names the
+    // glyph and says how to declare it.
+    if let Err(crate::semantic::ParseError::Elab(d)) = crate::semantic::parse_expr(src, ctx)
+        && d.code == "operator.undeclared"
+    {
+        return Err(anyhow::anyhow!(d.message));
+    }
+    Err(anyhow::anyhow!(
+        "`{}` is not notation: a proof row is a term, `= <term> [cite]`, or `⊢ <term>`",
+        line.trim()
+    ))
 }
 
 fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ChainRow>> {
@@ -936,6 +967,12 @@ fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ChainRow>> 
         if rest.trim().is_empty() {
             if initial.is_none() {
                 initial = Some(parse_row_expr(ctx, lhs_part.trim(), line)?);
+                continue;
+            }
+            // A later bare row is not a step of anything — but a STRUCTURAL pass cannot
+            // tell prose from notation it has yet to load, so it skips it. The build
+            // reports the row when it parses the file against the real context.
+            if crate::pros_are_tolerated() {
                 continue;
             }
             return Err(anyhow::anyhow!(
@@ -1143,9 +1180,12 @@ fn parse_proof_steps(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ProofStep>
                     steps.push(ProofStep::Chain { rows });
                 }
                 chain.clear();
-                let expr = parse_expr_ok(ctx, term).ok_or_else(|| {
-                    anyhow::anyhow!("`⊢ {term}` is not a term this corpus can read")
-                })?;
+                let expr = match parse_expr_retry(ctx, term) {
+                    Some(e) => e,
+                    // Same carve-out as a row: a structural pass cannot read it.
+                    None if crate::pros_are_tolerated() => Expr::Var(term.to_string()),
+                    None => bail!("`⊢ {term}` is not a term this corpus can read"),
+                };
                 steps.push(ProofStep::Conclude { term: expr });
             }
             None => chain.push(line.clone()),

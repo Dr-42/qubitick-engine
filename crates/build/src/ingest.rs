@@ -212,8 +212,11 @@ pub fn ingest_file_symbols(
     let src = std::fs::read_to_string(path)
         .with_context(|| format!("read {}", path.display()))?;
     let empty = qubitick_ctx::Ctx::from_rows("", vec![]);
+    qubitick_parse::tolerate_prose(true);
     let nodes = qubitick_parse::parse_content(&empty, &src)
-        .with_context(|| format!("parse {}", path.display()))?;
+        .with_context(|| format!("parse {}", path.display()));
+    qubitick_parse::tolerate_prose(false);
+    let nodes = nodes?;
     let node = nodes.first().context("empty parse result")?;
     let glyph = match node {
         Node::Definition(d) => Some((first_glyph_line(&src), d.d_block.kind.as_str().to_string())),
@@ -298,8 +301,11 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
     for path in &files {
         let src = std::fs::read_to_string(path)
             .with_context(|| format!("read {}", path.display()))?;
+        qubitick_parse::tolerate_prose(true);
         let nodes = qubitick_parse::parse_content(&empty, &src)
-            .with_context(|| format!("parse {}", path.display()))?;
+            .with_context(|| format!("parse {}", path.display()));
+        qubitick_parse::tolerate_prose(false);
+        let nodes = nodes?;
         let node = nodes.first().context("empty parse result")?;
         let glyph = match node {
             Node::Definition(d) => {
@@ -498,7 +504,9 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             for (i, e) in entries.iter().enumerate() {
                 let (ctx, _h) = &entry_ctxs[i];
                 let src = std::fs::read_to_string(&e.path)?;
+                qubitick_parse::tolerate_prose(true);
                 let nodes = qubitick_parse::parse_content(ctx, &src)?;
+                qubitick_parse::tolerate_prose(false);
                 if let Some(Node::Definition(d)) = nodes.first() {
                     persist_definition_metadata(&tx, ctx, &src, d, &precedence)?;
                 }
@@ -524,7 +532,9 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             let node_id = (i + 1) as i64;
             let (ctx, _h) = &entry_ctxs[i];
             let src = std::fs::read_to_string(&e.path)?;
+            qubitick_parse::tolerate_prose(true);
             let nodes = qubitick_parse::parse_content(ctx, &src)?;
+            qubitick_parse::tolerate_prose(false);
             let Some(Node::Definition(d)) = nodes.first() else {
                 continue;
             };
@@ -562,7 +572,9 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             let node_id = (i + 1) as i64;
             let (ctx, _h) = &entry_ctxs[i];
             let src = std::fs::read_to_string(&e.path)?;
+            qubitick_parse::tolerate_prose(true);
             let nodes = qubitick_parse::parse_content(ctx, &src)?;
+            qubitick_parse::tolerate_prose(false);
             let Some(Node::Definition(d)) = nodes.first() else {
                 continue;
             };
@@ -608,7 +620,13 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
         let (ctx, sym_hashes) = &entry_ctxs[i];
         let h = |id: u32| sym_hashes.get(&id).copied().unwrap_or(0);
         let src = std::fs::read_to_string(&e.path)?;
+        // TOLERANT, like every other pass: ingestion builds the ledger from what it can
+        // read, and a row it refuses is REPORTED per file by the build's diagnostics
+        // (`qubitick_parse::row_refusal`) instead of stopping the corpus at the door —
+        // a project the editor cannot even open is a project nobody can fix.
+        qubitick_parse::tolerate_prose(true);
         let nodes = qubitick_parse::parse_content(ctx, &src)?;
+        qubitick_parse::tolerate_prose(false);
         match &nodes[0] {
             Node::Axiom(a) => {
                 for (line, stmt) in a.statements.iter().enumerate() {
