@@ -21,6 +21,7 @@ pub fn emit_definition(ctx: &Ctx, def: &Definition) -> Result<String> {
         &Default::default(),
         &HashMap::new(),
         &HashMap::new(),
+        false,
     )
 }
 
@@ -36,6 +37,9 @@ pub fn emit_definition_in(
     sorts: &std::collections::HashSet<u32>,
     formations: &HashMap<u32, (String, Vec<u32>)>,
     known: &HashMap<String, String>,
+    // Emitting a GROUND: the file that DECLARES the class, so a field of the instance
+    // names itself (`plus`) rather than being reached through it (`R.plus`).
+    ground: bool,
 ) -> Result<String> {
     // A dual-use glyph declares its APPLIED form under the `_fn` name: its authored
     // `Type:` describes `\mathfrak{L}(t)`, while the bare `\mathfrak{L}` stays the
@@ -43,7 +47,23 @@ pub fn emit_definition_in(
     let name = crate::module::definition_decl_name(ctx, def, fn_names);
     // Sort glyphs render as the carrier so a body's lambda binder type matches the
     // operator declarations (`bigcup : Prop → Prop`).
-    let resolver = crate::resolver_with_sorts(ctx, fn_names, sorts);
+    let base = crate::resolver_with_sorts(ctx, fn_names, sorts);
+    let resolver = move |id: u32| -> String {
+        let name = base(id);
+        if ground {
+            name.strip_prefix("R.").map(str::to_string).unwrap_or(name)
+        } else {
+            name
+        }
+    };
+    /* A GLYPH WITH A GROUND NAME IS THE GROUND'S TO DECLARE.
+     *
+     * `Type: R.plus` says where the glyph lives; the engine writes no declaration for it
+     * anywhere — not in a module and not in a scaffolded ground. The ground's own hands
+     * put it in the class, which is why the scaffold's output has the class and no axiom. */
+    if def.d_block.ground_name.is_some() {
+        return Ok(String::new());
+    }
     if is_sort {
         return Ok(format!("axiom {name} : Type\n"));
     }

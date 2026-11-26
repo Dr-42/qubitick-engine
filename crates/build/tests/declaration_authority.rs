@@ -57,33 +57,51 @@ fn corpus(dir: &Path, declared: bool) {
     }
     // One node per glyph (a node declares the glyph on its own glyph line), and distinct
     // division numbers because two definitions claiming one number is an ingest error.
+    /* `Type: R.<field>` NAMES THE HOME. The glyph IS that field of the structure the
+       proofs are parametric over, so the engine declares nothing for it and the corpus's
+       own ground (see `ground_with_chain`) is where it lives. */
     wit(
         dir,
         "Era0/Strata0/Definitions/D_00_Delta.qbit",
-        "D.X.00. Delta\na \\Delta b\nRole: nullity\n",
+        "D.X.00. Delta\na \\Delta b\nType: R.Delta : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\nRole: nullity\n",
     );
     wit(
         dir,
         "Era0/Strata0/Definitions/D_02_Cap.qbit",
-        "D.X.02. Cap\na \\cap b\n",
+        "D.X.02. Cap\na \\cap b\nType: R.cap : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\n",
     );
     wit(
         dir,
         "Era0/Strata0/Definitions/D_03_Empty.qbit",
-        "D.X.03. Empty\n\\varnothing\nRole: null\n",
+        "D.X.03. Empty\n\\varnothing\nType: R.varnothing\nRole: null\n",
     );
     // The carrier: the axiom writes `\mathfrak{E}` as a binder sort, so the stratum must
     // home it — every glyph an A block writes needs a D node (crates/build/src/coverage.rs).
     wit(
         dir,
         "Era0/Strata0/Definitions/D_04_Carrier.qbit",
-        "D.X.04. Carrier\n\\mathfrak{E}\n",
+        "D.X.04. Carrier\n\\mathfrak{E}\nType: R.E : Type\n",
     );
     // ...and the unit, which the axiom and the wedge both write.
     wit(
         dir,
         "Era0/Strata0/Definitions/D_05_Unit.qbit",
-        "D.X.05. Unit\n\\mathbb{1}\n",
+        "D.X.05. Unit\n\\mathbb{1}\nType: R.unit\n",
+    );
+    // The ground those homes live in: the contract, plus the chain the axiom implies.
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, dir).expect("ingest for the scaffold");
+    let chain =
+        qubitick_build::scaffold::scaffold(&db, dir, "Qubitick.HL").expect("the chain scaffolds");
+    wit(
+        dir,
+        "lean/Qubitick/HL.lean",
+        &format!("{}\n\n{chain}", qubitick_build::ground::HL_LEAN),
+    );
+    wit(
+        dir,
+        "Canon.qbit",
+        "P. authority\nId: authority\nKind: project\nModule: Qubitick.HL\nLeanDir: lean\n",
     );
 }
 

@@ -59,6 +59,28 @@ pub fn module_name(corpus: &Path, file: &Path) -> String {
     format!("Qubitick.Corpus.{}", parts.join("."))
 }
 
+/// A node file → its Lean module name, from the path ALONE.
+///
+/// `module_name` needs the corpus root to strip; this does not, because an ingest
+/// records the path a file was walked with (absolute on one caller, corpus-relative on
+/// another) and the corpus prefix is not what makes a module importable. What does is
+/// the era tree: everything from the first `Era<N>` component is the module's place.
+pub fn module_name_of(filename: &str) -> Option<String> {
+    let parts: Vec<&str> = filename
+        .split(['/', '\\'])
+        .filter(|p| !p.is_empty())
+        .collect();
+    let start = parts.iter().position(|p| {
+        p.strip_prefix("Era").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    })?;
+    let mut names: Vec<String> = Vec::new();
+    for part in &parts[start..] {
+        let stem = part.strip_suffix(".qbit").unwrap_or(part);
+        names.push(sanitise(stem));
+    }
+    Some(format!("Qubitick.Corpus.{}", names.join(".")))
+}
+
 fn sanitise(text: &str) -> String {
     let mut out: String = text
         .chars()

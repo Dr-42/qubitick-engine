@@ -564,8 +564,20 @@ fn main() -> anyhow::Result<()> {
             let names: Vec<String> = nodes.iter().map(|n| n.base().name.clone()).collect();
             let emitted = qubitick_build::emit_file(&ctx, &db, &file)?;
             let ground = qubitick_build::ground::for_check(&root).ok();
-            let footprints =
-                qubitick_build::lean_check::axioms_footprint(ground.as_deref(), &emitted, &names)?;
+            /* THE CORPUS AS OLEANS FIRST. The module being probed imports the modules
+               that define the glyphs it names, so a footprint cannot be read until the
+               corpus it belongs to has compiled. */
+            let tree = qubitick_build::pipeline::compiled_tree(
+                &db,
+                &qubitick_build::walk_qbit(&root),
+                ground.as_deref(),
+            )
+            .ok();
+            let footprints = qubitick_build::lean_check::axioms_footprint(
+                tree.as_deref().or(ground.as_deref()),
+                &emitted,
+                &names,
+            )?;
             let rows: Vec<serde_json::Value> = footprints
                 .iter()
                 .map(|f| json!({ "name": f.name, "axioms": f.axioms }))

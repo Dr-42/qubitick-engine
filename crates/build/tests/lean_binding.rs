@@ -31,11 +31,9 @@ fn corpus(dir: &Path) {
         "Era0/Strata0/Definitions/D_S_01_Truth.qbit",
         "D.S.01. Truth\n\\truth\nType: True\nRole: null\n",
     );
-    wit(
-        dir,
-        "Era0/Strata0/Axioms/A1_Holds.qbit",
-        "A1. Holds\n\\truth\n",
-    );
+    // No A block: it would emit nothing at all (that is the A-block invariant), and the
+    // claim here is about the DECLARATION — a bound glyph declares nothing, anywhere.
+
 }
 
 fn lean_is_here() -> bool {
@@ -51,18 +49,15 @@ fn a_bound_glyph_gets_no_declaration_of_its_own() {
     corpus(&dir);
     let mut db = qubitick_db::open_in_memory().unwrap();
     qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
-    let file = dir.join("Era0/Strata0/Axioms/A1_Holds.qbit");
+    let file = dir.join("Era0/Strata0/Definitions/D_S_01_Truth.qbit");
     let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
-    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the axiom emits");
+    let emitted =
+        qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the declaration emits");
 
-    assert!(
-        emitted.contains("True"),
-        "the bound name is what the module uses:\\n{emitted}"
-    );
-    for banned in ["truth", "axiom \\truth"] {
+    for banned in ["truth", "True", "axiom", "def "] {
         assert!(
             !emitted.contains(banned),
-            "the engine declares nothing for a bound glyph, found `{banned}`:\\n{emitted}"
+            "the engine declares nothing for a bound glyph, found `{banned}`:\n{emitted}"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);

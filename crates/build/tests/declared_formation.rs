@@ -55,11 +55,9 @@ fn corpus(dir: &Path) {
         "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
         "D.S.05. Plus\na \\oplus b\nType: \\tau \\to \\tau \\to \\tau\n",
     );
-    wit(
-        dir,
-        "Era0/Strata0/Axioms/A1_Comm.qbit",
-        "A1. Comm\n\\forall a b : \\tau, a \\oplus b = b \\oplus a\n",
-    );
+    // No A block: a law an A block states becomes a field of the GROUND's class, and a
+    // class in the ground cannot be written over `\tau` — the formation is this corpus's,
+    // and its own module declares it. Statements about it are T blocks.
 }
 
 fn lean_is_here() -> bool {
@@ -75,9 +73,10 @@ fn a_declared_formation_is_emitted_as_an_inductive_with_typed_constructors() {
     corpus(&dir);
     let mut db = qubitick_db::open_in_memory().unwrap();
     qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
-    let file = dir.join("Era0/Strata0/Axioms/A1_Comm.qbit");
+    let file = dir.join("Era0/Strata0/Definitions/D_S_02_Tick.qbit");
     let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
-    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the axiom emits");
+    let emitted =
+        qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the formation emits");
 
     assert!(
         emitted.contains("inductive tau : Type"),
@@ -93,11 +92,11 @@ fn a_declared_formation_is_emitted_as_an_inductive_with_typed_constructors() {
         emitted.lines().any(|l| l.trim_start().starts_with('|') && l.contains("tau → tau")),
         "the recursive constructor is a function into the carrier:\n{emitted}"
     );
-    // ...and an operator whose authored signature returns the carrier is typed with
-    // the carrier, not `Prop`.
+    // ...and the module declares NOTHING ELSE for the operator: `\oplus` is another
+    // node's, and the frame writes no `axiom` for it.
     assert!(
-        emitted.contains("axiom oplus : (tau) → (tau) → tau"),
-        "the corpus's authored signature types the operator over its carrier:\n{emitted}"
+        !emitted.contains("axiom"),
+        "a corpus module declares no axiom:\n{emitted}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

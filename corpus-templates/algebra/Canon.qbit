@@ -2,6 +2,7 @@ P. Algebra — the starter corpus
 Id: algebra
 Kind: project
 Module: Qubitick.HL
+LeanDir: prelude
 Note: The engine's tutorial ship. Its operators are declared here, on the nodes that use
 Note: them, never by the engine; the carrier \mathfrak{R} appears in their signatures.
 % The master precedence table: one line per level, loosest first. A glyph the table

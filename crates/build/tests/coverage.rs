@@ -26,10 +26,16 @@ fn copy_qbit(from: &Path, to: &Path) {
     for entry in std::fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        // `.lake` is a previous emission and `canon.bit`/the db are build artifacts;
+        // everything else — the nodes AND the project's own ground — is the corpus.
+        if name == ".lake" || name.ends_with(".bit") || name.starts_with("qubitick.db") {
+            continue;
+        }
         let target = to.join(entry.file_name());
         if path.is_dir() {
             copy_qbit(&path, &target);
-        } else if path.extension().is_some_and(|e| e == "qbit") {
+        } else {
             std::fs::copy(&path, &target).unwrap();
         }
     }
@@ -87,6 +93,19 @@ fn a_glyph_an_a_block_writes_and_no_d_node_homes_is_refused_by_name() {
         results.iter().any(|r| !r.path.ends_with("A1_Comm.qbit") && r.verified),
         "a coverage hole is reported PER FILE: the rest of the corpus still builds"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn scaffold_writes_the_chain_the_a_blocks_imply() {
+    let dir = ship("scaffold");
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).expect("ingest");
+    let text = qubitick_build::scaffold::scaffold(&db, &dir, "Qubitick.HL").expect("scaffold");
+    assert!(text.contains("class ISA"), "{text}");
+    assert!(text.contains("class Comm extends ISA"), "{text}");
+    assert!(text.contains("ax_0"), "{text}");
+    assert!(!text.contains("axiom"), "a scaffolded ground writes no axiom: {text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

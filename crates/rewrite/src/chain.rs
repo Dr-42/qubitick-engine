@@ -653,32 +653,6 @@ fn instantiate_axiom(
     // `lhs = rhs` because the cited `def` makes both sides definitionally equal.
     // If they are not, Lean rejects the file (fail-closed).
     if rule.definitional {
-        // A plain `=`-macro (`Eq (op params) body`, e.g. D.BT.02
-        // `lnot a = Δ 𝟙 a`) is NOT a reducible def in this frame — it is an axiom —
-        // so `Eq.refl (lnot X)` cannot close `Eq (lnot X) (Δ 𝟙 X)`. The module
-        // declares `axiom {op}_def : ∀ params, Eq (op params) body`; cite it by
-        // name with the goal's instantiated arguments instead.
-        let (_b, stmt_body) = crate::rules::strip_binders(&rule.statement);
-        let plain_op = match &stmt_body {
-            Expr::Apply(h, a) if h.primary == qubitick_model::EQ_SYM && a.len() == 2 => {
-                match &a[0] {
-                    Expr::Apply(op, _) => Some(op.primary),
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-        if let Some(op_id) = plain_op {
-            let op_name = tc.resolve(op_id);
-            if let Expr::Apply(_, largs) = qubitick_pattern::expr_strip_parens(lhs) {
-                let args = largs
-                    .iter()
-                    .map(|a| format!("({})", lean_render(a, &|id| tc.resolve(id))))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                return Some(format!("{op_name}_def {args}"));
-            }
-        }
         return Some(format!(
             "Eq.refl ({})",
             qubitick_lean::render(lhs, &|id| tc.resolve(id))

@@ -192,6 +192,34 @@ pub struct EmitCache {
     /// used to run `format!("{:?}") + parse_expr` for EVERY definition on EVERY
     /// file — the single most expensive part of the emit phase.
     def_rules: std::collections::HashMap<String, std::sync::Arc<Vec<(u32, qubitick_model::Expr)>>>,
+    /// Node id -> the Lean module that node's file becomes, for one corpus.
+    ///
+    /// A module that NAMES a glyph another module defines imports that module; the
+    /// emitter asks for this map by the glyph's home node. Built once per corpus from
+    /// the ledger's own filenames.
+    home_modules: std::collections::HashMap<String, std::sync::Arc<std::collections::HashMap<i64, String>>>,
+}
+
+/// Node id -> Lean module name, for every node of the corpus this file belongs to.
+fn home_modules(
+    conn: &qubitick_db::Db,
+    cache: &mut EmitCache,
+    corpus_root: &Path,
+) -> Result<std::sync::Arc<std::collections::HashMap<i64, String>>> {
+    let key = corpus_root.display().to_string();
+    if let Some(m) = cache.home_modules.get(&key) {
+        return Ok(m.clone());
+    }
+    let mut map: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    for header in qubitick_db::read::get_node_list(conn)? {
+        let Some(module) = crate::lake::module_name_of(&header.filename) else {
+            continue;
+        };
+        map.insert(header.id, module);
+    }
+    let arc = std::sync::Arc::new(map);
+    cache.home_modules.insert(key, arc.clone());
+    Ok(arc)
 }
 
 pub fn emit_file(ctx: &Ctx, conn: &qubitick_db::Db, path: &Path) -> Result<String> {
@@ -247,7 +275,9 @@ pub fn emit_file_cached(
     path: &Path,
     cache: &mut EmitCache,
 ) -> Result<String> {
-    emit_file_with(ctx, conn, path, cache, &qubitick_emit::Options::inline())
+    let mut opts = qubitick_emit::Options::inline();
+    opts.home_modules = (*home_modules(conn, cache, &corpus_root(path))?).clone();
+    emit_file_with(ctx, conn, path, cache, &opts)
 }
 
 /// As [`emit_file_cached`], but with emission options — the meshed package asks for
@@ -293,28 +323,15 @@ pub fn emit_file_with(
     // the definition corpus as context for a DEFINITION file collided with its own
     // emitted body (a `def times ... := tau_0` typed over `Prop` when the frame now
     // types `\times_\tau` over `tau`). So only axioms and theorems merge the corpus.
-    if nodes.iter().any(|n| {
-        matches!(n, qubitick_model::Node::Theorem(_) | qubitick_model::Node::Axiom(_))
-    }) {
-        let defs_cache_key = ctx.scope().to_string();
-        let defs: std::sync::Arc<Vec<crate::axioms::LoadedDefinition>> = match cache
-            .defs
-            .get(&defs_cache_key)
-        {
-            Some(d) => d.clone(),
-            None => {
-                let d = std::sync::Arc::new(crate::axioms::load_definition_nodes(
-                    conn,
-                    ctx,
-                    ctx.scope(),
-                )?);
-                cache.defs.insert(defs_cache_key.clone(), d.clone());
-                d
-            }
-        };
-        if nodes
-            .iter()
-            .any(|n| matches!(n, qubitick_model::Node::Theorem(_)))
+    /* THE AXIOM CHAIN IS CONTEXT FOR EVERY KIND OF FILE — including a DEFINITION.
+     *
+     * A definition's module hypothesizes the instance its corpus's class chain names
+     * (`section variable [R : Comm]`), because a body written in the corpus's
+     * vocabulary reaches its ground symbols through it (`R.plus`). It is context, not
+     * content: the chain is the GROUND's to declare, and a node module never emits it.
+     * So the load below is ungated, while the DEFINITIONS load stays gated — those
+     * collide with a definition's own body. */
+    {
         {
             // Theorems also load the axiom classes they cite.
             let ax_key = ctx.scope().to_string();
@@ -334,6 +351,21 @@ pub fn emit_file_with(
                 context.push(a.clone());
             }
         }
+    }
+    /* The DEFINITIONS corpus is context only for a theorem/axiom module: a
+       definition's own module emits its body, and loading the corpus for it collided
+       with that body (`def times ... := tau_0` typed over `Prop`). */
+    if nodes.iter().any(|n| {
+        matches!(n, qubitick_model::Node::Theorem(_) | qubitick_model::Node::Axiom(_))
+    }) {
+        let defs = match cache.defs.get(ctx.scope()) {
+            Some(d) => d.clone(),
+            None => std::sync::Arc::new(crate::axioms::load_definition_nodes(
+                conn,
+                ctx,
+                ctx.scope(),
+            )?),
+        };
         for d in defs.iter() {
             let (node, division) = (&d.node, d.division);
             if let qubitick_model::Node::Definition(def) = node {
@@ -387,6 +419,35 @@ pub fn emit_file_with(
     // operators defined by recursion over a formation can be emitted as `{carrier}.rec`
     // recursor defs. They are not re-emitted; they contribute their constructor algebra.
     let src_key2 = format!("{}|{}", ctx.scope(), corpus_root(path).display());
+    /* A FORMATION'S CONSTRUCTORS ARE ITS TYPE. `\tau = \tau_0 \vee (^+ \tau)` names two
+       constructors whose SORTS live on their own nodes (one node per file), and without
+       those the inductive is a pile of untyped constants. So the nodes that declare a
+       formation's constructors join the context with it — they are not re-emitted (the
+       formation's module writes the `def ctor` aliases), only consulted. */
+    {
+        let sources: Vec<qubitick_model::Node> = cached_sources(ctx, path, cache, &src_key2).to_vec();
+        let ctor_ids: Vec<u32> = sources
+            .iter()
+            .filter_map(|n| match n {
+                qubitick_model::Node::Definition(d) => match &d.d_block.form {
+                    Some(qubitick_model::FormBody::Formation(cs)) => {
+                        Some(cs.iter().map(|c| c.constructor.primary))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        for node in &sources {
+            if let qubitick_model::Node::Definition(d) = node
+                && ctor_ids.contains(&d.symbol.primary)
+                && !context.iter().any(|c| c.base().id == node.base().id)
+            {
+                context.push(node.clone());
+            }
+        }
+    }
     for node in cached_sources(ctx, path, cache, &src_key2).iter().cloned() {
         if let qubitick_model::Node::Definition(d) = &node
             && matches!(d.d_block.form, Some(qubitick_model::FormBody::Formation(_)))
@@ -466,7 +527,7 @@ pub fn emit_file_with(
         )?;
         return Ok(emitted);
     }
-    let emitted = qubitick_emit::emit_lean_text_split(
+    let emitted = qubitick_emit::emit_lean_text_split_with(
         ctx,
         &context,
         &nodes,
@@ -474,8 +535,41 @@ pub fn emit_file_with(
         &def_index,
         &thm_index,
         &mut rules,
+        opts,
     )?;
     Ok(emitted)
+}
+
+/// Emit and compile a corpus into ONE module tree, and return that tree's root.
+///
+/// A footprint probe (`qubitick axioms`) compiles a module of the corpus with
+/// `#print axioms` appended, and that module IMPORTS the modules that define the glyphs
+/// it names — so the corpus has to exist as oleans first. This is the same ordered
+/// compile `run_pipeline` does, without the report.
+pub fn compiled_tree(
+    conn: &qubitick_db::Db,
+    files: &[PathBuf],
+    ground: Option<&Path>,
+) -> Result<PathBuf> {
+    let mut cache = EmitCache::default();
+    let mut scope_ctxs: std::collections::HashMap<String, qubitick_ctx::Ctx> =
+        std::collections::HashMap::new();
+    let mut units: Vec<crate::lean_check::ModuleUnit> = Vec::new();
+    for f in files {
+        let ctx = scope_ctx(conn, f, &mut scope_ctxs)?;
+        let source = emit_file_cached(ctx, conn, f, &mut cache)?;
+        let module = crate::lake::module_name_of(&f.display().to_string())
+            .unwrap_or_else(|| format!("Qubitick.Corpus.{}", units.len()));
+        units.push(crate::lean_check::ModuleUnit {
+            module,
+            file: f.clone(),
+            source,
+        });
+    }
+    let tree = crate::lean_check::tree_dir();
+    let _ = std::fs::remove_dir_all(&tree);
+    crate::lean_check::check_modules(ground, &units, &tree)?;
+    Ok(tree.join("src"))
 }
 
 /// The source-parsed definition nodes for a corpus root, memoised in `cache`.
@@ -706,39 +800,37 @@ pub fn run_pipeline(
         .collect();
 
     let t_emit = t0.elapsed();
-    // Phase 2 (parallel): Lean-check the emitted modules.
-    // Parallelism: `QUBITICK_JOBS` overrides; else the machine's parallelism.
-    // (Inside a nix-shell `available_parallelism` can report 1, which would
-    // silently serialise the whole check phase.)
-    let threads = std::env::var("QUBITICK_JOBS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1)
+    // Phase 2: compile the emitted modules IN DEPENDENCY ORDER.
+    //
+    // A module imports the modules that define the glyphs it names, and a Lean import
+    // needs the imported module's `.olean` — so the corpus is compiled the way a package
+    // is, each module after the ones it imports. Checking them independently is what
+    // made the engine write `axiom {op}` + `axiom {op}_def` instead of an import.
+    let mut units: Vec<crate::lean_check::ModuleUnit> = Vec::new();
+    let mut unit_of_file: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (i, f) in files.iter().enumerate() {
+        let Prepared::Emitted(emitted) = &prepared[i] else {
+            continue;
+        };
+        let module = crate::lake::module_name_of(&f.display().to_string()).unwrap_or_else(|| {
+            format!("Qubitick.Corpus.{}", i)
+        });
+        unit_of_file.insert(i, units.len());
+        units.push(crate::lean_check::ModuleUnit {
+            module,
+            file: f.clone(),
+            source: emitted.clone(),
+        });
+    }
+    let tree = crate::lean_check::tree_dir();
+    let module_checks = crate::lean_check::check_modules(ground, &units, &tree)?;
+    let checks: Vec<Option<Vec<Diagnostic>>> = (0..files.len())
+        .map(|i| {
+            unit_of_file
+                .get(&i)
+                .and_then(|u| module_checks.get(*u).cloned())
         })
-        .clamp(1, 16);
-    let checks: Vec<std::sync::Mutex<Option<Result<Vec<Diagnostic>>>>> =
-        (0..files.len()).map(|_| std::sync::Mutex::new(None)).collect();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        for _ in 0..threads.min(files.len().max(1)) {
-            scope.spawn(|| {
-                loop {
-                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if i >= files.len() {
-                        break;
-                    }
-                    if let Prepared::Emitted(emitted) = &prepared[i] {
-                        let outcome = check_file_diagnostics(&files[i], emitted, ground);
-                        *checks[i].lock().expect("check slot lock") = Some(outcome);
-                    }
-                }
-            });
-        }
-    });
+        .collect();
 
     let t_check = t0.elapsed() - t_emit;
     if std::env::var("QUBITICK_TIMING").is_ok() {
@@ -789,21 +881,10 @@ pub fn run_pipeline(
                 })
             }
             Prepared::Emitted(_) => {
-                let outcome = checks[i]
-                    .lock()
-                    .expect("check slot lock")
-                    .take()
-                    .unwrap_or_else(|| {
-                        Err(anyhow::anyhow!("file was never checked"))
-                    });
                 let mut diagnostics =
                     file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
-                match outcome {
-                    Ok(ds) => diagnostics.extend(ds),
-                    Err(e) => diagnostics.push(
-                        Diagnostic::error(Phase::Build, "build.lean-failed", e.to_string())
-                            .in_file(path.clone()),
-                    ),
+                if let Some(ds) = &checks[i] {
+                    diagnostics.extend(ds.iter().cloned());
                 }
                 let verified = !diagnostics.iter().any(Diagnostic::is_error);
                 results.push(BuildFileResult {
@@ -898,21 +979,38 @@ mod tests {
     fn declare_ops(root: &std::path::Path) {
         let defs = root.join("Era0/Strata0/Definitions");
         std::fs::create_dir_all(&defs).unwrap();
+        /* EVERY GLYPH NAMES ITS HOME: `Type: R.<field>` says the glyph IS that field of
+           the structure the proofs are parametric over, so the engine declares nothing
+           for it and the corpus's own ground (see `ground_with_chain`) is where it
+           lives. The signature is what types the field. */
         std::fs::write(
             defs.join("D_00_Delta.qbit"),
-            "D.X.00. Delta\na \\Delta b\nRole: nullity\n",
+            "D.X.00. Delta\na \\Delta b\nType: R.Delta : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\nRole: nullity\n",
         )
         .unwrap();
-        std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\n").unwrap();
+        std::fs::write(
+            defs.join("D_02_Cap.qbit"),
+            "D.X.02. Cap\na \\cap b\nType: R.cap : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\n",
+        )
+        .unwrap();
         std::fs::write(
             defs.join("D_03_Empty.qbit"),
-            "D.X.03. Empty\n\\varnothing\nRole: null\n",
+            "D.X.03. Empty\n\\varnothing\nType: R.varnothing\nRole: null\n",
         )
         .unwrap();
         // The carrier and the unit: `A1. Base` writes both, and every glyph an A block
         // writes needs a D node in its stratum (crates/build/src/coverage.rs).
-        std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\n").unwrap();
-        std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\n").unwrap();
+        std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\nType: R.E : Type\n").unwrap();
+        std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\nType: R.unit\n").unwrap();
+    }
+
+    /// The ground such a corpus needs: the contract, plus the class chain its A block
+    /// implies. `qubitick scaffold` writes the second half; a project owns both.
+    fn ground_with_chain(root: &std::path::Path) -> String {
+        let mut db = qubitick_db::open_in_memory().unwrap();
+        crate::ingest_corpus(&mut db, root).unwrap();
+        let chain = crate::scaffold::scaffold(&db, root, "Qubitick.HL").unwrap();
+        format!("{}\n\n{chain}", crate::ground::HL_LEAN)
     }
 
     #[test]
@@ -943,6 +1041,13 @@ mod tests {
         std::fs::write(
             root.join("Era0/Strata0/Theorems/T_01_Self.qbit"),
             "T.X.01. WedgeSelf\n\\forall a : \\mathfrak{E}, a \\wedge a = \\mathbb{1}\nProof:\na \\wedge a\n  = \\mathbb{1} \\Delta (a \\Delta a)    [D.X.01]\n  = \\mathbb{1} \\Delta \\varnothing     [A1.3]\n  = \\mathbb{1}                     [A1.2]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("ground/Qubitick")).unwrap();
+        std::fs::write(root.join("ground/Qubitick/HL.lean"), ground_with_chain(&root)).unwrap();
+        std::fs::write(
+            root.join("Canon.qbit"),
+            "P. Own\nId: own\nKind: project\nModule: Qubitick.HL\nLeanDir: ground\n",
         )
         .unwrap();
         let mut conn = qubitick_db::open_in_memory().unwrap();
@@ -1009,7 +1114,7 @@ mod tests {
         /* the project brings its own ground — the shipped one to start with, so a green build
            here is about WHERE it was read from, not about what it says */
         std::fs::create_dir_all(root.join("ground/Qubitick")).unwrap();
-        std::fs::write(root.join("ground/Qubitick/HL.lean"), crate::ground::HL_LEAN).unwrap();
+        std::fs::write(root.join("ground/Qubitick/HL.lean"), ground_with_chain(&root)).unwrap();
         std::fs::write(
             root.join("Canon.qbit"),
             "P. Own Ground\nId: own-ground\nKind: project\nModule: Qubitick.HL\nLeanDir: ground\n",
@@ -1087,6 +1192,13 @@ mod tests {
                  \x20 = \\mathbb{{1}} \\Delta \\varnothing     [{axiom_id}.3]\n\
                  \x20 = \\mathbb{{1}}                     [{cite}]\n"
             ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("ground/Qubitick")).unwrap();
+        std::fs::write(root.join("ground/Qubitick/HL.lean"), ground_with_chain(&root)).unwrap();
+        std::fs::write(
+            root.join("Canon.qbit"),
+            "P. Byo\nId: byo\nKind: project\nModule: Qubitick.HL\nLeanDir: ground\n",
         )
         .unwrap();
         root
@@ -1243,10 +1355,11 @@ mod tests {
     }
 
     #[test]
-    fn emits_bare_prelude_module_with_type_frame_and_no_latex_leak() {
-        // Locks in the emission-correctness work: the module is a bare-`prelude`
-        // module, declares a `Prop` type frame for referenced glyphs, renders
-        // equality as `Eq`, and never leaks raw LaTeX into the emitted Lean.
+    fn an_a_block_emits_nothing() {
+        // An A block is the corpus's GRAMMAR — the symbols and the ways they compose —
+        // and it emits no declaration at all: not the frame, not the class, not an
+        // `axiom`. What a proof module owns is its own `def`/`theorem`; an A block owns
+        // neither. This is the invariant `no_axiom_emission` rests on.
         use qubitick_db::queries::SymbolRow;
         let row = |id: i64, tex: &str| SymbolRow { facets: 0,
             id,
@@ -1279,18 +1392,38 @@ mod tests {
         );
         let src = "A1. Realm\n\\forall a b : \\mathfrak{E}, a \\Delta b = b \\Delta a";
         let nodes = qubitick_parse::parse_content(&ctx, src).unwrap();
-        let out = qubitick_emit::emit_lean_text(&ctx, &nodes, "Qubitick.HL", &mut qubitick_rewrite::rules::RuleTable::new()).unwrap();
+        let out = qubitick_emit::emit_lean_text(
+            &ctx,
+            &nodes,
+            "Qubitick.HL",
+            &mut qubitick_rewrite::rules::RuleTable::new(),
+        )
+        .unwrap();
 
+        assert!(out.starts_with("prelude\nimport Qubitick.HL"), "got:\n{out}");
+        assert!(!out.contains("axiom"), "an A block declares no axiom:\n{out}");
         assert!(
-            out.starts_with("prelude\nimport Qubitick.HL"),
-            "got:\n{out}"
+            !out.contains("class "),
+            "the class chain is the ground's:\n{out}"
         );
-        assert!(
-            out.contains("axiom Delta : Prop → Prop → Prop"),
-            "got:\n{out}"
-        );
-        assert!(out.contains("def mathfrak_E : Type := Prop"), "got:\n{out}");
-        assert!(out.contains("Eq (Delta a b) (Delta b a)"), "got:\n{out}");
+        // The body between the namespace and its `end` holds no declaration.
+        let body = out
+            .split("namespace Qubitick.HL")
+            .nth(1)
+            .and_then(|r| r.rsplit_once("end Qubitick.HL").map(|(b, _)| b))
+            .unwrap_or("");
+        for line in body.lines() {
+            let t = line.trim();
+            assert!(
+                t.is_empty()
+                    || t.starts_with("--")
+                    || t.starts_with("/-")
+                    || t.starts_with("# ")
+                    || t.starts_with("Math:")
+                    || t.ends_with("-/"),
+                "an A block writes no Lean: {line:?}\n{out}"
+            );
+        }
         // The original bug: raw ASCII-LaTeX leaking into Lean.
         assert!(!out.contains("\\Delta"), "raw LaTeX leaked:\n{out}");
         assert!(!out.contains("\\forall"), "raw LaTeX leaked:\n{out}");

@@ -772,6 +772,14 @@ pub(crate) struct Frame {
     pub declared: HashSet<String>,
     /// The Lean type of everything this module can name.
     pub types: HashMap<String, String>,
+    /// Glyphs this module NAMES and does not declare, as `(lean name, home node)`.
+    ///
+    /// The frame used to write `axiom <name> : <ty>` for these, which is the fallback
+    /// this architecture removes: an axiom is a global fact nobody chose. Each one is
+    /// a DEFINITION that lives in another module, so the answer is an `import` — the
+    /// glyph arrives as the `def` its own module wrote, and a citation of it closes by
+    /// conversion instead of by a characterising axiom.
+    pub needed: Vec<(String, i64)>,
 }
 
 /// The Lean type a frame gives a glyph.
@@ -794,6 +802,17 @@ fn glyph_type(
     sigs.get(&id).cloned().unwrap_or_default().ty(name_of)
 }
 
+/// The formation a glyph is a CONSTRUCTOR of, if it is one.
+fn formulations_carrier(
+    formations: &HashMap<u32, (String, Vec<u32>)>,
+    id: u32,
+) -> Option<u32> {
+    formations
+        .iter()
+        .find(|(_, (_, ctors))| ctors.contains(&id))
+        .map(|(carrier, _)| *carrier)
+}
+
 /// Whether the corpus BINDS this glyph to a Lean name that already exists.
 ///
 /// A bound glyph is declared by the project's ground, so the frame declares nothing for
@@ -809,7 +828,21 @@ fn symbol_declarations(
     fn_names: &std::collections::HashMap<u32, String>,
     opts: &Options,
 ) -> Frame {
-    let resolver = crate::resolver(ctx, fn_names);
+    let base_resolver = crate::resolver(ctx, fn_names);
+    /* IN A GROUND, A FIELD OF THE INSTANCE NAMES ITSELF.
+     *
+     * The corpus reaches a ground symbol through `R` (`Type: R.plus`) because that is how
+     * a proof module says it; the ground is where the class DECLARING that field lives, and
+     * inside it there is no instance yet. So a ground writes the field's own name — the
+     * same reading the class body makes, applied to the whole file. */
+    let resolver = move |id: u32| -> String {
+        let name = base_resolver(id);
+        if opts.ground_only {
+            name.strip_prefix("R.").map(str::to_string).unwrap_or(name)
+        } else {
+            name
+        }
+    };
     let name_of = |id: u32| resolver(id);
     // The sorts the corpus DECLARES, and the constructors of each formation. Every
     // typing decision below reads this map and the glyphs' own authored signatures;
@@ -822,6 +855,9 @@ fn symbol_declarations(
     // holds every definition at once, showed it as
     // `Qubitick.HL.W has already been declared`.
     let mut declared_names: HashSet<String> = HashSet::new();
+    // Glyphs this module names and does not declare: each is another module's
+    // definition, and each becomes an IMPORT (see `Frame::needed`).
+    let mut needed: Vec<(String, i64)> = Vec::new();
     // lean name -> declared Lean type string, for every frame symbol.
     let mut declared_types: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -858,6 +894,20 @@ fn symbol_declarations(
     let mut seen: HashSet<u32> = HashSet::new();
     for n in nodes {
         visit_node(n, &mut sigs, &mut sorts, &mut seen, &env);
+    }
+    /* WHAT THIS MODULE ITSELF WRITES.
+     *
+     * `nodes` is the module's CONTEXT — the whole scope — and the frame is built over
+     * it so a body can resolve what its neighbours declare. But an IMPORT is only owed
+     * for a glyph the module's own text names: deriving one from the context made every
+     * module in a corpus import every other and the compile order became a cycle. */
+    let mut own: HashSet<u32> = HashSet::new();
+    {
+        let (mut s2, mut so2, mut own2) = (HashMap::new(), HashSet::new(), HashSet::new());
+        for n in emitted {
+            visit_node(n, &mut s2, &mut so2, &mut own2, &env);
+        }
+        own.extend(own2);
     }
     // --- Infer operator RESULT sorts (a declared carrier, or `Prop`) ---
     // An operator whose result a CONSTRUCTOR of a declared sort consumes, or that
@@ -1204,15 +1254,56 @@ fn symbol_declarations(
             // `axiom`.
             defer_recursor_defs.push((id, def_text.clone()));
         } else {
-            let ty = glyph_type(id, &sigs, &authored, &name_of);
             if declared_types.contains_key(&lean) {
                 // Already declared by the sort loop above (a frame assembled from a
                 // whole era can reach one glyph from both). One declaration, or the
                 // module does not elaborate.
                 continue;
             }
-            declared_types.insert(lean.clone(), ty.clone());
-            out.push_str(&format!("axiom {lean} : {ty}\n"));
+            /* NO `axiom`. A glyph this module names and does not declare is a
+               definition that lives in ANOTHER module, and the honest encoding of
+               that is an `import`: the module gets the `def` its own module wrote, so
+               a citation of it closes by kernel conversion and `#print axioms` sees
+               nothing. Writing `axiom {lean} : {ty}` instead made every cross-module
+               reference a global assumption nobody chose — the bug this removes. */
+            if !own.contains(&id) && !own.contains(&(id.wrapping_sub(FN_OFFSET))) {
+                // The context declares it for a neighbour; this module never writes it.
+                continue;
+            }
+            /* A CONSTRUCTOR'S HOME IS THE FORMATION'S MODULE.
+               One node per file means `\tau` and its constructors are separate nodes, and
+               they refer to each other: the formation is typed by its constructors' sorts,
+               a constructor by its carrier. Importing each other's modules is a cycle; the
+               module that declares the inductive declares its constructors too (as the
+               `def ctor : ... := C.ctor` aliases), so that is the one to import. */
+            /* A FORMATION'S OWN MODULE DECLARES ITS CONSTRUCTORS, so it does not
+               import them: `\tau = \tau_0 \vee (^+ \tau)` writes the constructors to
+               declare them, and the module writes `inductive tau | tau_0 | caret`
+               itself. Importing the constructor's node instead would be that node
+               importing the carrier back — the one cycle a one-node-per-file corpus
+               cannot break any other way. */
+            if emitted.iter().any(|n| {
+                matches!(n, Node::Definition(d)
+                    if matches!(&d.d_block.form, Some(qubitick_model::FormBody::Formation(ctors))
+                        if ctors.iter().any(|c| c.constructor.primary == id)))
+            }) {
+                continue;
+            }
+            let carrier = formulations_carrier(&formations, id);
+            let home = carrier
+                .and_then(|c| ctx.by_id(c as i64))
+                .or_else(|| ctx.carrier_of_ctor(id as i64))
+                .or_else(|| ctx.by_id(id as i64))
+                .map(|r| r.home_node)
+                .unwrap_or(-1);
+            /* A GLYPH THIS MODULE DECLARES IS NOT IMPORTED. `Type: \mathcal{P} -> ...`
+               with no ground name is a glyph the module itself declares (a frame sort), so
+               its home node is this one — importing it made the module import ITSELF, and
+               the compile order had no first module. */
+            if emitted.iter().any(|n| n.base().id as i64 == home) {
+                continue;
+            }
+            needed.push((lean.clone(), home));
         }
     }
     // Every ordinary frame declaration counts as declared too.
@@ -1283,10 +1374,6 @@ fn symbol_declarations(
             let name = crate::lean_name_of(ctx, d.symbol.primary);
             let l = qubitick_lean::render(&eqargs[0], &resolver);
             let r = qubitick_lean::render(&eqargs[1], &resolver);
-            let own_def = emitted.iter().any(|nd| {
-                matches!(nd, Node::Definition(dd)
-                    if crate::lean_name_of(ctx, dd.symbol.primary) == name)
-            });
             // ONE carrier per characterising axiom, and it is whoever declares the
             // operator it names — an `axiom {op}_def` must FOLLOW the `def {op}`:
             //   * the GROUND declares the era's definitions, so it carries their
@@ -1298,22 +1385,16 @@ fn symbol_declarations(
             //     the only module that can see both halves. Emitting them here as
             //     well duplicated every one the moment two scope modules of the same
             //     era joined the same ground.
-            let skip = if opts.ground_only {
-                // The ground declares the era's definitions, so it carries EVERY
-                // `_def` line: the ones whose operator nothing defines (a frame
-                // axiom) and the ones whose operator its own `def` declares — for
-                // those the char-axiom is appended after the definitions, which is
-                // the whole reason they cannot simply sit in the frame.
-                false
-            } else if opts.ground == Ground::Inline {
-                // A per-file module declares the frame itself and no definitions:
-                // it carries the `_def` lines of the operators it does not define.
-                own_def
-            } else {
-                // A module that IMPORTS its ground carries none — the ground is the
-                // only module that can see both halves.
-                true
-            };
+            /* A NODE MODULE NEVER CARRIES A CHARACTERISING AXIOM.
+             *
+             * The pair `axiom {op}` + `axiom {op}_def` existed because a definition
+             * seen from a module that could not unfold it had to be restated as an
+             * assumption. A module IMPORTS the module that defines the operator now, so
+             * the operator IS a `def` there and a citation of it closes by kernel
+             * conversion (`Eq.refl`) — the `_def` half has nothing left to say. Only a
+             * GROUND, which declares the era's definitions itself, still writes one, and
+             * only for an operator whose own declaration it carries. */
+            let skip = !opts.ground_only;
 
             if skip {
                 continue;
@@ -1414,6 +1495,7 @@ fn symbol_declarations(
         arity,
         declared: declared_names,
         types: known_types,
+        needed,
     }
 }
 
@@ -1794,10 +1876,38 @@ pub fn emit_lean_text_split(
     thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
 ) -> Result<String> {
+    emit_lean_text_split_with(
+        ctx,
+        context,
+        own,
+        namespace,
+        def_index,
+        thm_index,
+        rules,
+        &Options::inline(),
+    )
+}
+
+/// As [`emit_lean_text_split`], but with the caller's options.
+///
+/// The build path needs this one: `Options::home_modules` is how a module names the
+/// modules it must import, and a caller that builds its own default options silently
+/// loses that map — every cross-module glyph then reaches the emitter with no home.
+#[allow(clippy::too_many_arguments)]
+pub fn emit_lean_text_split_with(
+    ctx: &Ctx,
+    context: &[Node],
+    own: &[Node],
+    namespace: &str,
+    def_index: &HashMap<u32, u32>,
+    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    rules: &mut RuleTable,
+    opts: &Options,
+) -> Result<String> {
     let mut all: Vec<Node> = Vec::with_capacity(context.len() + own.len());
     all.extend_from_slice(context);
     all.extend_from_slice(own);
-    emit_lean_text_impl(ctx, &all, own, namespace, def_index, thm_index, rules, &Options::inline())
+    emit_lean_text_impl(ctx, &all, own, namespace, def_index, thm_index, rules, opts)
 }
 
 /// As [`emit_lean_text`], but told each definition symbol's corpus division index
@@ -1843,6 +1953,7 @@ impl Options {
             ground_module: String::new(),
             declare_cited: true,
             extra_imports: Vec::new(),
+            home_modules: std::collections::HashMap::new(),
             ground_chain: false,
             ground_only: false,
         }
@@ -1878,6 +1989,14 @@ pub struct Options {
     /// Modules this one must import beyond the ground (its cited theorems and the
     /// modules that define the glyphs it uses).
     pub extra_imports: Vec<String>,
+    /// Node id -> the Lean module that node's file becomes, for the WHOLE corpus.
+    ///
+    /// A module that names a glyph another module defines imports that module; this is
+    /// the map that turns a glyph's home node into a module name. Filled by the caller
+    /// that has the corpus on disk (`crates/build`); empty for a caller that emits a
+    /// single file with no corpus, which is why a glyph with no entry is an error rather
+    /// than a silent `axiom`.
+    pub home_modules: std::collections::HashMap<i64, String>,
     /// Declare the theorems this module cites as assumed lemmas.
     ///
     /// True for a per-file module, which cannot see the theorem it cites. False when
@@ -2030,6 +2149,16 @@ fn emit_lean_text_impl(
         .map(|s| reduce_field_statement(&s))
         .collect();
 
+    /* CAN THIS MODULE NAME A CLASS? The chain is the GROUND's now: a module imports the
+       ground, so a corpus with any A block has one, and the module hypothesizes the
+       instance without declaring the class. The old question — does this module declare
+       the class itself? — is gone with the per-module chain. */
+    let chain_declared = if opts.ground == Ground::Inline {
+        opts.ground_only || chain.iter().any(|c| c.parent.is_none())
+    } else {
+        opts.ground_chain
+    };
+
     for entry in &chain {
         let Some(Node::Axiom(a)) = nodes
             .iter()
@@ -2152,9 +2281,51 @@ let mut binder_prefix = String::new();
         arity: frame_arity,
         declared: frame_declared,
         types: known_types,
+        needed: frame_needed,
     } = symbol_declarations(ctx, &collect, emit_nodes, &fn_names, opts);
+    /* THE MODULES THIS ONE MUST IMPORT, from the glyphs it names and does not own.
+     *
+     * Each is a definition that lives in another module. `opts.home_modules` is the
+     * corpus's own map (node id -> Lean module name), assembled by the caller that has
+     * the corpus on disk; a glyph whose home is not in the map reached the emitter
+     * without a home at all, which is a build error, not an axiom. */
+    /* AN A BLOCK EMITS NOTHING.
+     *
+     * Its module is vocabulary and composition — the grammar of the display — and a
+     * grammar is not a set of claims. So the frame is not written here either: the
+     * only declarations a node module owns are its own (`def` from a `Sema:`,
+     * `theorem` from a `T` block), and an A block owns neither. This is what makes
+     * "the emitted Lean contains no declaration from an A block" checkable. */
+    let a_block_only = emit_nodes.iter().all(|n| {
+        matches!(
+            n,
+            Node::Axiom(_) | Node::Calibration(_) | Node::Census(_)
+        )
+    });
+    let mut needed_imports: Vec<String> = Vec::new();
+    for (lean, home) in &frame_needed {
+        if a_block_only {
+            // An A block emits nothing at all, so it imports nothing either: the frame
+            // it would have needed is exactly what it does not write.
+            break;
+        }
+        match opts.home_modules.get(home) {
+            Some(m) => {
+                if !needed_imports.contains(m) {
+                    needed_imports.push(m.clone());
+                }
+            }
+            None => {
+                return Err(anyhow::anyhow!(
+                    "`{lean}` is named here but no module declares it: a glyph the \
+                     emitter cannot reach has no home, and the engine writes no `axiom` \
+                     in its place. Give it a D node with `Type:` or `Sema:`."
+                ));
+            }
+        }
+    }
     let mut body = String::new();
-    if inline {
+    if inline && !a_block_only {
         body.push_str(&declarations);
         // Assumed lemmas exist only because a per-file module cannot see the theorem
         // it cites. Where the theorems are declared in this module already — an era
@@ -2174,7 +2345,41 @@ let mut binder_prefix = String::new();
     // `\subseteq`) and Lean wants a declaration before its use.
     let mut chain_body = String::new();
     if inline && chain.iter().any(|c| c.parent.is_none()) {
-        chain_body.push_str("class ISA where\n-- framework symbols (home = None)\nE : Type\n\n");
+        /* THE ROOT CLASS CARRIES THE SYMBOLS THE CORPUS ONLY NAMES.
+         *
+         * A D block that says `Type: R.plus` names a field of the instance the proofs are
+         * parametric over; the class that DECLARES that field is this one. The engine does
+         * not decide the field's meaning — it writes the type the corpus's own `Type:`
+         * signature gave it, and the user's ground may say anything else. */
+        chain_body.push_str("class ISA where\n-- the symbols the corpus names but does not define (Type: R.<field>)\n");
+        let mut fields: Vec<String> = Vec::new();
+        let mut bound: Vec<&qubitick_db::queries::SymbolRow> = ctx
+            .symbols()
+            .filter(|r| r.kind == "bound")
+            .filter(|r| r.lean_name.starts_with("R."))
+            .collect();
+        bound.sort_by_key(|r| {
+            let ty = known_types
+                .get(&r.lean_name)
+                .or_else(|| known_types.get(r.lean_name.trim_start_matches("R.")))
+                .cloned()
+                .unwrap_or_default();
+            (usize::from(ty != "Type"), r.id)
+        });
+        for row in bound {
+            let field = row.lean_name.trim_start_matches("R.").to_string();
+            if fields.contains(&field) {
+                continue;
+            }
+            let ty = known_types
+                .get(&row.lean_name)
+                .or_else(|| known_types.get(&field))
+                .cloned()
+                .unwrap_or_else(|| "Prop".to_string());
+            fields.push(field.clone());
+            chain_body.push_str(&format!("  {field} : {ty}\n"));
+        }
+        chain_body.push('\n');
         // The class chain is emitted from `chain`, NOT from the node loop.
         //
         // A theorem's file holds ONE node: its axioms arrive as CONTEXT (so the frame
@@ -2197,11 +2402,15 @@ let mut binder_prefix = String::new();
             ));
         }
     }
-    if !opts.ground_only {
-        // A node module needs the class before the theorems that live in it.
-        body.push_str(&chain_body);
-
-    }
+    /* THE CLASS CHAIN IS THE GROUND'S, NOT A NODE MODULE'S.
+     *
+     * `class ISA where ...` and one class per A block declare the ASSUMPTIONS the
+     * corpus is written against, and they belong in the one file the user owns — not
+     * re-emitted into every module that happens to name them. A node module imports
+     * the ground and hypothesizes the instance (`section variable [R : Comm]`); the
+     * classes are the ground's. Only a ground writes them, below, AFTER its own
+     * definitions (a class field is written in the corpus's vocabulary, so a field
+     * that mentions a defined glyph needs that glyph declared first). */
 
     for node in emit_nodes.iter() {
         match node {
@@ -2253,7 +2462,12 @@ let mut binder_prefix = String::new();
                 if frame_declared.contains(&definition_decl_name(ctx, d, &fn_names)) {
                     continue;
                 }
-                body.push_str(&crate::definition::emit_definition_in(
+                /* A DEFINITION IS WRITTEN IN THE CORPUS'S VOCABULARY, so a body that
+                   names a ground symbol reached through the instance (`R.plus`) needs
+                   the instance hypothesized — the same `section variable [R : class]` a
+                   theorem gets. An unused hypothesis binds nothing, so wrapping a
+                   definition that does not need it is free. */
+                let def_text = crate::definition::emit_definition_in(
                     ctx,
                     d,
                     frame_sorts.contains(&d.symbol.primary),
@@ -2262,10 +2476,22 @@ let mut binder_prefix = String::new();
                     &frame_sorts,
                     &formations,
                     &known_types,
-                )?);
+                    opts.ground_only,
+                )?;
+                /* A GROUND does not hypothesize its own chain: it DECLARES it, below,
+                   after its definitions (a field is written in the corpus's vocabulary,
+                   so a field that mentions a defined glyph needs that glyph first). */
+                if chain_declared && !opts.ground_only {
+                    let class = section_class(&chain, &[]);
+                    body.push_str(&format!(
+                        "section\nvariable [R : {class}]\n\n{def_text}end\n"
+                    ));
+                } else {
+                    body.push_str(&def_text);
+                }
                 body.push('\n');
             }
-            // Classes come from the chain above; an axiom contributes nothing here.
+            // Classes are the ground's; an A block contributes nothing here.
             Node::Axiom(_) => {}
             Node::Calibration(_) | Node::Census(_) => {
                 body.push_str(&format!(
@@ -2277,8 +2503,8 @@ let mut binder_prefix = String::new();
     }
 
     if opts.ground_only {
-        // A ground's own definitions came first; the chain that MENTIONS them
-        // follows them — and so do their characterising axioms, which name them.
+        // A ground's definitions came first; the chain that MENTIONS them follows them,
+        // and so do their characterising axioms, which name them.
         body.push_str(&chain_body);
         body.push_str(&char_axioms);
     }
@@ -2296,6 +2522,7 @@ let mut binder_prefix = String::new();
         more.push(opts.ground_module.clone());
     }
     more.extend(opts.extra_imports.iter().cloned());
+    more.extend(needed_imports.iter().cloned());
     for m in more {
         if m.is_empty() || !seen_imports.insert(m.clone()) {
             continue;
@@ -2485,6 +2712,7 @@ pub fn emit_ground(
         ground_module: String::new(),
         declare_cited: false,
         extra_imports: Vec::new(),
+        home_modules: std::collections::HashMap::new(),
         ground_chain: false,
         ground_only: true,
     };
@@ -2498,6 +2726,93 @@ pub fn emit_ground(
         &mut rules,
         &opts,
     )
+}
+
+/// THE CHAIN ALONE — what `qubitick scaffold` writes into a user's ground.
+///
+/// A ground supplies what the corpus only NAMES: the root class carrying those symbols,
+/// and one class per A block carrying that block's statements as fields. It supplies no
+/// definition — a `Sema:` is the corpus's, and its module writes it — so there is no
+/// ordering problem between a definition and the class its body is written over.
+pub fn emit_ground_chain(
+    ctx: &Ctx,
+    nodes: &[Node],
+    namespace: &str,
+) -> Result<String> {
+    let opts = Options {
+        ground: Ground::Inline,
+        ground_module: String::new(),
+        declare_cited: false,
+        extra_imports: Vec::new(),
+        home_modules: std::collections::HashMap::new(),
+        ground_chain: false,
+        ground_only: true,
+    };
+    let fn_names = HashMap::new();
+    // The frame is not emitted — only consulted, for the type of every symbol the corpus
+    // names. A ground carries no frame: the corpus's own modules do.
+    let Frame { sorts, types, .. } = symbol_declarations(ctx, nodes, &[], &fn_names, &opts);
+    let axioms: Vec<&Axiom> = nodes
+        .iter()
+        .filter_map(|n| match n {
+            Node::Axiom(a) => Some(a),
+            _ => None,
+        })
+        .collect();
+    let chain = build_chain(&axioms);
+    let mut out = String::new();
+    if !namespace.trim().is_empty() {
+        out.push_str(&format!("namespace {namespace}\n\n"));
+    }
+    out.push_str("class ISA where\n-- the symbols the corpus names but does not define (Type: R.<field>)\n");
+    let mut fields: Vec<String> = Vec::new();
+    let mut bound: Vec<&qubitick_db::queries::SymbolRow> = ctx
+        .symbols()
+        .filter(|r| r.kind == "bound")
+        .filter(|r| r.lean_name.starts_with("R."))
+        .collect();
+    // A CARRIER COMES FIRST: a field typed `E → E → E` needs `E` declared above it, so
+    // the symbols whose type is a sort lead. Then corpus order.
+    bound.sort_by_key(|r| {
+        let ty = types
+            .get(&r.lean_name)
+            .or_else(|| types.get(r.lean_name.trim_start_matches("R.")))
+            .cloned()
+            .unwrap_or_default();
+        (usize::from(ty != "Type"), r.id)
+    });
+    for row in bound {
+        let field = row.lean_name.trim_start_matches("R.").to_string();
+        if fields.contains(&field) {
+            continue;
+        }
+        let ty = types
+            .get(&row.lean_name)
+            .or_else(|| types.get(&field))
+            .cloned()
+            .unwrap_or_else(|| "Prop".to_string());
+        fields.push(field.clone());
+        out.push_str(&format!("  {field} : {ty}\n"));
+    }
+    out.push('\n');
+    for entry in &chain {
+        let Some(stmts) = chain_statements(&axioms, entry) else {
+            continue;
+        };
+        out.push_str(&emit_axiom_class(
+            ctx,
+            &entry.name,
+            &stmts,
+            entry.parent.as_deref(),
+            entry.offset,
+            &fn_names,
+            &sorts,
+        ));
+    }
+    if !namespace.trim().is_empty() {
+        out.push_str(&format!("\nend {namespace}\n"));
+    }
+    Ok(out)
 }
 
 /// A node module in the meshed shape: own content only, importing the ground and
@@ -2530,6 +2845,7 @@ pub fn emit_lean_text_meshed(
         ground_module: ground_module.to_string(),
         declare_cited,
         extra_imports,
+        home_modules: std::collections::HashMap::new(),
         ground_chain,
         ground_only: false,
     };
@@ -2656,10 +2972,19 @@ fn emit_axiom_class(
         // Sort glyphs render as the carrier so a field's binder type matches the
         // operator declarations (`Δ : Prop → Prop → Prop`).
         let reduced = reduce_field_statement(stmt);
-        let lean = qubitick_lean::render(
-            &reduced,
-            &crate::resolver_with_sorts(ctx, fn_names, sorts),
-        );
+        let base = crate::resolver_with_sorts(ctx, fn_names, sorts);
+        /* A FIELD OF THE STRUCTURE NAMES ITSELF BARE HERE.
+         *
+         * The corpus reaches a field through the instance it quantifies over — a D block
+         * says `Type: R.plus`, and a proof module writes `R.plus`. Inside the class that
+         * DECLARES the field there is no instance yet, so the field's own name is what
+         * the body says. This is the scaffold's only reading of the corpus's names, and it
+         * reads nothing into them: whatever follows the `R.` is used as written. */
+        let bare = |id: u32| -> String {
+            let name = base(id);
+            name.strip_prefix("R.").map(str::to_string).unwrap_or(name)
+        };
+        let lean = qubitick_lean::render(&reduced, &bare);
         out.push_str(&format!("  ax_{} : {lean}\n", offset + k));
     }
     out.push('\n');
@@ -2756,15 +3081,20 @@ mod tests {
         assert_eq!(section_class(&[], &[]), "ISA");
     }
 
+    /* A NODE MODULE DECLARES NO CLASS — the ground owns the chain.
+     *
+     * The chain was emitted into every module that named it, which is what made a
+     * corpus's assumptions live in a file nobody wrote. A module now imports the ground
+     * and hypothesizes the instance (`section variable [R : ...]`); the classes are the
+     * ground's, and `emit_ground_chain` is the only thing that writes them. */
     #[test]
-    fn emits_class_chain_shell() {
+    fn a_node_module_declares_no_class() {
         let ctx = Ctx::from_rows("Era0/Strata0", vec![]);
         let a1 = Node::Axiom(axiom(1, "Realm", 1));
         let a2 = Node::Axiom(axiom(2, "Capacity", 1));
         let out = emit_lean_text(&ctx, &[a1, a2], "Qubitick.HL", &mut RuleTable::new()).unwrap();
-        assert!(out.contains("class ISA"));
-        assert!(out.contains("class Realm extends ISA"));
-        assert!(out.contains("class Capacity extends Realm"));
+        assert!(!out.contains("class "), "{out}");
+        assert!(!out.contains("axiom"), "{out}");
     }
 
     /* THE ONE WAY AN INDUCTIVE APPEARS IS A FORMATION THE CORPUS DECLARES.

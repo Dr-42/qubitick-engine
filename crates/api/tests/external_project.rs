@@ -49,13 +49,16 @@ fn scratch(tag: &str) -> PathBuf {
 fn declare_ops(dir: &Path) {
     let defs = dir.join("Era0/Strata0/Definitions");
     std::fs::create_dir_all(&defs).unwrap();
-    std::fs::write(defs.join("D_00_Delta.qbit"), "D.X.00. Delta\na \\Delta b\nRole: nullity\n").unwrap();
-    std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\n").unwrap();
-    std::fs::write(defs.join("D_03_Empty.qbit"), "D.X.03. Empty\n\\varnothing\nRole: null\n").unwrap();
-    // THE CARRIER: `A1. Base` writes `\mathfrak{E}` as a binder sort, so the stratum must home
-    // it — every glyph an A block writes needs a D node (crates/build/src/coverage.rs).
-    std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\n").unwrap();
-    std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\n").unwrap();
+    /* EVERY GLYPH NAMES ITS HOME. `Type: R.Delta` says the glyph IS the ground's
+       `Delta`, reached through the instance the proofs are parametric over — so the
+       engine declares nothing for it, and the corpus's own ground (below) is where it
+       lives. A bare node would be a glyph the ENGINE has to invent a declaration for,
+       which is the fallback this architecture removes. */
+    std::fs::write(defs.join("D_00_Delta.qbit"), "D.X.00. Delta\na \\Delta b\nType: R.Delta : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\nRole: nullity\n").unwrap();
+    std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\nType: R.cap : \\mathfrak{E} \\to \\mathfrak{E} \\to \\mathfrak{E}\n").unwrap();
+    std::fs::write(defs.join("D_03_Empty.qbit"), "D.X.03. Empty\n\\varnothing\nType: R.varnothing\nRole: null\n").unwrap();
+    std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\nType: R.E : Type\n").unwrap();
+    std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\nType: R.unit\n").unwrap();
 }
 
 fn corpus(dir: &Path) {
@@ -89,10 +92,25 @@ fn corpus(dir: &Path) {
 /// A project that carries its OWN ground: a charter naming `LeanDir: lean`, and that ground's
 /// `Qubitick/HL.lean` — the shipped one to start with, so a green build is about WHERE it was read
 /// from rather than about what it says.
+/// The ground a corpus's own A block implies: the contract, plus the class chain the
+/// block's statements become. `Canon.qbit` names `LeanDir:`; without it the engine's
+/// base is used, which carries the contract and NOT the corpus's vocabulary.
+fn ground_with_chain(dir: &Path) -> String {
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, dir).expect("ingest for the scaffold");
+    let chain = qubitick_build::scaffold::scaffold(&db, dir, "Qubitick.HL").expect("scaffold");
+    /* The root class carries the symbols the corpus only NAMES, and the scaffold's chain
+       declares the laws over them (`ax_0 : ... Eq (Delta (Delta a b) c) ...` — a field is
+       written bare inside the class that declares it). */
+    let text = format!("{}\n\n{chain}", qubitick_build::ground::HL_LEAN);
+    let _ = std::fs::write("/tmp/qb-fixture-ground.lean", &text);
+    text
+}
+
 fn project_with_own_ground(dir: &Path, title: &str) {
     corpus(dir);
     std::fs::create_dir_all(dir.join("lean/Qubitick")).unwrap();
-    std::fs::write(dir.join("lean/Qubitick/HL.lean"), qubitick_build::ground::HL_LEAN).unwrap();
+    std::fs::write(dir.join("lean/Qubitick/HL.lean"), ground_with_chain(dir)).unwrap();
     std::fs::write(
         dir.join("Canon.qbit"),
         format!("P. {title}\nId: own\nKind: project\nModule: Qubitick.HL\nLeanDir: lean\n"),
@@ -356,9 +374,12 @@ async fn an_admitted_theorem_verifies_and_is_counted() {
         "T.X.02. Open\n\\forall a : \\mathfrak{E}, a \\wedge a = \\mathbb{1}\nProof:\n\\sorry\n",
     )
     .unwrap();
+    // The corpus has an A block, so it has a class chain, so it carries a ground.
+    std::fs::create_dir_all(dir.join("lean/Qubitick")).unwrap();
+    std::fs::write(dir.join("lean/Qubitick/HL.lean"), ground_with_chain(&dir)).unwrap();
     std::fs::write(
         dir.join("Canon.qbit"),
-        "P. Admitted\nId: admitted\nKind: project\n",
+        "P. Admitted\nId: admitted\nKind: project\nLeanDir: lean\n",
     )
     .unwrap();
 

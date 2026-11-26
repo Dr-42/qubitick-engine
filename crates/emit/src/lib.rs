@@ -8,8 +8,8 @@ pub mod module;
 pub mod theorem;
 
 pub use module::{
-    Ground, Options, emit_ground, emit_lean_text, emit_lean_text_indexed,
-    emit_lean_text_era, emit_lean_text_meshed, emit_lean_text_split, emit_module,
+    Ground, Options, emit_ground, emit_ground_chain, emit_lean_text, emit_lean_text_indexed,
+    emit_lean_text_era, emit_lean_text_meshed, emit_lean_text_split, emit_lean_text_split_with, emit_module,
     lemma_name,
 };
 

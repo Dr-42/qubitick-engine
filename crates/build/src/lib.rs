@@ -10,6 +10,7 @@ pub mod cite_rules;
 pub mod cite_target;
 pub mod coverage;
 pub mod row_check;
+pub mod scaffold;
 pub mod cites;
 pub mod file;
 pub mod ground;

@@ -39,7 +39,16 @@ fn footprint(dir: &Path, rel: &str) -> Vec<String> {
     let names: Vec<String> = nodes.iter().map(|n| n.base().name.clone()).collect();
     let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).unwrap();
     let ground = qubitick_build::ground::for_check(dir).unwrap();
-    qubitick_build::lean_check::axioms_footprint(Some(&ground), &emitted, &names)
+    /* THE CORPUS AS OLEANS FIRST: the module being probed imports the modules that
+       define the glyphs it names, so a footprint cannot be read until the corpus it
+       belongs to has compiled. */
+    let tree = qubitick_build::pipeline::compiled_tree(
+        &db,
+        &qubitick_build::walk_qbit(dir),
+        Some(&ground),
+    )
+    .unwrap();
+    qubitick_build::lean_check::axioms_footprint(Some(&tree), &emitted, &names)
         .unwrap()
         .into_iter()
         .flat_map(|f| f.axioms)
@@ -125,21 +134,24 @@ fn a_bare_prelude_theorem_prints_nothing() {
 }
 
 #[test]
-fn the_ship_prints_the_admissions_it_does_make() {
+fn the_ship_stands_on_nothing() {
     if !lean_is_here() {
         eprintln!("skipping: lean not found");
         return;
     }
-    // Not a gate, a fact: the tutorial ship's theorem stands on the axioms the ENGINE
-    // emitted for its own declarations (`plus` is the corpus's primitive, `times` and
-    // `times_def` are its definition seen from a module that cannot unfold it). The
-    // footprint shows them, and the number is the corpus author's to lower — by binding
-    // a glyph to what the ground already provides, or by declaring the carrier.
+    /* THE HEADLINE NUMBER. The engine emits no `axiom`, so the only assumptions a
+       theorem can stand on are the ones the corpus's GROUND carries — and this ship's
+       ground carries none: its symbols are fields of the structure the proof is
+       parametric over (`section variable [R : Comm]`), `times` unfolds to `R.plus a a`,
+       and `#print axioms` therefore prints nothing at all.
+
+       It used to print `plus, times, times_def` — the corpus's primitive restated as an
+       assumption in every module that named it. */
     let ship = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus-templates/algebra");
     let found = footprint(&ship, "Era0/Strata0/Theorems/T_A_01_MulTwo.qbit");
     assert!(
-        found.contains(&"plus".to_string()) && found.contains(&"times".to_string()),
-        "the ship's theorem stands on its own declarations, named as Lean names them: {found:?}"
+        found.is_empty(),
+        "the ship's theorem stands on nothing at all: {found:?}"
     );
 }
 

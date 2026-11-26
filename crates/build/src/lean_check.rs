@@ -7,6 +7,16 @@ use anyhow::{Context, Result};
 use qubitick_model::{Diagnostic, Phase, Severity, Span};
 
 static SCRATCH_SEQ: AtomicUsize = AtomicUsize::new(0);
+/// One module tree per compile, even when two corpora are built in one process.
+static TREE_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+/// A fresh directory for one module tree. Two corpora built in one process (a swap, a
+/// test) must not share a tree: the second would inherit the first's modules, and a
+/// name they both declare would look like a collision.
+pub fn tree_dir() -> std::path::PathBuf {
+    let n = TREE_SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("qubitick-modules-{}-{n}", std::process::id()))
+}
 
 /// Check an emitted Lean file by invoking the `lean` binary on a scratch copy.
 ///
@@ -85,6 +95,196 @@ pub fn check_file_diagnostics(
         );
     }
     Ok(diagnostics)
+}
+
+/// One module of a corpus build: the Lean emitted for a file, and where it belongs.
+pub struct ModuleUnit {
+    /// The module name the emission gave it (`Qubitick.Corpus.Era0...D_A_02_Mul`).
+    pub module: String,
+    /// The `.qbit` it came from, which is the file a diagnostic names.
+    pub file: PathBuf,
+    /// The emitted Lean.
+    pub source: String,
+}
+
+/// Compile a corpus's modules IN DEPENDENCY ORDER, into one shared tree.
+///
+/// An emitted module IMPORTS the modules that define the glyphs it names, and a Lean
+/// import needs the imported module's `.olean`. So the corpus compiles the way a package
+/// does: every module written once into `tree`, then each module compiled after the ones
+/// it imports. This is the answer to "a definition seen from a module that cannot unfold
+/// it" — the old answer was an `axiom` pair, and the honest one is to build the module
+/// that defines it first.
+///
+/// Returns one diagnostic list per unit, in the caller's order. A module whose import
+/// never compiled reports Lean's own words about the missing object file, which is the
+/// truth about that module.
+pub fn check_modules(
+    ground: Option<&Path>,
+    units: &[ModuleUnit],
+    tree: &Path,
+) -> Result<Vec<Vec<Diagnostic>>> {
+    let src = tree.join("src");
+    let mut paths: Vec<PathBuf> = Vec::with_capacity(units.len());
+    for unit in units {
+        let rel = unit.module.replace('.', "/");
+        let path = src.join(format!("{rel}.lean"));
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, &unit.source)
+            .with_context(|| format!("writing module {}", path.display()))?;
+        paths.push(path);
+    }
+    let prelude = resolve_prelude(ground, tree);
+    if let Some(p) = &prelude {
+        ensure_prelude(p)?;
+    }
+    /* ONE ROOT, holding the ground AND the corpus's modules.
+     *
+     * Lean resolves an import against the first search-path root whose leading
+     * directory matches, so two roots — the ground (holding `Qubitick/`) and a module
+     * tree (holding `Qubitick/Corpus/`) — make every corpus import look for its olean
+     * under whichever root it happened to match first. A package has one `src/` with
+     * both; so does this. */
+    if let Some(p) = &prelude {
+        copy_ground_into(p, &src)?;
+    }
+    let lean_path = src.display().to_string();
+
+    // Who imports whom, within the corpus (the ground is already compiled).
+    let known: std::collections::HashMap<&str, usize> = units
+        .iter()
+        .enumerate()
+        .map(|(i, u)| (u.module.as_str(), i))
+        .collect();
+    let deps: Vec<Vec<usize>> = units
+        .iter()
+        .map(|u| {
+            let mut out: Vec<usize> = Vec::new();
+            for line in u.source.lines() {
+                let Some(rest) = line.trim().strip_prefix("import ") else {
+                    continue;
+                };
+                if let Some(i) = known.get(rest.trim())
+                    && !out.contains(i)
+                {
+                    out.push(*i);
+                }
+            }
+            out
+        })
+        .collect();
+
+    let mut results: Vec<Option<Vec<Diagnostic>>> = (0..units.len()).map(|_| None).collect();
+    let mut done: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    while done.len() < units.len() {
+        let wave: Vec<usize> = (0..units.len())
+            .filter(|i| !done.contains(i) && deps[*i].iter().all(|d| done.contains(d)))
+            .collect();
+        if wave.is_empty() {
+            // A cycle: every module left waits on another. Name them and stop; the
+            // corpus has a shape the emitter cannot order, which is its own error.
+            for i in 0..units.len() {
+                if done.contains(&i) {
+                    continue;
+                }
+                results[i] = Some(vec![Diagnostic::error(
+                    Phase::Build,
+                    "build.import-cycle",
+                    "this module is part of an import cycle: no order compiles it".to_string(),
+                )
+                .in_file(units[i].file.display().to_string())]);
+            }
+            break;
+        }
+        let slots: Vec<std::sync::Mutex<Option<Vec<Diagnostic>>>> =
+            wave.iter().map(|_| std::sync::Mutex::new(None)).collect();
+        std::thread::scope(|scope| {
+            for (slot, &i) in slots.iter().zip(wave.iter()) {
+                let (path, lean_path) = (paths[i].clone(), lean_path.clone());
+                let file = units[i].file.clone();
+                let src_dir = src.clone();
+                let rel = format!("{}.lean", units[i].module.replace('.', "/"));
+                let olean = path.with_extension("olean");
+                scope.spawn(move || {
+                    /* `-o` and a RELATIVE input, run from the module root: Lean writes
+                       an `.olean` only where it is told, and it wants the input to live
+                       under the root it resolves imports from. Without the olean an
+                       `import` of this module fails for every dependent — which is the
+                       whole reason a corpus compiles in dependency order. */
+                    let mut cmd = std::process::Command::new("lean");
+                    cmd.current_dir(&src_dir)
+                        .arg("-o")
+                        .arg(&olean)
+                        .arg(&rel)
+                        .env("LEAN_PATH", &lean_path);
+                    let out = cmd.output();
+                    let diagnostics = match out {
+                        Err(e) => vec![Diagnostic::error(
+                            Phase::Build,
+                            "build.lean-failed",
+                            format!("failed to spawn `lean` for {}: {e}", path.display()),
+                        )
+                        .in_file(file.display().to_string())],
+                        Ok(out) if out.status.success() => Vec::new(),
+                        Ok(out) => {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            let stderr = String::from_utf8_lossy(&out.stderr);
+                            let mut ds = parse_lean_errors(&file, &stdout);
+                            ds.extend(parse_lean_errors(&file, &stderr));
+                            if ds.is_empty() {
+                                ds.push(
+                                    Diagnostic::error(
+                                        Phase::Build,
+                                        "build.lean-failed",
+                                        format!("lean rejected the module:\n{}", stdout.trim()),
+                                    )
+                                    .in_file(file.display().to_string()),
+                                );
+                            }
+                            ds
+                        }
+                    };
+                    *slot.lock().expect("wave slot lock") = Some(diagnostics);
+                });
+            }
+        });
+        for (slot, &i) in slots.into_iter().zip(wave.iter()) {
+            results[i] = slot.into_inner().expect("wave slot lock");
+            done.insert(i);
+        }
+    }
+    Ok(results
+        .into_iter()
+        .map(|r| r.unwrap_or_default())
+        .collect())
+}
+
+/// Lay a compiled ground's `Qubitick/` into a module tree, so one root holds both.
+fn copy_ground_into(ground: &Path, src: &Path) -> Result<()> {
+    fn walk(from: &Path, to: &Path) -> Result<()> {
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let path = entry.path();
+            let target = to.join(entry.file_name());
+            if path.is_dir() {
+                std::fs::create_dir_all(&target)?;
+                walk(&path, &target)?;
+            } else if path.extension().is_some_and(|e| e == "lean" || e == "olean") {
+                std::fs::create_dir_all(to)?;
+                std::fs::copy(&path, &target)?;
+            }
+        }
+        Ok(())
+    }
+    let from = ground.join("Qubitick");
+    if from.is_dir() {
+        // `Qubitick/` exists in the tree already (the corpus's own modules); this
+        // merges the ground's files in beside them rather than replacing the tree.
+        walk(&from, &src.join("Qubitick"))?;
+    }
+    Ok(())
 }
 
 /// The ground a Lean invocation runs against: the caller's assembled ground, else a
