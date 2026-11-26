@@ -3190,7 +3190,10 @@ mod tests {
         for c in ["p", "q", "r", "s"] {
             assert!(out.contains(&format!("def {c} : W := W.{c}\n")), "{out}");
         }
-        // An operator whose authored signature returns the carrier is typed with it.
-        assert!(out.contains("axiom oplus : (W) → W\n"), "{out}");
+        /* ...and the operator the corpus declares with a signature and NO home is
+           declared by nobody: the engine writes no `axiom` for a glyph that lives
+           nowhere. `\oplus` is one — the corpus owes it a `Type: <ground name>` or a
+           `Sema:`, and the coverage pass says which (crates/build/src/coverage.rs). */
+        assert!(!out.contains("axiom"), "{out}");
     }
 }

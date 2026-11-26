@@ -221,6 +221,31 @@ declaration format's own alphabet (`=`, the iff, the arrows, the quantifiers, th
 corners) is the engine's and is exempt: a corpus is never asked to declare the format it is
 written in.
 
+### The import graph, and the order
+
+A module imports the modules that declare the glyphs its own text names, so the compile
+order is that graph walked wave by wave — every module after the ones it imports, and the
+members of a wave are independent, so they compile together. A loop has no first member, so
+it is reported **before anything compiles**, naming the loop in order and the files:
+
+```
+this module is part of an import cycle:
+    Qubitick.Corpus.Era0.Strata0.Definitions.D_01_Left → ...D_02_Right → ...D_01_Left
+  A module imports what its own text names, so an import cycle cannot be compiled.
+```
+
+Three graphs, three questions, and they are not the same graph:
+
+| graph | over | where it is checked |
+|---|---|---|
+| import | modules, by the glyphs a module names | before compiling (`lean_check::import_waves`) |
+| definition | definitions, by the glyphs they use | at ingest (`cycles.rs::definition_cycles`) |
+| citation | theorems, by the nodes they cite | written into `canon.bit` as `acyclic` + `edges`, served by `GET /api/graph` |
+
+`canon.rs` records the citation graph and notes that certifying a cycle with a Lean `Path`
+term is the intended drill-down; the DAG itself is a computation, and the artifact is
+`canon.bit`.
+
 ---
 
 ## 5. What gets emitted
@@ -238,7 +263,8 @@ Four constructs, and nothing else: `def`, `inductive`, `theorem`, and a referenc
   is declared by nobody in the corpus, and every use site writes the name the corpus wrote.
 
 The engine emits **no `axiom`**, ever — not for a primitive, not for a definition seen from
-another module, not for a sort word. A module that names a glyph another module defines
+another module, not for a sort word, and not for a `Sema:` whose body will not render as a
+term (that is a build error naming the glyph). A module that names a glyph another module defines
 **imports** that module, and the build compiles the corpus in dependency order so the import
 resolves. A glyph the engine cannot reach has no home, and that is a build error naming it.
 

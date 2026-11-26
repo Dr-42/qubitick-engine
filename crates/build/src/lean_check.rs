@@ -176,28 +176,19 @@ pub fn check_modules(
         })
         .collect();
 
+    /* THE ORDER IS A DAG WALK, AND IT IS CHECKED BEFORE ANY COMPILING HAPPENS.
+     *
+     * A module compiles after the modules it imports, and a cycle has no first member —
+     * so a corpus that imports in a loop is a corpus defect, not a slow build. This is
+     * the same relation `crates/build/src/cycles.rs` reports at the GLYPH level (two
+     * definitions that use each other) and `canon.rs` records for the citation graph;
+     * here it is the module graph the emission actually produced. */
+    let waves = match import_waves(units, &deps) {
+        Ok(w) => w,
+        Err(cycle) => return Ok(cycle_diagnostics(units, &cycle)),
+    };
     let mut results: Vec<Option<Vec<Diagnostic>>> = (0..units.len()).map(|_| None).collect();
-    let mut done: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    while done.len() < units.len() {
-        let wave: Vec<usize> = (0..units.len())
-            .filter(|i| !done.contains(i) && deps[*i].iter().all(|d| done.contains(d)))
-            .collect();
-        if wave.is_empty() {
-            // A cycle: every module left waits on another. Name them and stop; the
-            // corpus has a shape the emitter cannot order, which is its own error.
-            for i in 0..units.len() {
-                if done.contains(&i) {
-                    continue;
-                }
-                results[i] = Some(vec![Diagnostic::error(
-                    Phase::Build,
-                    "build.import-cycle",
-                    "this module is part of an import cycle: no order compiles it".to_string(),
-                )
-                .in_file(units[i].file.display().to_string())]);
-            }
-            break;
-        }
+    for wave in waves.iter() {
         let slots: Vec<std::sync::Mutex<Option<Vec<Diagnostic>>>> =
             wave.iter().map(|_| std::sync::Mutex::new(None)).collect();
         std::thread::scope(|scope| {
@@ -252,13 +243,110 @@ pub fn check_modules(
         });
         for (slot, &i) in slots.into_iter().zip(wave.iter()) {
             results[i] = slot.into_inner().expect("wave slot lock");
-            done.insert(i);
         }
     }
     Ok(results
         .into_iter()
         .map(|r| r.unwrap_or_default())
         .collect())
+}
+
+/// The compile order of a corpus, wave by wave, or the cycle that has none.
+///
+/// Kahn's algorithm over the modules' own `import` lines: each wave holds the modules
+/// every one of whose imports is already built, so members of a wave may compile in
+/// parallel and no module compiles before something it imports.
+fn import_waves(
+    units: &[ModuleUnit],
+    deps: &[Vec<usize>],
+) -> Result<Vec<Vec<usize>>, Vec<usize>> {
+    let mut waves: Vec<Vec<usize>> = Vec::new();
+    let mut done: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    while done.len() < units.len() {
+        let wave: Vec<usize> = (0..units.len())
+            .filter(|i| !done.contains(i) && deps[*i].iter().all(|d| done.contains(d)))
+            .collect();
+        if wave.is_empty() {
+            // Everything left waits on something left. Hand back a concrete loop rather
+            // than the whole stuck set: "these three" is actionable, "these forty" is not.
+            return Err(find_cycle(deps, &done));
+        }
+        done.extend(wave.iter().copied());
+        waves.push(wave);
+    }
+    Ok(waves)
+}
+
+/// One closed loop among the modules that could not be ordered.
+fn find_cycle(deps: &[Vec<usize>], done: &std::collections::HashSet<usize>) -> Vec<usize> {
+    let mut colour: std::collections::HashMap<usize, u8> = std::collections::HashMap::new();
+    for start in (0..deps.len()).filter(|i| !done.contains(i)) {
+        if colour.contains_key(&start) {
+            continue;
+        }
+        // Iterative DFS with the path on the stack, so the loop is read off directly.
+        let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
+        let mut path: Vec<usize> = vec![start];
+        colour.insert(start, 1);
+        while let Some((node, at)) = stack.pop() {
+            if at < deps[node].len() {
+                stack.push((node, at + 1));
+                let next = deps[node][at];
+                if done.contains(&next) {
+                    continue;
+                }
+                match colour.get(&next).copied() {
+                    Some(1) => {
+                        // A back edge: the loop is the path from `next` to here.
+                        if let Some(pos) = path.iter().position(|p| *p == next) {
+                            return path[pos..].to_vec();
+                        }
+                        return vec![next, node];
+                    }
+                    Some(_) => {}
+                    None => {
+                        colour.insert(next, 1);
+                        path.push(next);
+                        stack.push((next, 0));
+                    }
+                }
+            } else {
+                colour.insert(node, 2);
+                path.pop();
+            }
+        }
+    }
+    (0..deps.len()).filter(|i| !done.contains(i)).collect()
+}
+
+/// What a corpus with an import cycle is told: the loop, in order, with the files.
+fn cycle_diagnostics(units: &[ModuleUnit], cycle: &[usize]) -> Vec<Vec<Diagnostic>> {
+    let loop_text = cycle
+        .iter()
+        .map(|i| units[*i].module.clone())
+        .collect::<Vec<_>>()
+        .join(" → ");
+    let files = cycle
+        .iter()
+        .map(|i| units[*i].file.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n    ");
+    let message = format!(
+        "this module is part of an import cycle:\n    {loop_text} → {}\n  \
+         A module imports what its own text names, so an import cycle cannot be compiled.\n  \
+         The loop is:\n    {files}",
+        units[cycle[0]].module
+    );
+    (0..units.len())
+        .map(|i| {
+            if cycle.contains(&i) {
+                vec![Diagnostic::error(Phase::Build, "build.import-cycle", message.clone())
+                    .in_file(units[i].file.display().to_string())]
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
 }
 
 /// Lay a compiled ground's `Qubitick/` into a module tree, so one root holds both.
@@ -603,6 +691,68 @@ mod tests {
 
     fn parse(out: &str) -> Vec<Diagnostic> {
         parse_lean_errors(Path::new("project/T_BT_01.qbit"), out)
+    }
+
+    fn unit(module: &str, file: &str, imports: &[usize]) -> ModuleUnit {
+        let mut source = String::from("prelude\n");
+        for i in imports {
+            source.push_str(&format!("import {}\n", ["A", "B", "C"][*i]));
+        }
+        ModuleUnit {
+            module: module.to_string(),
+            file: std::path::PathBuf::from(file),
+            source,
+        }
+    }
+
+    /// THE ORDER IS A DAG WALK: a module compiles after the ones it imports, and the
+    /// members of a wave are independent, so they may compile together.
+    #[test]
+    fn modules_compile_in_import_order() {
+        // C imports B, B imports A: three waves, one each.
+        let units = vec![
+            unit("A", "A.qbit", &[]),
+            unit("B", "B.qbit", &[0]),
+            unit("C", "C.qbit", &[1]),
+        ];
+        let deps = vec![vec![], vec![0], vec![1]];
+        let waves = import_waves(&units, &deps).expect("a chain has an order");
+        assert_eq!(waves, vec![vec![0], vec![1], vec![2]]);
+
+        // Two modules that import nothing are one wave: they compile in parallel.
+        let units = vec![unit("A", "A.qbit", &[]), unit("B", "B.qbit", &[])];
+        let deps = vec![vec![], vec![]];
+        assert_eq!(import_waves(&units, &deps).unwrap(), vec![vec![0, 1]]);
+    }
+
+    /// A LOOP HAS NO FIRST MEMBER. It is reported before anything compiles, and the
+    /// report names the loop in order with the files a person has to change.
+    #[test]
+    fn an_import_cycle_is_named_with_its_files() {
+        let units = vec![
+            unit("A", "/corpus/D_01_Left.qbit", &[1]),
+            unit("B", "/corpus/D_02_Right.qbit", &[0]),
+            // Not in the loop, but waiting on one: it is reported only as blocked.
+            unit("C", "/corpus/D_03_Downstream.qbit", &[0]),
+        ];
+        let deps = vec![vec![1], vec![0], vec![0]];
+        let cycle = import_waves(&units, &deps).expect_err("a loop has no order");
+        let mut sorted = cycle.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![0, 1], "both members are in the loop: {cycle:?}");
+
+        let diagnostics = cycle_diagnostics(&units, &cycle);
+        let said = diagnostics[0][0].message.clone();
+        assert!(said.contains("import cycle"), "{said}");
+        assert!(said.contains("A") && said.contains("B"), "the loop is named: {said}");
+        assert!(
+            said.contains("D_01_Left.qbit") && said.contains("D_02_Right.qbit"),
+            "and so are the files: {said}"
+        );
+        assert!(
+            diagnostics[2].is_empty(),
+            "a module waiting on the loop is not itself a member"
+        );
     }
 
     #[test]

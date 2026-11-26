@@ -32,7 +32,7 @@ pub fn emit_definition_in(
     ctx: &Ctx,
     def: &Definition,
     is_sort: bool,
-    arity: usize,
+    _arity: usize,
     fn_names: &std::collections::HashMap<u32, String>,
     sorts: &std::collections::HashSet<u32>,
     formations: &HashMap<u32, (String, Vec<u32>)>,
@@ -65,7 +65,9 @@ pub fn emit_definition_in(
         return Ok(String::new());
     }
     if is_sort {
-        return Ok(format!("axiom {name} : Type\n"));
+        // The frame declares a sort glyph (`def X : Type := Prop`); a second declaration
+        // here collided with it, and an `axiom` was the wrong shape for it anyway.
+        return Ok(String::new());
     }
     match &def.d_block.form {
         Some(qubitick_model::FormBody::MacroExpr(e)) => {
@@ -73,21 +75,16 @@ pub fn emit_definition_in(
             // definitionally); otherwise the glyph is declared uninterpreted. An
             // operator defined by recursion over a declared formation is emitted as a
             // recursor `def` first; only if that is not applicable do we fall back to
-            // a plain macro/axiom.
-            Ok(
-                recursor_def_text_formation(ctx, &name, e, &resolver, formations)
-                    .or_else(|| macro_def_text(ctx, &name, e, &resolver, known))
-                    // Nothing about this Sema compiles to a term, so the glyph stays
-                    // uninterpreted — declared with the type the FRAME inferred for
-                    // it, not a flat `Prop → ... → Prop`. The two must agree: the
-                    // frame's answer is what every OTHER module sees, and in a ground
-                    // that holds both, a flat declaration here would make the glyph's
-                    // own node disagree with its own helper's body.
-                    .unwrap_or_else(|| match known.get(&name) {
-                        Some(ty) if ty != "Type" => format!("axiom {name} : {ty}\n"),
-                        _ => declaration(&name, arity),
-                    }),
-            )
+            // a term.
+            match recursor_def_text_formation(ctx, &name, e, &resolver, formations)
+                .or_else(|| macro_def_text(ctx, &name, e, &resolver, known))
+            {
+                Some(text) => Ok(text),
+                None => Err(anyhow::anyhow!(
+                    "`Sema:` body for `{name}` cannot be rendered as a Lean term.\n  \
+                     Bind the glyph with `Type:` to a ground name, or simplify the body."
+                )),
+            }
         }
         Some(qubitick_model::FormBody::Formation(ctors)) => {
             // Document 5 §5.3: bare-prelude inductive with `genInjectivity` off.
@@ -101,9 +98,16 @@ pub fn emit_definition_in(
             }
             Ok(out)
         }
-        // A body we cannot compile (recursive/bracket forms) leaves the glyph as
-        // an uninterpreted symbol rather than failing the whole file.
-        Some(_) => Ok(declaration(&name, arity)),
+        /* A BODY THE ENGINE CANNOT COMPILE IS A BUILD ERROR, NOT AN ASSUMPTION.
+         *
+         * This used to emit `axiom {name} : <type>` — an uninterpreted symbol nobody
+         * chose, in place of the definition the corpus wrote. A `Sema:` that does not
+         * render as a term is a hole in the corpus: bind the glyph with `Type:` to a
+         * ground name, or write a body that compiles. */
+        Some(_) => Err(anyhow::anyhow!(
+            "`Sema:` body for `{name}` cannot be rendered as a Lean term.\n  \
+             Bind the glyph with `Type:` to a ground name, or simplify the body."
+        )),
         None => {
             // An authored `Type:` is read EXACTLY as the frame reads it
             // (`render_type_expr`), not rendered verbatim. The two must agree: the
@@ -118,21 +122,14 @@ pub fn emit_definition_in(
                 .sig
                 .as_ref()
                 .map(|s| crate::module::render_type_expr(ctx, s));
-            Ok(match sig {
-                Some(ty) => format!("axiom {name} : {ty}\n"),
-                None => declaration(&name, arity),
-            })
+            // A glyph the corpus declares with a `Type:` and defines nowhere: the
+            // engine writes NO declaration for it. Either the ground carries the name
+            // (`Type: <name>` — the binding is the home) or the corpus has a hole, and
+            // the frame says which (crates/emit/src/module.rs, `Frame::needed`).
+            let _ = sig;
+            Ok(String::new())
         }
     }
-}
-
-/// An uninterpreted declaration of `name` at the observed arity.
-fn declaration(name: &str, arity: usize) -> String {
-    let mut ty = String::from("Prop");
-    for _ in 0..arity {
-        ty = format!("Prop → {ty}");
-    }
-    format!("axiom {name} : {ty}\n")
 }
 
 /// Whether `body` mentions `name` as a whole identifier.
