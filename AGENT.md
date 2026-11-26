@@ -26,8 +26,16 @@ glyph. *Enforced by* `crates/build/tests/no_glyph_names.rs` (a source guard over
 production code) and `crates/build/tests/declaration_authority.rs`.
 
 **2. The declaration is the authority.** Fixity from the glyph line; classification from
-`Role:`; a signature from `Type:`; an inductive from a `Sema:` whose alternatives a
-declared connective separates; precedence from the charter. Nothing else may decide.
+`Role:`; a signature from `Type:`; a binding from `Lean:` (the glyph IS a name the ground
+carries, and the engine declares nothing for it); an inductive from a `Sema:` whose
+alternatives a declared connective separates; precedence from the charter. Nothing else
+may decide.
+
+**2a. Ingestion never refuses a corpus.** All of its passes read tolerantly
+(`qubitick_parse::tolerate_prose(true)`), because a project the editor cannot open is a
+project nobody can fix. The refusal is per file, by the build
+(`pipeline::refused_row_diagnostics` asks the parser once, strictly). Do not "fix" the
+tolerance by making ingestion strict: the sentence belongs in the report.
 
 **3. The engine's whole vocabulary is the declaration FORMAT** —
 `crates/model/src/corpus.rs` (`Facet`, `DeclaredRole`) and `crates/model/src/format.rs`
@@ -121,8 +129,6 @@ Consequences that have bitten:
 - The rewriter's `C.rec` branch takes the induction hypothesis exactly when the compiled
   body uses it; the declaration-side recursion is not reachable from that crate.
 - `POST /api/induce` answers `{"ok": false, "error": "theorem induction not implemented yet"}`.
-- A proof row that is prose is refused **after** the chain's opening expression; the
-  opening expression still falls back to raw text, because several of the engine's own
-  fixtures write glyphs they do not declare. That fallback is the next slice: make the
-  fixtures declare their glyphs and refuse prose everywhere.
+- A corpus that writes an undeclared glyph still *opens* (ingestion is tolerant) and its
+  build reports the refusal; `/api/parse` answers the refusal directly to the editor.
 - `print-axioms` (the footprint Lean reports) is not surfaced.

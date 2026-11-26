@@ -60,6 +60,19 @@ a × b = a + a                 the definition's body
 Math: Multiplication by repeated addition.
 ```
 
+A proof is a chain and, optionally, the term that closes it:
+
+```
+Proof:
+a + b
+  = b + a        [A1.Comm]     one step of the chain
+⊢ h                            the term that proves the goal (the derivation sign)
+∎                              the end-of-proof mark; it carries no step
+```
+
+A row that is none of those — an English sentence, a stray expression — is **refused**,
+and the build reports it per file naming the row.
+
 The header is `<kind>.<division>.<n>. <Name>` (`D.` definition, `A.` axiom, `T.` theorem).
 The first bare line is the **glyph line**. The fields a node may carry are a closed,
 short list: `Type:`, `Sema:`, `Role:`, `Proof:`, `Falsify:`, `Math:`, `Phys:`, and — for a
@@ -112,6 +125,11 @@ is a collector.
 | `relation` | a relation between two terms: binds looser than the arithmetic it compares |
 | `null` | the carrier's empty element (the rewriter anchors an equality on it) |
 | `nullity` | the nullity operator a proof rewrites through |
+
+**A binding** comes from `Lean:`: `Lean: HMul.hMul` says the glyph IS that name, so the
+engine declares nothing for it and every use renders it — a project that imports Mathlib
+calls Mathlib's notation and Mathlib's lemmas. A binding and a `Sema:` contradict each
+other (the ground declares the glyph, or the corpus does) and one node cannot say both.
 
 **Type and form** come from `Type:` (a signature, so an operator is typed over its
 carrier) and from `Sema:` (a body). A `Sema:` whose alternatives are separated by a
@@ -201,6 +219,8 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors, and its operators are typed over the carrier |
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
+| `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
+| `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, and the build reports the row |
 | `crates/parse/tests/proof_surface.rs` | `⊢ <term>` closes a proof, `∎` ends it, and prose is refused by name |
 
 `./toolchain` is the build wrapper: it provisions the pinned Rust and borrows the corpus's
@@ -238,7 +258,6 @@ corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
 - **Induction** in the proof rewriter takes the induction hypothesis when the compiled
   body uses it; the declaration-side recursion is not reachable from that crate.
 - `POST /api/induce` answers that theorem induction is not implemented yet.
-- A **proof row** that is prose is refused after the chain's opening expression; the
-  opening expression itself still falls back to raw text, because the engine's own
-  fixtures write glyphs they do not declare yet.
+- Ingestion never refuses a corpus: it builds the ledger from what it can read, and the
+  refusal reaches the report per file. A corpus with a bad row opens; its build fails.
 - **print-axioms** (the footprint Lean reports per theorem) is not surfaced.
