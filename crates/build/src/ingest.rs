@@ -754,7 +754,7 @@ fn persist_definition_metadata(
         let level: Option<i64> = ctx.by_id(sid).and_then(|r| {
             precedence
                 .iter()
-                .position(|l| l.iter().any(|g| *g == r.tex))
+                .position(|l| l.contains(&r.tex))
                 .map(|i| i as i64 + 1)
         });
         tx.execute(

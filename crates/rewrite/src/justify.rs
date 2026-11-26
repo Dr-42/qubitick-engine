@@ -147,7 +147,7 @@ fn base_cite(cite: &str) -> &str {
         let inner = rest
             .strip_suffix(qubitick_model::format::CITE_CLOSE)
             .unwrap_or(rest);
-        return inner.trim().split_whitespace().next().unwrap_or(inner.trim());
+        return inner.split_whitespace().next().unwrap_or(inner.trim());
     }
     trimmed
 }

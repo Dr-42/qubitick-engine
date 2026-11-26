@@ -801,10 +801,7 @@ fn fold_infix(
     min: i64,
 ) -> Result<(StructExpr, usize), Diagnostic> {
     let mut pos = pos;
-    loop {
-        let Some(Token::Symbol(id, _)) = tokens.get(pos) else {
-            break;
-        };
+    while let Some(Token::Symbol(id, _)) = tokens.get(pos) {
         let id = *id;
         if is_sym_pair_glyph(ctx, id) {
             // An unmatched closing norm bar terminates this term; the caller decides

@@ -1057,7 +1057,7 @@ fn cite_to_enum(name: &str) -> CiteName {
             let inner = rest
                 .strip_suffix(qubitick_model::format::CITE_CLOSE)
                 .unwrap_or(rest);
-            inner.trim().split_whitespace().next().unwrap_or(inner.trim())
+            inner.split_whitespace().next().unwrap_or(inner.trim())
         }
         None => name,
     };

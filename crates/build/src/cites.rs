@@ -67,11 +67,10 @@ pub fn dangling(
                 // in the corpus for it to name.
                 CiteName::Local(_) => None,
             };
-            if let Some(problem) = problem {
-                if !out.contains(&problem) {
+            if let Some(problem) = problem
+                && !out.contains(&problem) {
                     out.push(problem);
                 }
-            }
         }
     }
     Ok(out)

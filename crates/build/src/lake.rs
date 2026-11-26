@@ -202,11 +202,10 @@ pub fn build(out: &Path) -> Result<LakeReport> {
 /// Lake decides what to rebuild from timestamps, so rewriting an unchanged module
 /// would make every run a full rebuild — the opposite of the point.
 fn write_if_changed(path: &Path, content: &str) -> Result<()> {
-    if let Ok(existing) = std::fs::read(path) {
-        if existing == content.as_bytes() {
+    if let Ok(existing) = std::fs::read(path)
+        && existing == content.as_bytes() {
             return Ok(());
         }
-    }
     std::fs::write(path, content)?;
     Ok(())
 }

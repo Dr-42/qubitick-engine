@@ -83,7 +83,10 @@ fn hsl_hex(h: f64, s: f64, l: f64) -> String {
 
 /// Compute the palette for all symbols in the corpus DB.
 pub fn generate_palette(conn: &qubitick_db::Db) -> anyhow::Result<Vec<PaletteEntry>> {
-    let rows = queries::symbols_in_scope(conn, "")?;
+    // Every symbol the corpus has. A palette is a list of the glyphs the OPEN PROJECT
+    // writes; asking the empty (global) scope listed the reserved `=` and nothing else,
+    // whatever the corpus declared.
+    let rows = queries::symbols_all(conn)?;
     // Definition RHS is reconstructed from the emitted surface; the palette
     // currently keys off role/axis style. Kept as an empty map so the
     // composition-hue enhancement can be added later without changing callers.

@@ -77,7 +77,7 @@ pub fn load_definition_nodes(
         if sema.is_none() {
             let declared = ctx
                 .symbols()
-                .find(|r| r.home_node == header.id as i64 && r.kind == "formation")
+                .find(|r| r.home_node == header.id && r.kind == "formation")
                 .map(|r| r.id as u32);
             let Some(symbol) = declared else {
                 continue;
@@ -119,7 +119,7 @@ pub fn load_definition_nodes(
         let symbol = definiendum_head(ctx, &sema);
         // Skip operator-headed misparses, unidentifiable (symbol 0) glyphs, and
         // duplicate glyphs claimed by more than one definition.
-        if is_operator_of_another_node(ctx, symbol, header.id as i64)
+        if is_operator_of_another_node(ctx, symbol, header.id)
             || symbol == 0
             || !seen_symbols.insert(symbol)
         {
@@ -177,7 +177,9 @@ fn form_body_of(
     symbol: u32,
 ) -> Result<Option<(qubitick_model::SymbolKind, qubitick_model::FormBody)>> {
     use qubitick_model::{FormBody, SymbolKind};
-    let row: Option<(String, Option<String>, Option<String>, Option<String>)> = conn
+    /// `form_kind`, the constructor list, the two bracket delimiters.
+    type FormRow = (String, Option<String>, Option<String>, Option<String>);
+    let row: Option<FormRow> = conn
         .query_row(
             "SELECT form_kind, ctors, open_delim, close_delim FROM form_bodies \
              WHERE symbol_id = ?1",

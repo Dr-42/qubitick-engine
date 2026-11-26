@@ -582,7 +582,7 @@ pub async fn post_goal(
             remaining = json!({
                 "reached": chain.reached,
                 "citations": chain.steps.iter().map(|s| json!({ "cite": s.cite, "expr": show(&s.expr) })).collect::<Vec<_>>(),
-                "closest": chain.closest.as_ref().map(&show),
+                "closest": chain.closest.as_ref().map(show),
                 "gap": chain.gap,
             });
         }
@@ -603,9 +603,9 @@ pub async fn post_goal(
             "kind": kind,
             "node": name,
             "line": req.line_no.unwrap_or(header_line),
-            "statement": statement_rhs.as_ref().or(statement_lhs.as_ref()).map(&show),
-            "current": current.as_ref().map(&show),
-            "target": statement_rhs.as_ref().map(&show),
+            "statement": statement_rhs.as_ref().or(statement_lhs.as_ref()).map(show),
+            "current": current.as_ref().map(show),
+            "target": statement_rhs.as_ref().map(show),
             "row": proof_row,
             "verdict": verdict,
             "remaining": remaining,

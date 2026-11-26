@@ -92,8 +92,12 @@ fn main() -> anyhow::Result<()> {
             let files = qubitick_build::walk_qbit(&root);
             println!("{}", serde_json::to_string_pretty(&json!({ "files": files }))?);
         }
-        Commands::Palette { root: _ } => {
-            let db = qubitick_db::open_in_memory()?;
+        Commands::Palette { root } => {
+            // The route this mirrors answers for the OPEN PROJECT, so the command has
+            // to ingest the corpus first: an in-memory DB with no symbols generates an
+            // empty palette, which is what this command answered for every corpus.
+            let mut db = qubitick_db::open_in_memory()?;
+            qubitick_build::ingest_corpus(&mut db, &root)?;
             let entries = qubitick_palette::generate_palette(&db)?;
             let vec: Vec<_> = entries
                 .iter()

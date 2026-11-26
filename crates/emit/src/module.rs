@@ -1439,10 +1439,11 @@ fn collect_plain_ids(e: &Expr, out: &mut HashSet<u32>) {
 ///
 /// `Apply(outer, args)` whose argument is itself an application records
 /// `outer → inner`: the inner operator's result is consumed by the outer head.
-fn collect_consumed_by(
-    nodes: &[Node],
-    env: &SortEnv,
-) -> (HashMap<u32, HashSet<u32>>, Vec<(u32, u32)>) {
+/// A head and the heads directly applied to its result, plus the `(lhs, rhs)` head pairs
+/// of the module's equations — the shape the result-carrier inference reads.
+type ConsumedBy = (HashMap<u32, HashSet<u32>>, Vec<(u32, u32)>);
+
+fn collect_consumed_by(nodes: &[Node], env: &SortEnv) -> ConsumedBy {
     let mut out: HashMap<u32, HashSet<u32>> = HashMap::new();
     let mut eq_terms: Vec<(u32, u32)> = Vec::new();
     let mut rec = |e: &Expr| rec_cb(e, &mut out, &mut eq_terms, env);
