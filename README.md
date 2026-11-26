@@ -193,6 +193,7 @@ qubitick steps   <root> <expr>     # the rewrites the corpus can cite from an ex
 qubitick autocite <root> <lhs> <rhs>  # the citations that bridge two expressions
 qubitick pdf     <root> [--latex]  # the corpus as a document
 qubitick prelude-check --module M  # prove a ground against the emitter's contract
+qubitick axioms  <root> <file>     # what Lean says the file's theorems stand on
 ```
 
 `qubitick-server` serves the same engine over HTTP (the routes the web client in
@@ -201,7 +202,29 @@ qubitick prelude-check --module M  # prove a ground against the emitter's contra
 
 ---
 
-## 7. Gates
+## 7. What a proof stands on
+
+The engine reports the **axiom footprint** Lean computes for each theorem — reported, never
+policed, and the ground decides the answer:
+
+```console
+$ qubitick axioms corpus-templates/algebra corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit
+{ "footprints": [ { "name": "Qubitick.HL.MulTwo",
+                    "axioms": ["plus", "times", "times_def"] } ] }
+```
+
+- On a project whose ground is `import Init`, a theorem that reaches `Classical` prints
+  Init's three (`propext`, `Classical.choice`, `Quot.sound`).
+- On the engine's bare prelude, a theorem of kernel reflexivity prints **nothing** — an
+  empty list, not an error.
+- The names are the corpus's own admissions when the corpus makes them: `plus` is a
+  `Type:` primitive, `times`/`times_def` are a definition seen from a module that cannot
+  unfold it. Binding a glyph to what the ground already provides (`Lean: True`,
+  `Lean: HMul.hMul`) is how a corpus lowers that number.
+
+A theorem's footprint includes its **type**, not only its proof term.
+
+## 8. Gates
 
 ```
 ./toolchain cargo test --workspace        # 38 targets, 278 tests, 2 ignored
@@ -221,6 +244,7 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
 | `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
 | `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, and the build reports the row |
+| `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship prints its own admissions |
 | `crates/parse/tests/proof_surface.rs` | `⊢ <term>` closes a proof, `∎` ends it, and prose is refused by name |
 
 `./toolchain` is the build wrapper: it provisions the pinned Rust and borrows the corpus's
@@ -228,7 +252,7 @@ Lean 4.35.0 (see its header for why `nix develop` cannot be used in this sandbox
 
 ---
 
-## 8. Layout
+## 9. Layout
 
 | crate | what it is |
 |---|---|
@@ -253,11 +277,11 @@ corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
 
 ---
 
-## 9. Known limits
+## 10. Known limits
 
 - **Induction** in the proof rewriter takes the induction hypothesis when the compiled
   body uses it; the declaration-side recursion is not reachable from that crate.
 - `POST /api/induce` answers that theorem induction is not implemented yet.
 - Ingestion never refuses a corpus: it builds the ledger from what it can read, and the
   refusal reaches the report per file. A corpus with a bad row opens; its build fails.
-- **print-axioms** (the footprint Lean reports per theorem) is not surfaced.
+- A corpus that writes an undeclared glyph still *opens*; its build reports the refusal.

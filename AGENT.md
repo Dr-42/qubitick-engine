@@ -43,6 +43,12 @@ tolerance by making ingestion strict: the sentence belongs in the report.
 surface change: write the reason in the doc comment, make the parser read it, and make
 ingestion persist it.
 
+**3a. Axioms are reported, not policed.** `qubitick axioms <root> <file>` prints what Lean
+says a theorem stands on, and the answer belongs to the ground (Init's three, or the bare
+prelude's none) plus whatever the corpus itself admits. Never gate a build on it, and never
+put it in a diagnostic: `warning_count` counts every non-error diagnostic, so an info line
+per theorem breaks every test that asserts a clean build.
+
 **4. Documentation describes the current state.** Present tense. No "this used to", no
 migration stories, no before/after. A document that contradicts the code is wrong, and the
 fix is the document.
@@ -131,4 +137,6 @@ Consequences that have bitten:
 - `POST /api/induce` answers `{"ok": false, "error": "theorem induction not implemented yet"}`.
 - A corpus that writes an undeclared glyph still *opens* (ingestion is tolerant) and its
   build reports the refusal; `/api/parse` answers the refusal directly to the editor.
+- The axiom footprint of a theorem includes its TYPE as well as its proof term, so
+  "what did my proof use" is not what `qubitick axioms` answers.
 - `print-axioms` (the footprint Lean reports) is not surfaced.
