@@ -143,8 +143,10 @@ pub fn justified_by_chain(
 /// (`\ulcornerA1.1 b b a\urcorner`), the name inside the corners.
 fn base_cite(cite: &str) -> &str {
     let trimmed = cite.trim();
-    if let Some(rest) = trimmed.strip_prefix("\\ulcorner") {
-        let inner = rest.strip_suffix("\\urcorner").unwrap_or(rest);
+    if let Some(rest) = trimmed.strip_prefix(qubitick_model::format::CITE_OPEN) {
+        let inner = rest
+            .strip_suffix(qubitick_model::format::CITE_CLOSE)
+            .unwrap_or(rest);
         return inner.trim().split_whitespace().next().unwrap_or(inner.trim());
     }
     trimmed

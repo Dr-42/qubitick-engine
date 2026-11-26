@@ -70,11 +70,48 @@ pub fn load_definition_nodes(
             statements.push((*expr).clone());
             line += 1;
         }
-        // A definition's Sema is stored as the node's statement; the glyph it
-        // defines is the statement's head symbol.
-        let Some(sema) = statements.first().cloned() else {
+        // A definition's Sema is stored as the node's statement. A FORMATION has no
+        // Sema — its content is its constructor list — so the glyph is the one the
+        // node declares (the row whose home is this node and whose kind is a sort).
+        let sema = statements.first().cloned();
+        if sema.is_none() {
+            let declared = ctx
+                .symbols()
+                .find(|r| r.home_node == header.id as i64 && r.kind == "formation")
+                .map(|r| r.id as u32);
+            let Some(symbol) = declared else {
+                continue;
+            };
+            let Some((_, form)) = form_body_of(conn, symbol)? else {
+                continue;
+            };
+            out.push(LoadedDefinition {
+                division,
+                node: Node::Definition(qubitick_model::Definition {
+                    base: NodeBase {
+                        id: header.id as u32,
+                        kind: NodeKind::Definition,
+                        era: Era::Era0,
+                        strata: Strata(0),
+                        name: header.name.clone(),
+                        req: Vec::new(),
+                        derived: Vec::new(),
+                        note: None,
+                    },
+                    symbol: qubitick_model::AtomicComposite::new(symbol),
+                    extra_symbols: Vec::new(),
+                    d_block: qubitick_model::DBlockIR {
+                        kind: qubitick_model::SymbolKind::Formation,
+                        sig: None,
+                        form: Some(form),
+                        ..Default::default()
+                    },
+                    tag: PhysOrMath::Math,
+                }),
+            });
             continue;
-        };
+        }
+        let sema = statements.first().cloned().expect("sema checked");
         // The defined glyph is the DEFININIENDUM's head. When the definiendum is a
         // compound (e.g. `e_1 \cap e_2`), the head is an OPERATOR that is NOT the
         // glyph being defined — skip it so it doesn't pollute `defined_names` and
@@ -88,6 +125,21 @@ pub fn load_definition_nodes(
         {
             continue;
         }
+        // THE FORM THE NODE DECLARED, not just its Sema. A definition loaded as
+        // CONTEXT (every axiom and theorem module) has to arrive with the same shape
+        // it has in its own file: a formation without its constructor list emits no
+        // inductive, and the frame then types the corpus's carrier as `Prop`.
+        let (kind, form) = match form_body_of(conn, symbol)? {
+            Some((qubitick_model::SymbolKind::Formation, qubitick_model::FormBody::Formation(ctors))) => (
+                qubitick_model::SymbolKind::Formation,
+                qubitick_model::FormBody::Formation(ctors),
+            ),
+            Some((k, f)) => (k, f),
+            None => (
+                qubitick_model::SymbolKind::Notation,
+                qubitick_model::FormBody::MacroExpr(sema),
+            ),
+        };
         out.push(LoadedDefinition {
             division,
             node: Node::Definition(qubitick_model::Definition {
@@ -104,9 +156,9 @@ pub fn load_definition_nodes(
                 symbol: qubitick_model::AtomicComposite::new(symbol),
                 extra_symbols: Vec::new(),
                 d_block: qubitick_model::DBlockIR {
-                    kind: qubitick_model::SymbolKind::Notation,
+                    kind,
                     sig: None,
-                    form: Some(qubitick_model::FormBody::MacroExpr(sema)),
+                    form: Some(form),
                     ..Default::default()
                 },
                 tag: PhysOrMath::Math,
@@ -114,6 +166,45 @@ pub fn load_definition_nodes(
         });
     }
     Ok(out)
+}
+
+/// The D-block form a definition persisted, rebuilt from `form_bodies`.
+///
+/// `None` means the row predates the record or the definition has no form of its own,
+/// and the caller keeps the Sema it reconstructed.
+fn form_body_of(
+    conn: &qubitick_db::Db,
+    symbol: u32,
+) -> Result<Option<(qubitick_model::SymbolKind, qubitick_model::FormBody)>> {
+    use qubitick_model::{FormBody, SymbolKind};
+    let row: Option<(String, Option<String>, Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT form_kind, ctors, open_delim, close_delim FROM form_bodies \
+             WHERE symbol_id = ?1",
+            rusqlite::params![symbol as i64],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .ok();
+    let Some((kind, ctors, open, close)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(match kind.as_str() {
+        "Formation" => {
+            let list: Vec<qubitick_model::CtorDecl> = match ctors {
+                Some(json) => serde_json::from_str(&json)?,
+                None => Vec::new(),
+            };
+            (SymbolKind::Formation, FormBody::Formation(list))
+        }
+        "Bracket" => (
+            SymbolKind::BracketFn,
+            FormBody::Bracket(
+                open.unwrap_or_default(),
+                close.unwrap_or_default(),
+            ),
+        ),
+        _ => return Ok(None),
+    }))
 }
 
 /// The head symbol of a definition's definiendum.
@@ -152,9 +243,8 @@ fn definiendum_head(ctx: &Ctx, sema: &qubitick_model::Expr) -> u32 {
     // the very same peel: a definition must resolve to one symbol id whether it is
     // rebuilt from the DB or parsed from its file.
     qubitick_model::corpus::definiendum_head(sema, |id| {
-        ctx.by_id(id as i64).is_some_and(|r| {
-            ctx.has_facet(&r.tex, Facet::LeftIff)
-        })
+        ctx.by_id(id as i64)
+            .is_some_and(|r| qubitick_model::format::is_iff(&r.tex))
     })
 }
 

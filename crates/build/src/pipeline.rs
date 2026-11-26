@@ -375,11 +375,17 @@ pub fn emit_file_with(
         for node in src_nodes.iter().cloned() {
             if let qubitick_model::Node::Definition(d) = &node {
                 // A source node may enter context when it carries the authored
-                // `Type:` (so the frame knows a glyph's declared type) OR when its
-                // `Sema:` is a recursive tick-operator equation (so the module can
-                // emit the operator as a recursor `def` instead of a bare `axiom`).
+                // `Type:` (so the frame knows a glyph's declared type), when it
+                // DECLARES A FORMATION (so the module emits that inductive and types
+                // its carrier), or when its `Sema:` is a recursive tick-operator
+                // equation (so the module can emit the operator as a recursor `def`
+                // instead of a bare `axiom`).
                 let recursor = d.d_block.form.as_ref().is_some_and(|f| is_recursor_sema_form(f, ctx));
-                if d.d_block.sig.is_some() || recursor {
+                let formation = matches!(
+                    d.d_block.form,
+                    Some(qubitick_model::FormBody::Formation(_))
+                );
+                if d.d_block.sig.is_some() || recursor || formation {
                     match context.iter_mut().find(|n| {
                         matches!(n, qubitick_model::Node::Definition(e) if e.base.name == d.base.name)
                     }) {
@@ -521,13 +527,21 @@ fn corpus_root(path: &Path) -> PathBuf {
         std::env::current_dir().unwrap_or_default().join(path)
     };
     let mut dir = abs.parent().map(Path::to_path_buf).unwrap_or_default();
+    // The corpus's own root is the ancestor whose children are the era trees. It is
+    // the answer when the corpus carries no `prelude/` of its own (the engine embeds
+    // the base ground), and reaching for the CWD instead scanned whatever tree the
+    // process happened to start in — another corpus's definitions entered the module.
+    let mut corpus: Option<PathBuf> = None;
     loop {
         if dir.join("prelude").join("Qubitick").join("HL.lean").is_file() {
             return dir;
         }
+        if corpus.is_none() && (dir.join("Era0").is_dir() || dir.join("Era1").is_dir()) {
+            corpus = Some(dir.clone());
+        }
         match dir.parent() {
             Some(p) => dir = p.to_path_buf(),
-            None => return PathBuf::from("."),
+            None => return corpus.unwrap_or_else(|| PathBuf::from(".")),
         }
     }
 }

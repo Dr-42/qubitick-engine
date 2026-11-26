@@ -54,7 +54,7 @@ pub(crate) fn compile_steps_with_env(
 
     // 2. Unpack → implications using dynamic name matching
     let mut arrow_ids = Vec::new();
-    for tex in qubitick_model::corpus::texes_with(qubitick_model::corpus::Facet::CompileImp) {
+    for tex in qubitick_model::format::IMPLICATION {
         if let Some(rows) = ctx.by_tex(tex) {
             for r in rows {
                 arrow_ids.push(r.id as u32);

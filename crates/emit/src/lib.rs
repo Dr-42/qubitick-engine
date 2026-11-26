@@ -49,7 +49,7 @@ pub fn resolver_with_sorts<'a>(
         // own inductive type, so collapsing it would make the quantification in a
         // `\mu` theorem unrelated to the cases the corpus proves.
         if sorts.contains(&id) {
-            let name = fn_names.get(&id).cloned().unwrap_or_else(|| lean_name_of(ctx, id));
+            let _name = fn_names.get(&id).cloned().unwrap_or_else(|| lean_name_of(ctx, id));
             // A real inductive carrier — the generated τ/ℤ sorts OR a declarative
             // FORMATION — is NOT collapsed to `Prop`, so a binder over it quantifies
             // over the actual inductive (and a recursor `def` over it reduces).
@@ -57,7 +57,7 @@ pub fn resolver_with_sorts<'a>(
                 .by_id(id as i64)
                 .map(|r| r.kind == "formation")
                 .unwrap_or(false);
-            if name != "tau" && name != "mathbb_Z" && !is_formation {
+            if !is_formation {
                 return "Prop".to_string();
             }
         }

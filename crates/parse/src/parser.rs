@@ -22,6 +22,23 @@ pub fn exclude_connective(id: u32) {
     EXCLUDED_CONNECTIVE.with(|c| c.set(id));
 }
 
+thread_local! {
+    /// True while a definition's `Sema:` is being parsed.
+    ///
+    /// A `Sema:` is `<glyph> = <body>`: the format fixes that shape, so no CORPUS
+    /// connective inside the body may outrank the `=` that links it — a formation
+    /// whose alternatives are separated by the corpus's `Role: connective` glyph
+    /// would otherwise absorb the `=` into the separator's tree and read as
+    /// `separator(glyph = first, second)`. The format's own iff stays loose, because
+    /// that is what links a relational definition to its body.
+    static SEMA_BODY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Mark the start/end of a `Sema:` parse (see [`SEMA_BODY`]).
+pub fn in_sema_body(inside: bool) {
+    SEMA_BODY.with(|c| c.set(inside));
+}
+
 use crate::atomic::parse_atomic;
 use crate::lexer::{LexError, Span, Token};
 use crate::semantic::{Diagnostic, Phase, Severity};
@@ -54,32 +71,20 @@ pub fn parse_struct(tokens: &[Token], ctx: &Ctx) -> Result<(StructExpr, usize), 
     Ok((e, pos))
 }
 
-/// The surface's prefix (unary) glyphs.
+/// Whether a glyph acts as a prefix (unary) operator.
 ///
-/// The declarative surface (SurfaceFormat §5) does not author operator metadata,
-/// so prefix-ness is fixed by the engine for the glyphs the corpus actually uses
-/// as prefix operators: negation and the tick/successor.
-/// Which glyphs may act as a prefix (unary) operator.
-///
-/// The declarative surface authors no operator metadata, so prefix-ness has to be
-/// decided by the engine. Two families qualify:
-///   * the fixed unary glyphs — `\lnot` (negation) and `^+` (the tick/successor);
-///   * a glyph whose tex is LED by an ASCII operator or a directional arrow, which
-///     the corpus uses unarily with its sort in the mod: `-_{\mathbb{Z}} a`,
-///     `-_{\tau} a`, `\uparrow_{\mathbb{Z}} n`, `\downarrow_{\tau} n`.
+/// The answer is the corpus's: a declaration whose glyph line puts its operand AFTER
+/// the glyph (`op a`) derives the role `prefix`, and a `Role: prefix` states it
+/// outright. The engine names no unary glyph of its own.
 ///
 /// This is consulted only where an OPERAND is expected, so a glyph that also has an
 /// infix use (`a +_{\tau} b`) is unaffected: after an operand it is consumed by the
 /// infix arm instead.
 fn is_prefix_glyph(ctx: &Ctx, id: u32) -> bool {
-    // DB-driven: the persisted surface role decides (derived from the definition's
-    // glyph line). No hardcoded glyph list.
-    if ctx.by_id(id as i64).and_then(|r| r.role.as_deref()) == Some("prefix") {
-        return true;
-    }
-    // Engine substrate: the generated tick successor has no corpus definition, so
-    // it cannot carry a derived role; it is unary by construction.
-    ctx.by_id(id as i64).is_some_and(|r| r.tex == "^+")
+    // The persisted surface role decides: `prefix` comes from the glyph line
+    // (`op a`) or from a `Role:` the corpus stated. A glyph used unarily that the
+    // corpus never declared is not an operator at all.
+    ctx.by_id(id as i64).and_then(|r| r.role.as_deref()) == Some("prefix")
 }
 
 /// Whether a token can begin an operand (so a prefix glyph applies to it).
@@ -632,18 +637,13 @@ fn is_logic_connective(ctx: &Ctx, id: u32) -> bool {
     if EXCLUDED_CONNECTIVE.with(|c| c.get()) == id {
         return false;
     }
-    // DB-declared connective: a symbol whose persisted surface role is
-    // "connective" binds loosely (below `=`). This ADDS looseness; other roles
-    // (prefix/infix/collector) say nothing about precedence, so we fall through.
-    if ctx.by_id(id as i64).and_then(|r| r.role.as_deref()) == Some("connective") {
-        return true;
-    }
-    // The declaration's classification (`Role: connective`), which the shape cannot
-    // give: `a \land b` and `a \cup b` are identical glyph lines.
-    if ctx
-        .by_id(id as i64)
-        .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Connective))
-    {
+    let declared = ctx.by_id(id as i64).is_some_and(|r| {
+        r.role.as_deref() == Some("connective") || ctx.has_facet(&r.tex, Facet::Connective)
+    });
+    // A corpus's connective is loose in a STATEMENT, where it connects two claims.
+    // Inside a definition's `Sema:` it is a term: the `=` that links the body is the
+    // format's, and a separator must not swallow it.
+    if declared && !SEMA_BODY.with(|c| c.get()) {
         return true;
     }
     // Default: the two iff spellings, which are the connective a `Sema:` is
@@ -696,9 +696,12 @@ fn require_declared_operator(ctx: &Ctx, id: u32, pos: usize) -> Result<(), Diagn
             code,
         });
     };
-    if ctx.is_declared(&row.tex) || qubitick_model::corpus::is_any_class(&row.tex) {
-        // Declared by the corpus, or one of the engine's own glyphs (an arrow, an iff,
-        // a generated sort): both are a role the engine may rely on.
+    if ctx.is_declared(&row.tex)
+        || qubitick_model::format::is_iff(&row.tex)
+        || qubitick_model::format::is_arrow(&row.tex)
+        || qubitick_model::format::is_binder(&row.tex)
+    {
+        // Declared by the corpus, or one of the declaration FORMAT's own tokens.
         return Ok(());
     }
     Err(Diagnostic {

@@ -43,28 +43,18 @@ pub fn compile_induction(
         &[(var_name.clone(), Expr::Var(mvar.clone()))],
     );
     let motive = lean_render(&motive_expr, &|id| tc.resolve(id));
-    // The bare `prelude` cannot elaborate the `{scrut}.rec (motive := …)` notation
+    // The bare `prelude` cannot elaborate the `{scrut}.rec (motive := ...)` notation
     // (it hinges on `Init` recursion elaborators that the minimal prelude lacks) —
-    // that surface gave `CoeFun`. The EXPLICIT kernel form `@<ind>.rec motive …`
-    // elaborates fine. Family: \tau (zero/succ) or \mathbb{Z} (zero/plus/minus),
-    // detected from the case constructors (both braced/unbraced tex forms).
-    let z_ctor = |tex: &str| -> bool {
-        ctx.by_tex(tex)
-            .and_then(|rows| rows.first())
-            .map(|r| {
-                cases.iter().any(|c| {
-                    c.pattern
-                        .as_ref()
-                        .is_some_and(|p| p.constructor.primary == r.id as u32)
-                })
-            })
-            .unwrap_or(false)
-    };
-    let is_z = ["\\mathbb{Z}_{0}", "\\mathbb{Z}_0", "\\mathbb{Z}^{+}", "\\mathbb{Z}^+", "\\mathbb{Z}^{-}", "\\mathbb{Z}^-"]
+    // that surface gave `CoeFun`. The EXPLICIT kernel form `@<ind>.rec motive ...`
+    // elaborates fine. WHICH inductive this is comes from the corpus: the cases'
+    // constructors name a declared formation, and the recursor is that formation's.
+    let family = cases
         .iter()
-        .any(|t| z_ctor(t));
-    let ind = if is_z { "mathbb_Z" } else { "tau" };
-    let mut out = format!("@{ind}.rec\n  (fun {mvar} => {motive})\n");
+        .filter_map(|c| c.pattern.as_ref())
+        .find_map(|p| ctx.carrier_of_ctor(p.constructor.primary as i64))
+        .map(|s| s.lean_name.clone())
+        .unwrap_or_else(|| tc.resolve(0));
+    let mut out = format!("@{family}.rec\n  (fun {mvar} => {motive})\n");
 
     for c in cases {
         let binders = c
@@ -121,19 +111,24 @@ pub fn compile_induction(
 
         if binders.is_empty() {
             out.push_str(&format!("  ({body})\n"));
-        } else if is_z {
-            // \mathbb{Z}'s constructor fields are not recursive, so its rec
-            // branches take only the field argument (no ih).
-            let params: Vec<String> = binders.clone();
-            out.push_str(&format!("  (fun {} => ({body}))\n", params.join(" ")));
-        } else {
-            let params: Vec<String> = binders
-                .iter()
-                .cloned()
-                .chain(std::iter::once("ih".to_string()))
-                .collect();
-            out.push_str(&format!("  (fun {} => ({body}))\n", params.join(" ")));
+            continue;
         }
+        // A `C.rec` branch takes the constructor's fields, plus an induction
+        // hypothesis for each RECURSIVE field. Which fields are recursive is a fact
+        // of the corpus's formation declaration, and this crate carries the symbol
+        // table rather than the declarations, so the branch takes the hypothesis
+        // exactly when the compiled body USES it: a proof over a recursive
+        // constructor does, and a non-recursive constructor's branch has none to use.
+        // A proof that ignores an available hypothesis therefore needs the
+        // declaration-side arity, which is the induction path's known limit.
+        let uses_ih = body
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|word| word == "ih");
+        let mut params: Vec<String> = binders.clone();
+        if uses_ih {
+            params.push("ih".to_string());
+        }
+        out.push_str(&format!("  (fun {} => ({body}))\n", params.join(" ")));
     }
     out.push_str(&format!("  {scrut}\n"));
     Ok(out)

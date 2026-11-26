@@ -4,7 +4,7 @@ use crate::imports::assemble_imports;
 use anyhow::Result;
 use qubitick_ctx::Ctx;
 use qubitick_lean::LeanTarget;
-use qubitick_model::corpus::{texes_with, Facet};
+use qubitick_model::corpus::Facet;
 use qubitick_model::{Axiom, EQ_SYM, Expr, FormBody, Node, NodeBase};
 use qubitick_rewrite::RuleTable;
 use std::collections::{HashMap, HashSet};
@@ -31,9 +31,18 @@ pub fn lemma_name(name: &str) -> String {
     s
 }
 
-/// Symbols that are aliases of the type arrow (declare no constant; Lean's `->`).
-fn is_arrow_glyph(lean: &str) -> bool {
-    matches!(lean, "to" | "rightarrow" | "longrightarrow" | "arrow")
+/// Whether `id` is the declaration format's arrow.
+///
+/// A `Type:` signature is written `\varphi \to \psi` and nothing else, so an
+/// application inside a signature IS the arrow of the format; the glyph the corpus
+/// used to spell it names no constant of its own (Lean's `→` is built in).
+fn is_format_arrow(ctx: &Ctx, id: u32) -> bool {
+    match ctx.by_id(id as i64) {
+        Some(row) => qubitick_model::format::is_arrow(&row.tex),
+        // The lexer binds an arrow it has no row for to the reserved id 0, so an
+        // unresolved head inside a signature is the format's arrow.
+        None => id == 0,
+    }
 }
 
 /// Symbols used both bare (`\mathfrak{L}`) and applied (`\mathfrak{L}(t)`).
@@ -74,17 +83,26 @@ fn dual_use_symbols(nodes: &[Node]) -> HashSet<u32> {
     bare.intersection(&applied).copied().collect()
 }
 
-/// The ℤ-constructor glyphs are ATOMS (constructors), never functions: their
-/// occurrence as an argument (e.g. `\mathbb{Z}_{0}` in `a +_Z \mathbb{Z}_{0}`)
-/// is not an "applied" use, so they must never be `_fn`-dual-split — splitting
-/// them changes the citation ground (Strata1's commutative duplications of
-/// Strata0 theorems hit the base-vs-_fn mismatch). Exclude them from dual-use.
+/// Keep the constructors of the corpus's formations out of the bare/applied split.
+///
+/// A constructor is an ATOM, never a function: its occurrence as an argument
+/// (`\mathbf{p}` in `\mathbf{p} \vee \mathbf{q}`) is not an "applied" use, so it must
+/// never be `_fn`-dual-split. Splitting one changes the citation ground — a later
+/// scope's commutative duplication of an earlier scope's theorem then hits the
+/// base-vs-_fn mismatch. Which symbols those are is what the corpus declares (the
+/// `CtorDecl`s of a formation); the emitter names no glyph.
 fn exclude_ctor_dual(dual: &mut HashSet<u32>, ctx: &Ctx) {
-    for tex in texes_with(Facet::ZCtorDual) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            dual.remove(&(r.id as u32));
-        }
+    for row in ctx.declared_ctors() {
+        dual.remove(&(row.id as u32));
     }
+}
+
+/// Whether a glyph heads a CONJUNCT of a `Sema:` — the connective a corpus writes a
+/// case-by-case definition with (`Eq (f c0) r0 \land Eq (f c1) r1`). Which glyph that
+/// is belongs to the declaration; the emitter names none.
+pub(crate) fn is_conjunct_head(ctx: &Ctx, id: u32) -> bool {
+    ctx.by_id(id as i64)
+        .is_some_and(|row| ctx.has_facet(&row.tex, Facet::Connective))
 }
 
 /// Record bare vs applied head uses of every symbol in `e`.
@@ -367,11 +385,13 @@ fn defines_its_glyph(ctx: &Ctx, d: &qubitick_model::Definition) -> bool {
 /// `e_1 \cap e_2 = \varnothing` and declares `e_1`). So the question is the head's
 /// role and whose glyph it is — never a list of builtin names.
 fn is_operand_postulate(ctx: &Ctx, e: &Expr, own: u32) -> bool {
+    // A glyph the corpus declares a surface role for is an operator; a glyph nothing
+    // declares (a use-only mention) is not, and cannot head a postulate.
     qubitick_model::corpus::is_operand_postulate(e, |id| {
         id != own
-            && ctx.by_id(id as i64).is_some_and(|r| {
-                r.role.is_some() || ctx.has_facet(&r.tex, Facet::BinOp)
-            })
+            && ctx
+                .by_id(id as i64)
+                .is_some_and(|r| r.role.is_some())
     })
 }
 
@@ -396,210 +416,274 @@ fn defined_symbols(
 /// The observed application signature of a glyph in one module.
 ///
 /// A flat arity is not enough. The corpus applies operators to BINDERS as well as to
-/// events — `\bigcup_{t : \tau} \mathfrak{L}(t)` is `bigcup (fun t => …)`. A binder
-/// argument types as `Prop → Prop`, so declaring `bigcup : Prop → Prop` and then
-/// passing it a `fun` is an `Application type mismatch`. `binder[i]` marks the
+/// events — an indexed union `\bigcup_{x \in S} A(x)` is `bigcup (fun x => ...)`. A
+/// binder argument types as `Prop → Prop`, so declaring `bigcup : Prop → Prop` and
+/// then passing it a `fun` is an `Application type mismatch`. `binder[i]` marks the
 /// positions observed receiving a lambda.
+///
+/// An argument or a result over a DECLARED sort is typed with that sort's carrier
+/// (`C → C → C`), never with the `Prop` carrier every undeclared glyph lives on:
+/// applying such an operator to a term of `C` and typing it over `Prop` is an
+/// `Application type mismatch` at the first use, two files from the declaration.
 #[derive(Default, Clone)]
 struct GlyphSig {
     len: usize,
     binder: Vec<bool>,
-    /// Argument positions observed over \mathbb{Z} (a ℤ-constructor application).
-    z_genids: Vec<bool>,
-    /// Positions observed receiving the GENERATED sort (`\tau`), which is its own
-    /// inductive type rather than the `Prop` carrier. An operator over the tick
-    /// sequence must be declared `tau → tau → tau`; typing it over `Prop` while the
-    /// statement binds `a : tau` is an `Application type mismatch`.
-    genids: Vec<bool>,
-    /// The operator RETURNS the generated sort: `+_\tau`, `\times_\tau`, `\uparrow`
-    /// are `tau → … → tau`, not `… → Prop`.
-    res_tau: bool,
-    /// The operator RETURNS the generated `\mathbb{Z}` sort (its result feeds a
-    /// ℤ-constructor) — typed `… → mathbb_Z`, not `… → Prop`.
-    res_z: bool,
+    /// The declared sort each argument position was observed at, when one was.
+    arg_carrier: Vec<Option<u32>>,
+    /// The declared sort the operator RETURNS: what its own `Type:` states, or what
+    /// the result-sort inference read off its uses.
+    res_carrier: Option<u32>,
 }
 
 impl GlyphSig {
-    fn merge(&mut self, args: &[Expr], tau_flags: &[bool], z_flags: &[bool]) {
+    /// Record `args` at this signature's positions, growing it to fit.
+    fn merge(&mut self, args: &[Expr], arg_carrier: &[Option<u32>]) {
         if args.len() > self.len {
             self.len = args.len();
-            self.binder.resize(args.len(), false);
-            self.genids.resize(args.len(), false);
-            self.z_genids.resize(args.len(), false);
         }
+        self.binder.resize(self.len, false);
+        self.arg_carrier.resize(self.len, None);
         for (i, a) in args.iter().enumerate() {
-            // Only a LAMBDA types as `Prop → Prop`; `Exists (fun …)` is itself a Prop.
+            // Only a LAMBDA types as `Prop → Prop`; `Exists (fun ...)` is itself a Prop.
             if matches!(a, Expr::Binder(qubitick_model::BinderKind::Lambda, _, _)) {
                 self.binder[i] = true;
             }
-            if tau_flags.get(i).copied().unwrap_or(false) {
-                self.genids[i] = true;
-            }
-            if z_flags.get(i).copied().unwrap_or(false) {
-                self.z_genids[i] = true;
+            if let Some(c) = arg_carrier.get(i).copied().flatten() {
+                self.arg_carrier[i] = Some(c);
             }
         }
     }
 
-    fn ty(&self) -> String {
-        // An operator that returns the generated sort ends in `tau`, not `Prop`.
-        let mut ty = if self.res_tau && self.len > 0 {
-            "tau".to_string()
-        } else if self.res_z && self.len > 0 {
-            "mathbb_Z".to_string()
-        } else {
-            "Prop".to_string()
+    /// The Lean type, with every carrier rendered through `name_of`.
+    fn ty(&self, name_of: &impl Fn(u32) -> String) -> String {
+        let mut ty = match self.res_carrier {
+            Some(c) if self.len > 0 => name_of(c),
+            _ => "Prop".to_string(),
         };
         for i in (0..self.len).rev() {
-            if self.z_genids.get(i).copied().unwrap_or(false) {
-                ty = format!("mathbb_Z → {ty}");
-                continue;
-            }
-            // A binder over the GENERATED sort is a `tau`-valued function
-            // (`(tau → Prop) → …`), taking precedence over the plain-`Prop` form.
-            if self.binder.get(i).copied().unwrap_or(false) {
-                if self.genids.get(i).copied().unwrap_or(false) {
-                    ty = format!("(tau → Prop) → {ty}");
-                } else {
-                    ty = format!("(Prop → Prop) → {ty}");
-                }
-            } else if self.genids.get(i).copied().unwrap_or(false) {
-                ty = format!("tau → {ty}");
-            } else {
-                ty = format!("Prop → {ty}");
-            }
+            let carrier = self.arg_carrier.get(i).copied().flatten();
+            let binder = self.binder.get(i).copied().unwrap_or(false);
+            ty = match (carrier, binder) {
+                // A binder over a declared sort is a function ON that sort
+                // (`(C → Prop) → ...`), which takes precedence over the plain form.
+                (Some(c), true) => format!("({} → Prop) → {ty}", name_of(c)),
+                (None, true) => format!("(Prop → Prop) → {ty}"),
+                (Some(c), false) => format!("{} → {ty}", name_of(c)),
+                (None, false) => format!("Prop → {ty}"),
+            };
         }
         ty
     }
 }
 
-/// A coarse name identifying the sort an argument expression belongs to.
+/// An authored `Type:` signature, read as the declaration format states it: an arrow
+/// chain over declared sorts, with the sort at each argument position and at the
+/// result.
+#[derive(Clone, Default)]
+struct AuthoredType {
+    args: Vec<Option<u32>>,
+    res: Option<u32>,
+}
+
+/// The sorts a module's corpus DECLARES, and the constructors of each.
 ///
-/// Deliberately shallow: it recognises the corpus's named constructors of the
-/// generated sort (`\tau_0`, `^+`). Anything deeper needs the binder scope, which the
-/// frame does not carry — and this is enough for the tick/integer operators, whose
-/// arguments are built from exactly those constructors.
-fn render_head_name(e: &Expr) -> String {
+/// A sort is a symbol the corpus declares as one — a `Formation`'s carrier, or a
+/// `Type:` carrier — and a constructor is a symbol a formation declares, which the
+/// loader records with the formation as its home. The emitter keeps no list of its
+/// own: a glyph is a sort here because a declaration says so, and the constructors of
+/// that sort are the ones the declaration names.
+#[derive(Default, Clone)]
+struct SortEnv {
+    /// Every declared sort, by symbol id.
+    sorts: HashSet<u32>,
+    /// A formation's carrier → the constructors it declares, in declaration order.
+    ctors_of: HashMap<u32, Vec<u32>>,
+    /// A constructor → the carrier of the formation that declares it.
+    carrier_of: HashMap<u32, u32>,
+}
+
+impl SortEnv {
+    /// Read the declared sorts out of the symbol table, then out of the module's own
+    /// `Formation` bodies — a scope's `Ctx` is not required to carry a row for a
+    /// formation the module itself declares.
+    fn of(ctx: &Ctx, nodes: &[Node]) -> Self {
+        let mut env = Self::default();
+        for row in ctx.declared_sorts() {
+            env.sorts.insert(row.id as u32);
+        }
+        for ctor in ctx.declared_ctors() {
+            let Some(carrier) = ctx.carrier_of_ctor(ctor.id) else {
+                continue;
+            };
+            let (cid, sid) = (ctor.id as u32, carrier.id as u32);
+            env.sorts.insert(sid);
+            env.carrier_of.insert(cid, sid);
+            env.ctors_of.entry(sid).or_default().push(cid);
+        }
+        for n in nodes {
+            if let Node::Definition(d) = n
+                && let Some(FormBody::Formation(ctors)) = &d.d_block.form
+            {
+                let sid = d.symbol.primary;
+                let ctor_ids: Vec<u32> = ctors.iter().map(|c| c.constructor.primary).collect();
+                env.sorts.insert(sid);
+                for cid in &ctor_ids {
+                    env.carrier_of.entry(*cid).or_insert(sid);
+                }
+                env.ctors_of.entry(sid).or_insert(ctor_ids);
+            }
+        }
+        env
+    }
+
+    /// The declared sort a term belongs to, read off its head symbol: the sort
+    /// itself, or the carrier of the constructor that builds the term.
+    fn carrier_of_head(&self, id: u32) -> Option<u32> {
+        self.carrier_of
+            .get(&id)
+            .copied()
+            .or_else(|| self.sorts.contains(&id).then_some(id))
+    }
+
+    /// Whether the sort is a formation — an inductive the emitter declares for it.
+    fn is_formation(&self, id: u32) -> bool {
+        self.ctors_of.contains_key(&id)
+    }
+
+    /// Every constructor of every declared sort.
+    fn ctors(&self) -> impl Iterator<Item = u32> + '_ {
+        self.carrier_of.keys().copied()
+    }
+}
+
+/// The head symbol of a term.
+fn head_id(e: &Expr) -> Option<u32> {
     match e {
-        Expr::Sym(ac) => format!("#{}", ac.primary),
-        Expr::Apply(h, _) => format!("#{}", h.primary),
-        _ => String::new(),
+        Expr::Sym(ac) => Some(ac.primary),
+        Expr::Apply(h, _) => Some(h.primary),
+        _ => None,
+    }
+}
+
+/// Render an arrow chain over carriers with `name_of`; a position that names no
+/// declared sort is the `Prop` carrier.
+fn arrow_ty(args: &[Option<u32>], res: Option<u32>, name_of: &impl Fn(u32) -> String) -> String {
+    let one = |c: Option<u32>| match c {
+        Some(id) => name_of(id),
+        None => "Prop".to_string(),
+    };
+    let mut ty = one(res);
+    for a in args.iter().rev() {
+        ty = format!("({}) → {ty}", one(*a));
+    }
+    ty
+}
+
+/// Read an authored `Type:` signature as its argument sorts and its result sort.
+fn read_type_arrow(ctx: &Ctx, e: &Expr) -> AuthoredType {
+    match e {
+        // The declaration format writes a signature as an arrow chain and nothing
+        // else, so an application inside a `Type:` is that arrow.
+        Expr::Apply(h, args) if args.len() == 2 && is_format_arrow(ctx, h.primary) => {
+            let lhs = read_type_arrow(ctx, &args[0]);
+            let rhs = read_type_arrow(ctx, &args[1]);
+            let mut sorted = lhs.args;
+            sorted.push(lhs.res);
+            sorted.extend(rhs.args);
+            AuthoredType {
+                args: sorted,
+                res: rhs.res,
+            }
+        }
+        Expr::Sym(ac) if ctx.is_declared_sort(ac.primary as i64) => AuthoredType {
+            args: Vec::new(),
+            res: Some(ac.primary),
+        },
+        // A space the corpus does not declare as a sort is written over the `Prop`
+        // carrier the corpus identifies its events with.
+        _ => AuthoredType::default(),
     }
 }
 
 /// Render an authored `Type:` expression as a Lean type.
 ///
-/// The generated sort keeps its own type (`\tau` → `tau`); every other sort is the
-/// carrier and becomes `Prop`. An arrow chain becomes a Lean function type.
+/// A signature keeps the carrier each position declares (`C \to D` is `C → D`); a
+/// position naming no declared sort is the `Prop` carrier. An arrow chain becomes a
+/// Lean function type.
 pub fn render_type_expr(ctx: &Ctx, e: &Expr) -> String {
-    let is_tau = |id: u32| {
-        ctx.by_id(id as i64)
-            .map(|r| ctx.has_facet(&r.tex, Facet::SortTau))
-            .unwrap_or(false)
-    };
-    match e {
-        Expr::Sym(ac) => {
-            if is_tau(ac.primary) {
-                "tau".to_string()
-            } else {
-                "Prop".to_string()
-            }
-        }
-        Expr::Apply(h, args) => {
-            let is_arrow = ctx
-                .by_id(h.primary as i64)
-                .map(|r| ctx.has_facet(&r.tex, Facet::Arrow))
-                .unwrap_or(false);
-            if is_arrow && args.len() == 2 {
-                return format!(
-                    "({}) → {}",
-                    render_type_expr(ctx, &args[0]),
-                    render_type_expr(ctx, &args[1])
-                );
-            }
-            "Prop".to_string()
-        }
-        _ => "Prop".to_string(),
-    }
+    let auth = read_type_arrow(ctx, e);
+    arrow_ty(&auth.args, auth.res, &|id| crate::lean_name_of(ctx, id))
 }
 
 /// Re-mark an operator's argument positions from the ARGUMENTS themselves.
 ///
-/// The first walk reads an argument's sort off its head symbol (`\mathbb{Z}_0`,
-/// `^+ t`), which is all it can know before the τ/Z result fixpoint has run. With
-/// the fixpoint in hand it can also see that an argument is an APPLICATION whose
-/// head returns τ/Z: `\frac{a \cdot_Z d +_Z c \cdot_Z b}{b \cdot_Z d}` gives
-/// `\frac` two `\mathbb{Z}` argument positions. Without them the frame types
-/// `\frac` over the carrier, and the definition that uses it cannot be typed at
-/// all — its own body applies `\frac` to `\mathbb{Z}`-valued subterms.
+/// The first walk reads an argument's sort off its head symbol (`^+ t`, a
+/// constructor of a declared sort), which is all it can know before the result sorts
+/// are inferred. With them in hand it can also see that an argument is an
+/// APPLICATION whose head returns a declared sort, and type that position with the
+/// carrier too: a `\frac`-style operator applied to two terms of a sort has two
+/// positions on it. Without this it is typed over the carrier and a definition whose
+/// own body applies it to sort-valued subterms cannot be typed at all.
 fn remark_arg_sorts(
     nodes: &[Node],
     sigs: &mut HashMap<u32, GlyphSig>,
-    tau_results: &HashSet<u32>,
-    z_results: &HashSet<u32>,
-    names: &HashMap<u32, String>,
     connectives: &HashSet<u32>,
 ) {
-    let _ = names;
-    fn walk(
-        e: &Expr,
-        sigs: &mut HashMap<u32, GlyphSig>,
-        tau_results: &HashSet<u32>,
-        z_results: &HashSet<u32>,
-        connectives: &HashSet<u32>,
-    ) {
+    fn walk(e: &Expr, sigs: &mut HashMap<u32, GlyphSig>, connectives: &HashSet<u32>) {
         if let Expr::Apply(h, args) = e {
+            // A propositional CONNECTIVE's argument positions are propositions,
+            // whatever an application of it happens to hold: its own `Sema:` states
+            // that (`a \leftrightarrow b = 1 \Delta (a \Delta b)`).
+            let marks: Vec<(usize, u32)> = if connectives.contains(&h.primary) {
+                Vec::new()
+            } else {
+                args.iter()
+                    .enumerate()
+                    .filter_map(|(i, a)| match a {
+                        Expr::Apply(ah, _) => sigs
+                            .get(&ah.primary)
+                            .and_then(|s| s.res_carrier)
+                            .map(|c| (i, c)),
+                        _ => None,
+                    })
+                    .collect()
+            };
             let s = sigs.entry(h.primary).or_default();
             if args.len() > s.len {
                 s.len = args.len();
-                s.binder.resize(args.len(), false);
-                s.genids.resize(args.len(), false);
-                s.z_genids.resize(args.len(), false);
             }
-            for (i, a) in args.iter().enumerate() {
-                // A propositional CONNECTIVE's argument positions are propositions,
-                // whatever an application of it happens to hold: its own `Sema:`
-                // (`a \leftrightarrow b = 1 \Delta (a \Delta b)`) states that. The
-                // one place a connectivity position here looks Z-valued is
-                // `D.BT.76`'s `a \cdot_Z d \le_Z c \cdot_Z b`, whose mixed-operator
-                // chain parses left-to-right as `((a \cdot_Z d) \le_Z c) \cdot_Z b`
-                // — a precedence bug of its own, not evidence about `\leftrightarrow`.
-                if connectives.contains(&h.primary) {
-                    continue;
-                }
-                if let Expr::Apply(ah, _) = a {
-                    if z_results.contains(&ah.primary) {
-                        s.z_genids[i] = true;
-                    }
-                    if tau_results.contains(&ah.primary) {
-                        s.genids[i] = true;
-                    }
-                }
+            s.binder.resize(s.len, false);
+            s.arg_carrier.resize(s.len, None);
+            for (i, carrier) in marks {
+                s.arg_carrier[i] = Some(carrier);
             }
         }
         match e {
-            Expr::Apply(_, args) | Expr::Bracket(_, args) | Expr::Vector(args)
+            Expr::Apply(_, args)
+            | Expr::Bracket(_, args)
+            | Expr::Vector(args)
             | Expr::Set(args) => {
                 for a in args {
-                    walk(a, sigs, tau_results, z_results, connectives);
+                    walk(a, sigs, connectives);
                 }
             }
             Expr::Binder(_, bs, body) => {
                 for b in bs {
-                    walk(&b.ty, sigs, tau_results, z_results, connectives);
+                    walk(&b.ty, sigs, connectives);
                 }
-                walk(body, sigs, tau_results, z_results, connectives);
+                walk(body, sigs, connectives);
             }
             Expr::Recursor(sc, cases) => {
-                walk(sc, sigs, tau_results, z_results, connectives);
+                walk(sc, sigs, connectives);
                 for (_, b) in cases {
-                    walk(b, sigs, tau_results, z_results, connectives);
+                    walk(b, sigs, connectives);
                 }
             }
             Expr::Matrix(rows) => {
                 for r in rows {
                     for c in r {
-                        walk(c, sigs, tau_results, z_results, connectives);
+                        walk(c, sigs, connectives);
                     }
                 }
             }
@@ -608,28 +692,26 @@ fn remark_arg_sorts(
     }
     for n in nodes {
         match n {
-            Node::Axiom(a) => a.statements
-                .iter()
-                .for_each(|e| walk(e, sigs, tau_results, z_results, connectives)),
+            Node::Axiom(a) => a.statements.iter().for_each(|e| walk(e, sigs, connectives)),
             Node::Theorem(t) => {
-                walk(&t.statement, sigs, tau_results, z_results, connectives);
+                walk(&t.statement, sigs, connectives);
                 for step in &t.proof {
                     if let qubitick_model::ProofStep::Chain { rows } = step {
                         for row in rows {
                             if let Some(l) = &row.lhs {
-                                walk(l, sigs, tau_results, z_results, connectives);
+                                walk(l, sigs, connectives);
                             }
-                            walk(&row.rhs, sigs, tau_results, z_results, connectives);
+                            walk(&row.rhs, sigs, connectives);
                         }
                     }
                 }
             }
             Node::Definition(d) => {
                 if let Some(FormBody::MacroExpr(e)) = &d.d_block.form {
-                    walk(e, sigs, tau_results, z_results, connectives);
+                    walk(e, sigs, connectives);
                 }
                 if let Some(sig) = &d.d_block.sig {
-                    walk(sig, sigs, tau_results, z_results, connectives);
+                    walk(sig, sigs, connectives);
                 }
             }
             Node::Calibration(_) | Node::Census(_) => {}
@@ -641,10 +723,10 @@ fn remark_arg_sorts(
 /// result are all `Prop`?
 ///
 /// A characterising axiom (`{op}_def : ∀ params, Eq (op params) body`) binds its parameters at
-/// `Prop`, so it may only be emitted when everything its equation names is Prop-SORTED — no `tau`,
-/// no `mathbb_Z`, no `mathfrak_E`. This is a string test for exactly that question, not a type
-/// checker: `Prop`, `(Prop → Prop)` and `(Prop) → (Prop) → Prop` all pass it, and a sort in any
-/// position fails it.
+/// `Prop`, so it may only be emitted when everything its equation names is Prop-SORTED — no
+/// declared carrier anywhere in the type. This is a string test for exactly that question, not a
+/// type checker: `Prop`, `(Prop → Prop)` and `(Prop) → (Prop) → Prop` all pass it, and a carrier in
+/// any position fails it.
 /// The test is a string test because these types are strings, and it must not care HOW the renderer
 /// parenthesised them: `Prop → Prop → Prop`, `(Prop) → (Prop) → Prop` and `(Prop → Prop)` are the
 /// same type three ways. Reading only the first spelling silently dropped every `_def` line for a
@@ -690,76 +772,26 @@ pub(crate) struct Frame {
     pub declared: HashSet<String>,
     /// The Lean type of everything this module can name.
     pub types: HashMap<String, String>,
-    /// Every symbol the module mentions, for the recursor emitters' permission set.
-    pub seen: HashSet<u32>,
 }
 
-/// The Lean type a frame gives a glyph, from what it observes of it.
+/// The Lean type a frame gives a glyph.
 ///
-/// Extracted so that a glyph a DEFINITION declares (and the frame therefore does
-/// not) still gets the frame's answer: `+_{\mathbb{Z}^{+}}` is declared by its own
-/// node, but `+_{\mathbb{Z}}`'s helper and every definition that applies it need
-/// the same `\mathbb{Z}` type the frame would have inferred. Without this the
-/// definition's module declared it flat (`Prop → Prop → Prop`) while every other
-/// module saw the sharp one, and an era ground holding both could not type a
-/// single body.
+/// The corpus's own `Type:` is the first answer — it STATES the sorts the glyph works
+/// over — and where there is none, the observed uses are, with an argument or a
+/// result over a declared sort rendered as that sort's carrier. Extracted so that a
+/// glyph a DEFINITION declares (and the frame therefore does not) still gets the
+/// frame's answer: a glyph's type belongs to the glyph, and every module that names
+/// it has to agree — otherwise an era ground holding both cannot type a single body.
 fn glyph_type(
-    ctx: &Ctx,
     id: u32,
-    lean: &str,
     sigs: &HashMap<u32, GlyphSig>,
-    tau_results: &HashSet<u32>,
-    z_results: &HashSet<u32>,
+    authored: &HashMap<u32, AuthoredType>,
+    name_of: &impl Fn(u32) -> String,
 ) -> String {
-    let mut s = sigs.get(&id).cloned().unwrap_or_default();
-    // A glyph whose own tex carries the generated sort's mod operates OVER that
-    // sort: `+_{\tau}`, `\times_{\tau}`, `\uparrow_{\tau}`. This is the reliable
-    // signal — the binder scope is not always available (in TickAdd's
-    // `a +_{\tau} \tau_0 = a` the `a` is free), while the glyph's tex always
-    // states which sequence it belongs to.
-    if ctx
-        .by_id(id as i64)
-        .map(|r| r.tex.contains("_{\\tau}") || r.tex.contains("^{\\tau}"))
-        .unwrap_or(false)
-    {
-        s.genids = vec![true; s.len.max(1)];
-        // …and it RETURNS the tick: `+_{\tau}`, `\times_{\tau}` and `\uparrow`
-        // are τ-arithmetic. Without this the result fell back to the carrier
-        // wherever no tick consumer happened to be visible in the module, and the
-        // recursor `def` for a tick operator (`tau.rec … (fun b rec => plus_tau a
-        // rec)`) then applied a `Prop` where the recursor's motive is `tau`.
-        // …but a RELATION over the tick (`\le_{\tau}`) states a proposition, so
-        // its τ mod says what its ARGUMENTS are, not what it returns.
-        let is_relation = ctx
-            .by_id(id as i64)
-            .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Relation));
-        s.res_tau = !is_relation;
+    if let Some(auth) = authored.get(&id) {
+        return arrow_ty(&auth.args, auth.res, name_of);
     }
-    // Result-sort inference: operators whose result feeds a tau-consuming head
-    // (`^+`, `\uparrow`, or another tau-returning operator) return tau.
-    if tau_results.contains(&id) {
-        s.res_tau = true;
-    }
-    if z_results.contains(&id) {
-        s.res_z = true;
-    }
-    // Z-family rule: an operator whose lean name is a Z member has its non-τ
-    // non-binder argument positions on \mathbb{Z}. Value-position arguments are Z
-    // elements even as plain bound variables (e.g. T_BT_72's
-    // `\ge_{0}^{\mathbb{Z}}` rows) where no Z-ctor application ever pins them. The
-    // arithmetic ops (plus/minus/times/up/down) also return \mathbb{Z}; the ORDER
-    // relations (le/ge) return Prop.
-    if lean.contains("mathbb_Z") && s.len > 0 {
-        for i in 0..s.len {
-            if !s.genids[i] && !s.binder[i] {
-                s.z_genids[i] = true;
-            }
-        }
-        if !s.res_tau && !s.res_z && !lean.starts_with("le") && !lean.starts_with("ge") {
-            s.res_z = true;
-        }
-    }
-    s.ty()
+    sigs.get(&id).cloned().unwrap_or_default().ty(name_of)
 }
 
 fn symbol_declarations(
@@ -769,41 +801,36 @@ fn symbol_declarations(
     fn_names: &std::collections::HashMap<u32, String>,
     opts: &Options,
 ) -> Frame {
+    let resolver = crate::resolver(ctx, fn_names);
+    let name_of = |id: u32| resolver(id);
+    // The sorts the corpus DECLARES, and the constructors of each formation. Every
+    // typing decision below reads this map and the glyphs' own authored signatures;
+    // the emitter supplies no meaning for a glyph of its own.
+    let env = SortEnv::of(ctx, nodes);
+
     // Every name this frame DECLARES itself. The node loop needs it: the frame
-    // declares the generated environments (the tick sequence, the integer
-    // sequence, a formation's carrier and its constructors) unconditionally, so a
-    // `Definition` node for one of those glyphs must not declare it a second time.
-    // One file per module never showed this — an era ground, which holds every
-    // definition at once, showed it immediately (`Qubitick.HL.tau has already been
-    // declared`).
+    // declares a formation's carrier and its constructors, so a `Definition` node for
+    // one of those glyphs must not declare it a second time — an era ground, which
+    // holds every definition at once, showed it as
+    // `Qubitick.HL.W has already been declared`.
     let mut declared_names: HashSet<String> = HashSet::new();
-    // The generated sort's constructors, as the tags `render_head_name` produces.
-    // An argument built from one of these belongs to the generated sort.
-    let mut genids: HashSet<String> = HashSet::new();
-    for tex in texes_with(Facet::GenTag) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            genids.insert(format!("#{}", r.id));
-        }
-    }
-    // The `\tau` SORT symbol id, recognised for a big-operator binder over the
-    // generated sort (`\bigcup_{t : \tau}`) and a binder whose variables range
-    // over `\tau`. Kept separate from `genids` (constructors): adding the sort
-    // there would wrongly tau-type an operator mixing `Prop` and `tau` args.
-    let tau_sort_ids: HashSet<String> = texes_with(Facet::SortTau)
-        .filter_map(|tex| ctx.by_tex(tex).and_then(|rows| rows.first()))
-        .map(|r| format!("#{}", r.id))
-        .collect();
-    // Authored `Type:` signatures: the corpus's own statement of a glyph's type.
-    // `\mathfrak{L}(t)` with `Type: \tau \to \mathfrak{E}` IS a function
-    // `tau → Prop`, and typing it by inferred arity gives `Prop → Prop`, which then
-    // refuses a `tau`-typed argument (`unknown constant 'CoeFun'`).
-    let mut authored: HashMap<u32, String> = HashMap::new();
-    // An authored `Type:` describes the glyph's APPLIED form. A dual-use glyph
-    // (`\mathfrak{L}` vs `\mathfrak{L}(t)`) has a `_fn` variant (id + FN_OFFSET)
-    // whose name is recorded in `fn_names`; the family type belongs to THAT
-    // variant, while the bare use is a `Prop` (the total-ledger set). Attaching the
-    // family sig to the bare id typed bare `cap a \mathfrak{L}` against a
-    // `tau→Prop`, which broke the whole `class` chain (R.ax_0 cascade).
+    // lean name -> declared Lean type string, for every frame symbol.
+    let mut declared_types: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    // The types the frame infers for glyphs it does NOT declare (a Definition owns
+    // those). Kept apart from `declared_types`, which also means "this frame has
+    // already written this name" and must not gain names it never wrote.
+    let mut inferred_types: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // Authored `Type:` signatures, read as the declaration format states them.
+    //
+    // An authored signature describes the glyph's APPLIED form: a dual-use glyph
+    // (`\mathfrak{L}` vs `\mathfrak{L}(t)`) has a `_fn` variant whose id carries the
+    // family type, while the bare use is a `Prop` (the total-ledger set). Attaching
+    // the family sig to the bare id typed bare `cap a \mathfrak{L}` against a
+    // function type, which broke the whole `class` chain.
+    let mut authored: HashMap<u32, AuthoredType> = HashMap::new();
     for n in nodes.iter().chain(emitted.iter()) {
         if let Node::Definition(d) = n
             && let Some(sig) = &d.d_block.sig
@@ -815,180 +842,76 @@ fn symbol_declarations(
             };
             authored
                 .entry(family)
-                .or_insert_with(|| render_type_expr(ctx, sig));
+                .or_insert_with(|| read_type_arrow(ctx, sig));
         }
     }
     let mut sigs: HashMap<u32, GlyphSig> = HashMap::new();
     let mut sorts: HashSet<u32> = HashSet::new();
     let mut seen: HashSet<u32> = HashSet::new();
-    // ℤ-constructor ids: argument positions holding one of these are \mathbb{Z}.
-    let mut z_ctor_ids: HashSet<u32> = HashSet::new();
-    for tex in texes_with(Facet::ZCtor) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            z_ctor_ids.insert(r.id as u32);
-        }
-    }
-    let z_sort_ids: HashSet<String> = texes_with(Facet::SortZ)
-        .filter_map(|tex| ctx.by_tex(tex))
-        .flat_map(|rows| {
-            rows.iter()
-                .map(|r| format!("#{}", r.id))
-                .collect::<HashSet<String>>()
-        })
-        .collect();
     for n in nodes {
-        visit_node(n, &mut sigs, &mut sorts, &mut seen, &genids, &tau_sort_ids, &z_ctor_ids, &z_sort_ids);
+        visit_node(n, &mut sigs, &mut sorts, &mut seen, &env);
     }
-    // --- Infer operator RESULT sorts (the generated sort vs Prop) ---
-    // `+_{\tau}`, `\times_{\tau}`, `\uparrow_{\tau}` … are total functions on the
-    // tick: `a +_\tau b` is itself a `\tau`. The frame must type them `tau → tau →
-    // tau`, NOT `tau → tau → Prop`, or `Eq (plus_tau a tau_0) a` (a proposition
-    // `a=...` with `a : tau` on the right) is an application-type mismatch.
-    // Signal: an operator application consumed in a tau position (as the ARGUMENT
-    // of a tick constructor or of another operator already known to return tau)
-    // returns tau. Propagate to fixpoint.
-    let mut tau_results: HashSet<u32> = HashSet::new();
-    // Head ids that demand tau-typed operands: the tick constructor(s) (`\tau_0` is
-    // nullary; `^+`/`tick`/`succ` are unary tau → tau).
-    let mut tau_consuming: HashSet<u32> = HashSet::new();
-    for tex in texes_with(Facet::TauConsume) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            tau_consuming.insert(r.id as u32);
+    // --- Infer operator RESULT sorts (a declared carrier, or `Prop`) ---
+    // An operator whose result a CONSTRUCTOR of a declared sort consumes, or that
+    // stands on the other side of `=` from a term of one, returns that sort; the
+    // closure carries the same answer to whatever feeds such an operator. This is what
+    // types an operator over its sort (`C → C → C`) instead of over the carrier —
+    // typed over `Prop`, `Eq (op a c) a` with `a : C` is an application-type
+    // mismatch.
+    let (consumed_by, eq_terms) = collect_consumed_by(nodes, &env);
+    for (id, carrier) in infer_result_sorts(&env, &consumed_by, &eq_terms) {
+        if let Some(sig) = sigs.get_mut(&id) {
+            sig.res_carrier = Some(carrier);
         }
     }
-    // ℤ-constructors consume ℤ: an operator applied as an argument TO a
-    // ℤ-constructor returns \mathbb{Z} (its result is a ℤ element).
-    let mut z_consuming: HashSet<u32> = HashSet::new();
-    for tex in texes_with(Facet::ZCtor) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            z_consuming.insert(r.id as u32);
-        }
-    }
-    // τ-terminators: an `=`-counterpart to these forces the other side to be τ.
-    let mut tau_term: HashSet<u32> = HashSet::new();
-    for tex in texes_with(Facet::TickTerm) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            tau_term.insert(r.id as u32);
-        }
-    }
-    // eater -> set of sub-application heads it is directly applied to
-    let mut consumed_by: HashMap<u32, HashSet<u32>> = HashMap::new();
-    let mut eq_tau: HashSet<u32> = HashSet::new();
-    let mut eq_z: HashSet<u32> = HashSet::new();
-    let mut z_term: HashSet<u32> = HashSet::new();
-    for tex in texes_with(Facet::ZCtor) {
-        if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-            z_term.insert(r.id as u32);
-        }
-    }
-    collect_consumed_by(nodes, &mut consumed_by, &mut eq_tau, &mut eq_z, &tau_term, &z_term);
-    // An operator whose application is the `=`-side against a τ-terminator returns τ.
-    tau_results.extend(eq_tau);
-    // Seed: anything directly consumed by a tau-constructor returns tau; then
-    // closure where a head consumed by a tau-returning head also returns tau.
-    loop {
-        let before = tau_results.len();
-        // Any head whose application is directly consumed by a tau-constructor
-        // returns tau; then closure over tau-returning consumers.
-        let mut changed = false;
-        for (eater, deps) in &consumed_by {
-            if !tau_consuming.contains(eater) && !tau_results.contains(eater) {
-                continue;
-            }
-            for d in deps {
-                if tau_results.insert(*d) {
-                    changed = true;
-                }
-            }
-        }
-        if !changed && tau_results.len() == before {
-            break;
-        }
-    }
-    // Same fixpoint for ℤ-returning operators (their result feeds a ℤ-constructor,
-    // or an `=`-side against a ℤ-terminator).
-    let mut z_results: HashSet<u32> = HashSet::new();
-    z_results.extend(eq_z);
-    loop {
-        let before = z_results.len();
-        let mut changed = false;
-        for (eater, deps) in &consumed_by {
-            if !z_consuming.contains(eater) && !z_results.contains(eater) {
-                continue;
-            }
-            for d in deps {
-                if z_results.insert(*d) {
-                    changed = true;
-                }
-            }
-        }
-        if !changed && z_results.len() == before {
-            break;
-        }
-    }
-    // Now that the τ/Z result fixpoints have settled, re-read the argument
-    // positions with that knowledge. The heads that COUNT as τ/Z-valued are the
-    // same set the declaration loop uses: a result the fixpoint proved, or a glyph
-    // whose own name/tex says which sequence it belongs to (`\cdot_{\mathbb{Z}}`
-    // is Z-arithmetic and returns a Z, even where no Z-constructor ever pins it).
-    // Only operators that RETURN τ/Z may say what an argument's sort is, and the
-    // test for that is the frame's OWN answer for the head — not the raw `z_results`
-    // fixpoint, whose rule reads "consumed by a Z-constructor" as "returns Z". That
-    // rule is harmless where it only decides a result sort (`tick` returns τ, and
-    // τ wins), but as an ARGUMENT test it said `tick` and `\times_{\tau}` were
-    // `\mathbb{Z}`-valued, which marked `plus_{\tau}`'s second argument on Z and
-    // broke `plus_tau m n` in every theorem that used it.
+    // With the result sorts settled, re-read the argument positions: an argument that
+    // is an APPLICATION whose head returns a declared sort belongs to that sort.
     //
     // A connective is excluded outright: its arguments are propositions by its own
-    // `Sema:` (`a \leftrightarrow b = 1 \Delta (a \Delta b)`), whatever one
-    // application happens to hold. The single place a connective position here looks
-    // Z-valued is `D.BT.76`'s `a \cdot_Z d \le_Z c \cdot_Z b`, whose mixed-operator
-    // chain parses left-to-right as `((a \cdot_Z d) \le_Z c) \cdot_Z b` — a
-    // precedence bug of its own, not evidence about `\leftrightarrow`.
-    let connectives: HashSet<u32> = texes_with(Facet::LeftIff)
-        .chain(texes_with(Facet::RightIff))
-        .filter_map(|t| ctx.by_tex(t).and_then(|rows| rows.first()))
-        .map(|r| r.id as u32)
-        .chain(seen.iter().copied().filter(|id| {
-            matches!(crate::resolver(ctx, fn_names)(*id).as_str(), "land" | "lor")
-        }))
-        .collect();
-    let name_of: HashMap<u32, String> = seen
-        .iter()
-        .map(|id| (*id, crate::resolver(ctx, fn_names)(*id)))
-        .collect();
-    let returns = |id: u32, sort: &str| -> bool {
-        glyph_type(ctx, id, &name_of[&id], &sigs, &tau_results, &z_results).ends_with(sort)
-    };
-    let z_heads: HashSet<u32> = seen
+    // `Sema:`, whatever one application happens to hold.
+    let connectives: HashSet<u32> = seen
         .iter()
         .copied()
-        .filter(|id| !connectives.contains(id) && returns(*id, "mathbb_Z"))
+        .filter(|id| {
+            let Some(row) = ctx.by_id(*id as i64) else {
+                return false;
+            };
+            qubitick_model::format::is_iff(&row.tex) || ctx.has_facet(&row.tex, Facet::Connective)
+        })
         .collect();
-    let tau_heads: HashSet<u32> = seen
-        .iter()
-        .copied()
-        .filter(|id| !connectives.contains(id) && returns(*id, "tau"))
-        .collect();
-    remark_arg_sorts(nodes, &mut sigs, &tau_heads, &z_heads, &name_of, &connectives);
+    remark_arg_sorts(nodes, &mut sigs, &connectives);
 
-    // Recursor-definable operators (from CONTEXT definitions): their defining recursive
-    // `\land`-Sema is compiled to a `noncomputable def … tau.rec …`, so every module
-    // that USES the operator sees a real definition (`[\equiv]` can unfold it) instead
-    // of an uninterpreted `axiom`. Keyed by the operator's glyph id (== definition
-    // symbol id after `definition_symbol_id`).
+    // Every declared sort an emitted type NAMES. A carrier a type mentions has to
+    // exist in the text even when no statement uses the carrier itself, and a
+    // formation's carrier additionally has to carry its inductive.
+    let mut named_carriers: HashSet<u32> = HashSet::new();
+    for auth in authored.values() {
+        named_carriers.extend(auth.args.iter().copied().flatten());
+        named_carriers.extend(auth.res);
+    }
+    for (id, sig) in &sigs {
+        if seen.contains(id) {
+            named_carriers.extend(sig.arg_carrier.iter().copied().flatten());
+            named_carriers.extend(sig.res_carrier);
+        }
+    }
+
+    // Recursor-definable operators (from CONTEXT definitions): their defining
+    // recursive `\land`-Sema is compiled to a `noncomputable def ... .rec`, so every
+    // module that USES the operator sees a real definition (`[\equiv]` can unfold it)
+    // instead of an uninterpreted `axiom`. Keyed by the operator's glyph id (==
+    // definition symbol id after `definition_symbol_id`).
     let recursor_resolver = crate::resolver(ctx, fn_names);
-    // Cross-operator tick recursor closure, by fixpoint: a recursor op qualifies if
-    // every glyph its base/succ RHS references is itself recursor-definable (the
-    // tick closure `plus_tau < times_tau`, `downarrow < minus_tau`). Keying and
-    // naming by the Sema's head id (not the glyph-line's first control word, which
-    // can drop a `_τ` suffix) resolves times_tau/etc. correctly.
+    // Cross-operator recursor closure, by fixpoint: a recursor op qualifies if every
+    // glyph its case RHS references is itself recursor-definable. Keying and naming by
+    // the Sema's head id (not the glyph-line's first control word, which can drop a
+    // mod suffix) resolves the operator correctly.
     let sema_head = |e: &Expr| -> Option<(u32, String)> {
         use qubitick_model::{BinderKind as BK, Expr as E, EQ_SYM as EQ};
-        // Collect every conjunct of a (possibly nested) `land`.
+        // Collect every conjunct of a (possibly nested) conjunction.
         fn conj<'a>(x: &'a Expr, ctx: &Ctx, out: &mut Vec<&'a Expr>) {
             match x {
-                E::Apply(h, args) if crate::lean_name_of(ctx, h.primary) == "land" => {
+                E::Apply(h, args) if crate::module::is_conjunct_head(ctx, h.primary) => {
                     for a in args {
                         conj(a, ctx, out);
                     }
@@ -999,7 +922,7 @@ fn symbol_declarations(
         let mut cs: Vec<&Expr> = Vec::new();
         conj(e, ctx, &mut cs);
         for c in cs {
-            // strip a `∀ n, …` wrapper
+            // strip a `∀ n, ...` wrapper
             let body = match c {
                 E::Binder(BK::Forall, _, b) => b.as_ref(),
                 o => o,
@@ -1017,19 +940,18 @@ fn symbol_declarations(
     let mut recursor_able: HashSet<u32> = HashSet::new();
     let mut recursor_defs: HashMap<u32, String> = HashMap::new();
     // DEMAND-DRIVEN: only recursor-def operators the module's OWN emitted nodes
-    // reference; context defs must not inject their recursors into frames that
-    // never use (nor declare the sorts of) them. Gated by LEAN NAME (ids can
-    // differ between the statement's glyph and the Sema's head for the same op).
+    // reference; context defs must not inject their recursors into frames that never
+    // use (nor declare the sorts of) them. Gated by LEAN NAME (ids can differ between
+    // the statement's glyph and the Sema's head for the same op).
     let mut own_names: HashSet<String> = HashSet::new();
     let mut own_ids: HashSet<u32> = HashSet::new();
     for n in emitted {
         match n {
             Node::Theorem(t) => {
                 collect_plain_ids(&t.statement, &mut own_ids);
-                // Proof rows may reference operators the statement never mentions
-                // (e.g. T_BT_72's \ge_{0}^{\mathbb{Z}}, defined as a ℤ-recursor
-                // in D_BT_78); without the demand they stay opaque axioms and
-                // `[\equiv]` steps over them cannot reduce.
+                // Proof rows may reference operators the statement never mentions;
+                // without the demand they stay opaque axioms and `[\equiv]` steps
+                // over them cannot reduce.
                 for step in &t.proof {
                     if let qubitick_model::ProofStep::Chain { rows } = step {
                         for row in rows {
@@ -1062,15 +984,9 @@ fn symbol_declarations(
         let nm = recursor_resolver(*id);
         own_names.insert(nm);
     }
-    // The op's result sort, keyed by LEAN NAME (ids can differ between the
-    // statement's glyph, the def's symbol and the sigs key).
-    let res_z_by_name: std::collections::HashMap<String, bool> = sigs
-        .iter()
-        .map(|(id, sg)| (recursor_resolver(*id), sg.res_z))
-        .collect();
 
     // DEMAND CLOSURE: an admitted def's Sema glyphs are also demanded, so the
-    // dependency chain (plus_ℤ -> plus_ℤ± -> uparrow_ℤ) becomes reducible defs.
+    // dependency chain of a definition over a formation becomes reducible defs.
     // Names are compared with a trailing `_fn` (applied-use split) normalized away.
     let norm = |n: &str| n.strip_suffix("_fn").unwrap_or(n).to_string();
     let mut demand: HashSet<u32> = own_ids.clone();
@@ -1098,39 +1014,19 @@ fn symbol_declarations(
                 && let Some(FormBody::MacroExpr(e)) = &d.d_block.form
                 && let Some((head_id, hname)) = sema_head(e)
                 && !recursor_defs.contains_key(&head_id)
-                && (demand.contains(&head_id)
-                    || demand_names.contains(&norm(&hname)))
-
-                && let Some(lt) = crate::definition::recursor_def_text(
-                    ctx, &hname, e, &recursor_resolver, &seen,
+                && (demand.contains(&head_id) || demand_names.contains(&norm(&hname)))
+                && let Some(lt) = crate::definition::recursor_def_text_formation(
+                    ctx,
+                    &hname,
+                    e,
+                    &recursor_resolver,
+                    &formations,
                 )
-                .or_else(|| {
-                    crate::definition::recursor_def_text_extended(
-                        ctx,
-                        &hname,
-                        e,
-                        &recursor_resolver,
-                        &seen,
-                        res_z_by_name
-                            .get(&hname)
-                            .copied()
-                            .or_else(|| res_z_by_name.get(&format!("{hname}_fn")).copied()),
-                    )
-                })
-                .or_else(|| {
-                    crate::definition::recursor_def_text_formation(
-                        ctx,
-                        &hname,
-                        e,
-                        &recursor_resolver,
-                        &formations,
-                    )
-                })
             {
                 recursor_defs.insert(head_id, lt);
                 recursor_able.insert(head_id);
                 // DEMAND CLOSURE: the def's Sema glyphs become demanded so the
-                // dependency chain (plus_ℤ -> plus_ℤ± -> uparrow_ℤ) is reducible.
+                // dependency chain is reducible.
                 let mut ids = HashSet::new();
                 collect_plain_ids(e, &mut ids);
                 for x in ids {
@@ -1145,13 +1041,12 @@ fn symbol_declarations(
     }
     // Symbols the module DEFINES itself get a real `def` and must not also be
     // declared as frame axioms (name collision).
-    let resolver = crate::resolver(ctx, fn_names);
     // Only names this module actually EMITS a `def` for may be suppressed from the
     // frame. `nodes` includes CONTEXT (a theorem's file holds one node, so the
     // corpus definitions arrive as context), and those definitions are never
     // emitted — suppressing their glyphs left them undeclared, so a statement that
-    // APPLIES one (`plus_tau a tau_0`) applied an unknown constant and Lean
-    // reported `unknown constant 'CoeFun'`.
+    // APPLIES one applied an unknown constant and Lean reported
+    // `unknown constant 'CoeFun'`.
     let defined_names = defined_symbols(ctx, emitted, fn_names);
     let mut out = String::new();
     let mut extra_defined: HashSet<String> = HashSet::new();
@@ -1160,6 +1055,8 @@ fn symbol_declarations(
     // every formation twice, so each carrier is declared once and the second pass
     // over it is skipped.
     let mut formation_done: HashSet<u32> = HashSet::new();
+    // The one way an inductive appears: a formation the corpus declares, named by the
+    // module (its carrier or one of its constructors, in a statement or in a type).
     for n in nodes.iter().chain(emitted.iter()) {
         if let Node::Definition(d) = n
             && let Some(qubitick_model::FormBody::Formation(ctors)) = &d.d_block.form
@@ -1167,170 +1064,87 @@ fn symbol_declarations(
         {
             let ctor_ids: Vec<u32> = ctors.iter().map(|c| c.constructor.primary).collect();
             let used = seen.contains(&d.symbol.primary)
+                || named_carriers.contains(&d.symbol.primary)
                 || ctor_ids.iter().any(|id| seen.contains(id));
             if !used {
                 continue;
             }
-            let carrier = crate::lean_name_of(ctx, d.symbol.primary);
+            let carrier = name_of(d.symbol.primary);
+            // A constructor's Lean type: its carrier when nullary, its declared argument
+            // sorts armed into the carrier when it takes arguments.
+            let ctor_ty = |c: &qubitick_model::CtorDecl| -> String {
+                if c.args.is_empty() {
+                    return carrier.clone();
+                }
+                let mut ty = String::new();
+                for arg in &c.args {
+                    ty.push_str(&name_of(*arg));
+                    ty.push_str(" \u{2192} ");
+                }
+                ty.push_str(&carrier);
+                ty
+            };
             let mut f = format!("set_option genInjectivity false in\ninductive {carrier} : Type\n");
-            for cid in &ctor_ids {
-                let cnam = ctx
-                    .by_id(*cid as i64)
-                    .map(|r| r.lean_name.clone())
-                    .unwrap_or_else(|| format!("s{cid}"));
-                f.push_str(&format!("  | {cnam}\n"));
+            // A CONSTRUCTOR CARRIES ITS DECLARED ARGUMENT SORTS: a nullary one is
+            // written bare (Lean reads it as its carrier), and one declared with
+            // arguments is a function into the carrier — which is what makes a
+            // RECURSIVE formation a real inductive rather than a pile of constants.
+            for c in ctors {
+                let cnam = name_of(c.constructor.primary);
+                let ty = ctor_ty(c);
+                if c.args.is_empty() {
+                    f.push_str(&format!("  | {cnam}\n"));
+                } else {
+                    f.push_str(&format!("  | {cnam} : {ty}\n"));
+                }
+                declared_names.insert(cnam.clone());
+                declared_types.insert(cnam.clone(), ty);
                 extra_defined.insert(cnam);
             }
             extra_defined.insert(carrier.clone());
             declared_names.insert(carrier.clone());
-            for cid in &ctor_ids {
-                if let Some(r) = ctx.by_id(*cid as i64) {
-                    declared_names.insert(r.lean_name.clone());
+            declared_types.insert(carrier.clone(), "Type".to_string());
+            for c in ctors {
+                let cnam = name_of(c.constructor.primary);
+                declared_names.insert(cnam.clone());
+                // A nullary constructor is a value of its carrier; one with arguments
+                // was given its function type above. Either way `known_types` agrees
+                // with the inductive that declares it.
+                if c.args.is_empty() {
+                    declared_types.insert(cnam, carrier.clone());
                 }
             }
             out.push_str(&f); // the `inductive` FIRST
-            for cid in &ctor_ids {
-                let cnam = ctx
-                    .by_id(*cid as i64)
-                    .map(|r| r.lean_name.clone())
-                    .unwrap_or_else(|| format!("s{cid}"));
+            for c in ctors {
+                let cnam = name_of(c.constructor.primary);
+                // The corpus writes the bare glyph, so the glyph gets a name of its own
+                // bound to the constructor — typed with the CONSTRUCTOR's type, or a
+                // recursive one would be closed over the wrong arity.
                 out.push_str(&format!(
-                    "def {cnam} : {carrier} := {carrier}.{cnam}\n"
+                    "def {cnam} : {} := {carrier}.{cnam}\n",
+                    ctor_ty(c)
                 ));
             }
         }
     }
-    // The corpus identifies events with propositions, so the carrier sort is `Prop`
-    // (Δ = XOR, ∩ = AND, 𝟙 = True, ∅ = False, `=` = propositional equality).
-
-    // Emit the generated-sort inductive and its constructor aliases FIRST so that any
-    // recursor `def` for tick operators (`plus_tau` etc.) can reference `tau`/`tick`/
-    // `tau_0`. The `sorts` set marks `\tau` when it is used as a binder sort.
-    let tau_id = texes_with(Facet::SortTau)
-        .filter_map(|tex| ctx.by_tex(tex).and_then(|rows| rows.first()))
-        .map(|r| r.id as u32)
-        .next();
-    // Emit the tick environment when `\tau` is a binder sort, OR the module uses
-    // tick-valued operators (result-sort inference marked some glyph tau) — a tick-op
-    // `def`/recursor needs `inductive tau`/`tick`/`tau_0` in scope.
-    // Also trigger on the tick CONSTRUCTOR glyphs (`^+`/`tick`, `\tau_0`) being used
-    // anywhere in the module (a tick-op definition references them even when `\tau`
-    // the SORT symbol is absent).
-    let ctor_used = texes_with(Facet::GenTag).any(|tex| {
-        ctx.by_tex(tex)
-            .and_then(|rows| rows.first())
-            .map(|r| seen.contains(&(r.id as u32)))
-            .unwrap_or(false)
-    });
-    // The generated sort `\mathbb{Z}` is also a real inductive in the corpus's own
-    // semantics (`\mathbb{Z} = \mathbb{Z}_{0} \cup ⋃_{t:τ}(𝕫⁺(t) ∪ 𝕫⁻(t))`,
-    // D.BT.47): three constructors over the tick. Emit it (and the constructor
-    // ALIASES that all Z-glyph uses share) when any Z-constructor is referenced.
-    let z_ctor_used = texes_with(Facet::ZCtor).any(|tex| {
-        ctx.by_tex(tex)
-            .and_then(|rows| rows.first())
-            .map(|r| seen.contains(&(r.id as u32)))
-            .unwrap_or(false)
-    });
-    let z_id = texes_with(Facet::SortZ)
-        .filter_map(|tex| ctx.by_tex(tex).and_then(|rows| rows.first()))
-        .map(|r| r.id as u32)
-        .next();
-    // A declared type that MENTIONS a generated sort forces that sort's inductive to
-    // exist, exactly as using one of its constructors does. Without this the frame
-    // wrote `axiom cdot___mathbb_Z : mathbb_Z → mathbb_Z → mathbb_Z` and never
-    // declared `mathbb_Z` — and Lean, in a bare prelude with `autoImplicit` on,
-    // silently bound every occurrence to a FRESH implicit variable, so the module
-    // "checked" with each sort occurrence unrelated to the others.
-    let z_in_types = seen.iter().any(|id| {
-        sigs.get(id).is_some_and(|s| {
-            (s.res_z && s.len > 0)
-                || (!s.z_genids.is_empty() && s.z_genids.iter().any(|b| *b))
-        })
-    }) || authored.values().any(|t| t.contains("mathbb_Z"));
-    let tau_in_types = seen.iter().any(|id| {
-        sigs.get(id).is_some_and(|s| {
-            (s.res_tau && s.len > 0)
-                || (!s.genids.is_empty() && s.genids.iter().any(|b| *b))
-        })
-    }) || authored.values().any(|t| t.contains("tau") || t.contains("tick"));
-    // The integer sequence's constructors take a tick (`\mathbb{Z}^{+} n`), so a
-    // Z sort needs the tick inductive declared beside it.
-    let tau_used = tau_in_types || z_in_types || ctor_used
-        || z_ctor_used // ℤ-constructor aliases take `tau` args; the inductive needs it
-        || z_id.is_some_and(|zid| seen.contains(&zid) || sorts.contains(&zid))
-        || tau_id.is_some_and(|tid| {
-            sorts.contains(&tid) || tau_results.contains(&tid) || seen.contains(&tid)
-        });
-    // lean name -> declared Lean type string, for every frame symbol.
-    let mut declared_types: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    // The types the frame infers for glyphs it does NOT declare (a Definition owns
-    // those). Kept apart from `declared_types`, which also means "this frame has
-    // already written this name" and must not gain names it never wrote.
-    let mut inferred_types: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    if tau_used {
-        declared_names.extend(["tau", "tau_0", "tick"].map(String::from));
-        // The generated environment is part of what a definition body may name, so
-        // its TYPES go into `known_types` too: `\uparrow a = ^+ a` (D.BT.54) is
-        // `tau → tau` because `tick` is, and the tick environment declares itself,
-        // not through the ordinary symbol loop.
-        declared_types.insert("tau".to_string(), "Type".to_string());
-        declared_types.insert("tau_0".to_string(), "tau".to_string());
-        declared_types.insert("tick".to_string(), "tau → tau".to_string());
-        out.push_str(
-            "inductive tau : Type\n  | zero : tau\n  | succ : tau → tau\n\
-             def tau_0 : tau := tau.zero\n\
-             def tick (x : tau) : tau := tau.succ x\n",
-        );
-    }
-    let z_used = z_in_types
-        || z_ctor_used
-        || z_id.is_some_and(|zid| {
-            sorts.contains(&zid) || seen.contains(&zid)
-        });
-    // lean names of the ℤ-constructor aliases (their actual sanitized spellings)
-    let mut z_alias_names: HashSet<String> = HashSet::new();
-    if z_used {
-        declared_names.insert("mathbb_Z".to_string());
-        declared_types.insert("mathbb_Z".to_string(), "Type".to_string());
-        // Constructor aliases under the ACTUAL lean names of the glyphs in the
-        // DB (the `\mathbb{Z}_{0}` symbol sanitizes to mathbb_Z__0 — the
-        // underscore count comes from the symbol table, not from a hand-write).
-        let mut zb = String::from(
-            "inductive mathbb_Z : Type\n\
-             \x20 | zero : mathbb_Z\n\
-             \x20 | plus : tau → mathbb_Z\n\
-             \x20 | minus : tau → mathbb_Z\n",
-        );
-        let ctor_aliases = qubitick_model::corpus::Z_CTOR_ALIASES;
-        for (tex, ctor) in ctor_aliases {
-            if let Some(r) = ctx.by_tex(tex).and_then(|rows| rows.first()) {
-                let nm = &r.lean_name;
-                z_alias_names.insert(nm.clone());
-                declared_names.insert(nm.clone());
-                declared_types.insert(
-                    nm.clone(),
-                    if *ctor == "mathbb_Z.plus" || *ctor == "mathbb_Z.minus" {
-                        "tau → mathbb_Z".to_string()
-                    } else {
-                        "mathbb_Z".to_string()
-                    },
-                );
-                let args = if *ctor == "mathbb_Z.plus" || *ctor == "mathbb_Z.minus" {
-                    " (t0 : tau)"
-                } else {
-                    ""
-                };
-                zb.push_str(&format!(
-                    "def {nm}{args} : mathbb_Z := {ctor}{}\n",
-                    if args.is_empty() { "" } else { " t0" }
-                ));
-            }
+    // A declared sort that is NOT a formation is the `Type` carrier the corpus's
+    // signatures are written over. A carrier a type names has to exist even when no
+    // statement uses the carrier glyph itself.
+    for sid in named_carriers.clone() {
+        let lean = name_of(sid);
+        if env.is_formation(sid)
+            || seen.contains(&sid)
+            || defined_names.contains(&lean)
+            || extra_defined.contains(&lean)
+            || declared_types.contains_key(&lean)
+        {
+            continue;
         }
-        out.push_str(&zb);
+        out.push_str(&format!("def {lean} : Type := Prop\n"));
+        declared_types.insert(lean, "Type".to_string());
     }
+    // Recursor defs are deferred: they follow every ordinary axiom symbol, and are
+    // ordered among themselves by dependency (below).
     let mut defer_recursor_defs: Vec<(u32, String)> = Vec::new();
     let mut ids: Vec<u32> = seen.iter().copied().collect();
     ids.sort_unstable();
@@ -1347,72 +1161,51 @@ fn symbol_declarations(
         }
         // A glyph a Definition in this module declares: the frame leaves it alone —
         // but its TYPE is still the frame's answer, and another definition's body
-        // may apply it. The name stays FREE for a later glyph of the same spelling,
-        // exactly as before this branch existed.
+        // may apply it. The name stays FREE for a later glyph of the same spelling.
         if defined_names.contains(&lean) {
             if !sorts.contains(&id) {
-                inferred_types.insert(
-                    lean.clone(),
-                    glyph_type(ctx, id, &lean, &sigs, &tau_results, &z_results),
-                );
+                inferred_types.insert(lean.clone(), glyph_type(id, &sigs, &authored, &name_of));
             }
             continue;
         }
         if extra_defined.contains(&lean) || !emitted_names.insert(lean.clone()) {
             continue;
         }
-        // Constructors of the generated sort are declared BY the inductive (emitted above).
-        if matches!(lean.as_str(), "tau" | "tau_0" | "tick") {
+        // The declaration format's arrow declares no constant: Lean's `→` is built in.
+        if is_format_arrow(ctx, id) {
             continue;
         }
-        // The ℤ inductive declares `mathbb_Z` and its constructor aliases.
-        if z_used
-            && (lean == "mathbb_Z" || z_alias_names.contains(&lean))
-        {
-            continue;
-        }
-        if is_arrow_glyph(&lean) {
-            continue;
-        }
-        if sorts.contains(&id) {
-            // A GENERATED sort is a real inductive (emitted above). Any other "sort"
-            // glyph stays `def : Type := Prop`.
-            if lean == "tau" || (z_used && lean == "mathbb_Z") {
-                continue;
-            } else {
-                out.push_str(&format!("def {lean} : Type := Prop\n"));
-                // Record it: a frame assembled from a whole era can reach the same
-                // glyph again as an operator, and one declaration is all Lean allows.
-                declared_types.insert(lean.clone(), "Type".to_string());
-            }
+        if sorts.contains(&id) || env.sorts.contains(&id) {
+            // A DECLARED sort is a `Type` carrier, and a glyph used as a binder type
+            // is one too (the corpus's spaces are written over `Prop`). A formation's
+            // carrier is its own inductive and was skipped above.
+            out.push_str(&format!("def {lean} : Type := Prop\n"));
+            // Record it: a frame assembled from a whole era can reach the same
+            // glyph again as an operator, and one declaration is all Lean allows.
+            declared_types.insert(lean.clone(), "Type".to_string());
         } else if let Some(def_text) = recursor_defs.get(&id) {
-            // A recursor-definable operator (τ/ℤ or custom-formation) is a real
+            // A recursor-definable operator over a declared formation is a real
             // `def` (so `[\equiv]` unfolds it by kernel conversion), not a frame
-            // `axiom`. Take precedence over an authored `Type:` sig, which only
-            // states the glyph's type (a recursor Sema means it actually computes).
+            // `axiom`.
             defer_recursor_defs.push((id, def_text.clone()));
-        } else if let Some(ty) = authored.get(&id) {
-            declared_types.insert(lean.clone(), ty.clone());
-            out.push_str(&format!("axiom {lean} : {ty}\n"));
         } else {
-            let ty = glyph_type(ctx, id, &lean, &sigs, &tau_results, &z_results);
-            // `\top`/`\bot` are the order-theoretic truth constants: emit them
-            // REDUCIBLE (`≡ True`/`≡ False`) so a `[\equiv]` row ends at a provable
-            // object and a Prop-goal chain can close via `trivial` (e.g. T_BT_72's
-            // `ge (a + -a) = ge Z0 = \top`).
+            let ty = glyph_type(id, &sigs, &authored, &name_of);
             if declared_types.contains_key(&lean) {
                 // Already declared by the sort loop above (a frame assembled from a
                 // whole era can reach one glyph from both). One declaration, or the
                 // module does not elaborate.
                 continue;
             }
+            // The order-theoretic truth constants are emitted REDUCIBLE (`≡ True`,
+            // `≡ False`) so a `[\equiv]` row ends at a provable object and a
+            // Prop-goal chain can close via `trivial`.
             if lean == "top" {
                 out.push_str("def top : Prop := True\n");
             } else if lean == "bot" {
                 out.push_str("def bot : Prop := False\n");
             } else {
                 declared_types.insert(lean.clone(), ty.clone());
-            out.push_str(&format!("axiom {lean} : {ty}\n"));
+                out.push_str(&format!("axiom {lean} : {ty}\n"));
             }
         }
     }
@@ -1440,7 +1233,8 @@ fn symbol_declarations(
         for (id, txt, nm) in pending {
             let depends = all_names.iter().any(|onm| {
                 onm != &nm
-                    && txt.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    && txt
+                        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
                         .any(|t| t == onm.as_str())
             });
             if !depends {
@@ -1468,18 +1262,11 @@ fn symbol_declarations(
     // imports a ground. They reference the operator, so they go into the body where
     // the operator is in scope — after the definition in a ground.
     let mut char_axioms = String::new();
-    // Characterising axioms for `=`-defined macros (`\lnot a = \mathbb{1} Δ a`,
-    // D.BT.02): `axiom {op}_def : ∀ params, Eq (op params) body`. Theorem proofs
-    // cite these by name (chain.rs's `rule.definitional` branch) instead of
-    // relying on `Eq.refl` over an opaque head, which cannot close
-    // `Eq (lnot X) (Δ 𝟙 X)` when `lnot` is only an axiom in this frame.
-    let resolver = crate::resolver(ctx, fn_names);
-    // Characterising axioms for `=`-defined PROP macros (e.g. D.BT.02
-    // `\lnot a = \mathbb{1} Δ a`): `axiom {op}_def : ∀ params, Eq (op params) body`.
-    // Theorem proofs cite these by name (chain.rs's `rule.definitional`) instead
-    // of `Eq.refl`, which cannot close `Eq (lnot X) (Δ 𝟙 X)` over an opaque axiom.
-    // Restricted to Prop-valued macros: a `tick`/τ-sort equation would make the
-    // Eq-frame axiom ill-typed (mixed sorts). `lnot` is the confirmed case.
+    // Characterising axioms for `=`-defined PROP macros (`\lnot a = \mathbb{1} Δ a`,
+    // D.BT.02): `axiom {op}_def : ∀ params, Eq (op params) body`. Theorem proofs cite
+    // these by name (chain.rs's `rule.definitional` branch) instead of relying on
+    // `Eq.refl` over an opaque head, which cannot close `Eq (lnot X) (Δ 1 X)` when
+    // `lnot` is only an axiom in this frame.
     for n in nodes {
         if let Node::Definition(d) = n
             && let Some(FormBody::MacroExpr(e)) = &d.d_block.form
@@ -1525,46 +1312,36 @@ fn symbol_declarations(
             if skip {
                 continue;
             }
-            // Generalize beyond `lnot`: emit the characterising axiom for ANY
-            // `=`-macro whose operands and result are the plain `Prop` carrier, so
-            // an author's own defined operator is citable definitionally. The test
-            // is the operator's observed GlyphSig (no τ/Z/binder positions, Prop
-            // result), which is exactly the condition under which the `∀ (a : Prop)`
-            // binder shape is well-typed. Sort-valued macros are skipped: their
-            // equations close by `Eq.refl` and a Prop-binder axiom would be
-            // ill-typed (the original mixed-sort failure).
+            // Emit the characterising axiom for any `=`-macro whose operands and
+            // result are the plain `Prop` carrier, so an author's own defined
+            // operator is citable definitionally. The test is the operator's observed
+            // GlyphSig (no carrier positions, Prop result), which is exactly the
+            // condition under which the `∀ (a : Prop)` binder shape is well-typed.
             let prop_valued = sigs.get(&d.symbol.primary).is_none_or(|sg| {
-                !sg.res_tau
-                    && !sg.res_z
-                    && sg.genids.iter().all(|b| !*b)
-                    && sg.z_genids.iter().all(|b| !*b)
+                sg.res_carrier.is_none()
+                    && sg.arg_carrier.iter().all(|c| c.is_none())
                     && sg.binder.iter().all(|b| !*b)
             });
-            // Also skip anything whose equation mentions a SORT (`mathbb_Z`,
-            // `mathfrak_E`, `tau`, …): those render `Type`-valued, so `Eq` over
-            // them is ill-typed (and the equation closes by `Eq.refl` anyway).
-            // Any symbol that is NOT a plain Prop carrier: sorts, and operators
-            // whose observed result is τ or Z. An equation mentioning one of them
-            // is not Prop-typed, so the `∀ (a : Prop)` binder shape would not
-            // type-check — skip it (those equations close by `Eq.refl`).
+            // A symbol is PROP-SAFE only when its declared type is built purely of
+            // `Prop`. Any symbol that is not prop-safe is added to the exclusion set,
+            // together with every declared sort and every constructor of one, so an
+            // equation mentioning a `Type`-valued glyph is skipped: its `∀ (a : Prop)`
+            // binder shape would not type-check (and it closes by `Eq.refl` anyway).
             let mut sort_names: Vec<String> =
                 sorts.iter().map(|id| crate::lean_name_of(ctx, *id)).collect();
-            // A symbol is PROP-SAFE only when its declared type is built purely of
-            // `Prop` (no τ/Z/binder positions and a Prop result). Any symbol that
-            // is not prop-safe is added to the exclusion set, so an equation
-            // mentioning it is skipped.
             for (id, sg) in sigs.iter() {
-                let prop_safe = !sg.res_tau
-                    && !sg.res_z
-                    && sg.genids.iter().all(|b| !*b)
-                    && sg.z_genids.iter().all(|b| !*b)
+                let prop_safe = sg.res_carrier.is_none()
+                    && sg.arg_carrier.iter().all(|c| c.is_none())
                     && sg.binder.iter().all(|b| !*b);
                 if !prop_safe {
                     sort_names.push(crate::lean_name_of(ctx, *id));
                 }
             }
-            for extra in ["tau", "tick", "tau_0", "mathbb_Z"] {
-                sort_names.push(extra.to_string());
+            for sid in &env.sorts {
+                sort_names.push(name_of(*sid));
+            }
+            for cid in env.ctors() {
+                sort_names.push(name_of(cid));
             }
             let mentions_sort = |t: &str| {
                 t.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
@@ -1572,12 +1349,10 @@ fn symbol_declarations(
             };
             // Every identifier in either side must be a KNOWN Prop-valued symbol
             // (or the macro's own parameter). This is the precise well-typedness
-            // condition: anything else (τ/Z-valued, or not in the frame at all)
-            // would make `Eq (op …) …` ill-typed.
+            // condition: anything else (a carrier-valued glyph, or one not in the
+            // frame at all) would make `Eq (op ...) ...` ill-typed.
             let mut params_now = Vec::new();
             qubitick_pattern::expr_idents(&eqargs[0], &mut params_now);
-            // Precisely: every identifier must be a frame symbol whose DECLARED
-            // Lean type is built purely of `Prop` (so `Eq (op …) …` is well-typed).
             let prop_ok: std::collections::HashSet<String> = declared_types
                 .iter()
                 .filter(|(_, ty)| prop_only_type(ty))
@@ -1616,13 +1391,13 @@ fn symbol_declarations(
     }
     // The types of everything this module can name: what the frame declared, plus
     // the authored `Type:` of every definition in it (whose declaration the frame
-    // leaves to the node). A definition body is typed from this, so the body and
-    // the frame agree about which of τ/Z/Prop a glyph lives in.
-    // Precedence: what the CORPUS says (`Type:`), then what this frame wrote, then
-    // what it would have written for a glyph a definition owns.
+    // leaves to the node). A definition body is typed from this, so the body and the
+    // frame agree about which carrier a glyph lives on.
+    // Precedence: what the CORPUS says (`Type:`), then what this frame would have
+    // written for a glyph a definition owns, then what it wrote.
     let mut known_types: HashMap<String, String> = HashMap::new();
-    for (id, ty) in &authored {
-        known_types.insert(resolver(*id), ty.clone());
+    for (id, auth) in &authored {
+        known_types.insert(resolver(*id), arrow_ty(&auth.args, auth.res, &name_of));
     }
     known_types.extend(inferred_types.clone());
     known_types.extend(declared_types.clone());
@@ -1633,7 +1408,6 @@ fn symbol_declarations(
         arity,
         declared: declared_names,
         types: known_types,
-        seen,
     }
 }
 
@@ -1660,18 +1434,18 @@ fn collect_plain_ids(e: &Expr, out: &mut HashSet<u32>) {
     }
 }
 
-/// Walk all nodes, recording `Apply(outer, args)` where an arg is itself an
-/// application `Apply(inner, _)`: record `outer` -> `inner`. Used to infer which
-/// operators return the generated sort (their result feeds a tau-consuming head).
+/// Record, for every node, which operator applications feed which head, and which
+/// operators stand on the other side of `=` from a term of a declared sort.
+///
+/// `Apply(outer, args)` whose argument is itself an application records
+/// `outer → inner`: the inner operator's result is consumed by the outer head.
 fn collect_consumed_by(
     nodes: &[Node],
-    out: &mut HashMap<u32, HashSet<u32>>,
-    eq_tau: &mut HashSet<u32>,
-    eq_z: &mut HashSet<u32>,
-    term: &HashSet<u32>,
-    z_term: &HashSet<u32>,
-) {
-    let mut rec = |e: &Expr| rec_cb(e, out, eq_tau, eq_z, term, z_term);
+    env: &SortEnv,
+) -> (HashMap<u32, HashSet<u32>>, Vec<(u32, u32)>) {
+    let mut out: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mut eq_terms: Vec<(u32, u32)> = Vec::new();
+    let mut rec = |e: &Expr| rec_cb(e, &mut out, &mut eq_terms, env);
     for n in nodes {
         match n {
             Node::Axiom(a) => a.statements.iter().for_each(&mut rec),
@@ -1687,43 +1461,82 @@ fn collect_consumed_by(
             Node::Calibration(_) | Node::Census(_) => {}
         }
     }
+    (out, eq_terms)
 }
 
-/// Whether `e` is a τ-terminator: the `\tau_0` constant, or a tick/`^+`/`↑`/`↓`
-/// constructor application. The OTHER side of an equality against one of these
-/// must itself be a τ, so its head is a τ-returning operator.
-fn is_tau_terminator(e: &Expr, term: &HashSet<u32>) -> bool {
-    match e {
-        Expr::Sym(ac) => term.contains(&ac.primary),
-        Expr::Apply(h, _) => term.contains(&h.primary),
-        _ => false,
+/// The declared sort each operator RETURNS, read off the way it is used.
+///
+/// The argument of a constructor of a declared sort is a term of that sort, so an
+/// operator whose result that constructor consumes returns it; and an operator that
+/// stands on the other side of `=` from a term of a sort returns it too. The answer
+/// then propagates along `consumed_by`: whatever feeds an operator that returns `C`
+/// also returns `C`.
+///
+/// Deterministic: heads and their consumers are visited in id order, and the first
+/// sort a head is proved to return is the one it keeps.
+fn infer_result_sorts(
+    env: &SortEnv,
+    consumed_by: &HashMap<u32, HashSet<u32>>,
+    eq_terms: &[(u32, u32)],
+) -> HashMap<u32, u32> {
+    let mut edges: Vec<(u32, Vec<u32>)> = consumed_by
+        .iter()
+        .map(|(eater, deps)| {
+            let mut deps: Vec<u32> = deps.iter().copied().collect();
+            deps.sort_unstable();
+            (*eater, deps)
+        })
+        .collect();
+    edges.sort_unstable_by_key(|(eater, _)| *eater);
+    let mut res: HashMap<u32, u32> = HashMap::new();
+    // A constructor of a declared sort demands a term of that sort.
+    for (eater, deps) in &edges {
+        if let Some(carrier) = env.carrier_of.get(eater) {
+            for dep in deps {
+                res.entry(*dep).or_insert(*carrier);
+            }
+        }
     }
+    let mut terms: Vec<(u32, u32)> = eq_terms.to_vec();
+    terms.sort_unstable();
+    for (head, carrier) in terms {
+        res.entry(head).or_insert(carrier);
+    }
+    loop {
+        let before = res.len();
+        for (eater, deps) in &edges {
+            let Some(carrier) = res.get(eater).copied() else {
+                continue;
+            };
+            for dep in deps {
+                res.entry(*dep).or_insert(carrier);
+            }
+        }
+        if res.len() == before {
+            break;
+        }
+    }
+    res
 }
 
 fn rec_cb(
     e: &Expr,
     out: &mut HashMap<u32, HashSet<u32>>,
-    eq_tau: &mut HashSet<u32>,
-    eq_z: &mut HashSet<u32>,
-    term: &HashSet<u32>,
-    z_term: &HashSet<u32>,
+    eq_terms: &mut Vec<(u32, u32)>,
+    env: &SortEnv,
 ) {
     match e {
         Expr::Apply(head, args) => {
-            // `Eq (op …) τ_0` / `Eq (op …) (tick …)`: an operator applied against a
-            // τ-terminator returns τ (its result sort is the generated sort).
+            // `Eq (op ...) term`: when the other side is a term of a declared sort,
+            // the operator applied on this side returns that sort.
             if head.primary == EQ_SYM && args.len() == 2 {
                 for (i, side) in args.iter().enumerate() {
                     let other = &args[1 - i];
-                    if is_tau_terminator(other, term)
-                        && let Expr::Apply(oh, _) = side
-                    {
-                        eq_tau.insert(oh.primary);
-                    }
-                    if is_tau_terminator(other, z_term)
-                        && let Expr::Apply(oh, _) = side
-                    {
-                        eq_z.insert(oh.primary);
+                    if let (Expr::Apply(oh, _), Some(carrier)) = (
+                        side,
+                        head_id(other).and_then(|h| env.carrier_of.get(&h).copied()),
+                    ) {
+                        eq_terms.push((oh.primary, carrier));
                     }
                 }
             }
@@ -1731,30 +1544,30 @@ fn rec_cb(
                 if let Expr::Apply(inner, _) = a {
                     out.entry(head.primary).or_default().insert(inner.primary);
                 }
-                rec_cb(a, out, eq_tau, eq_z, term, z_term);
+                rec_cb(a, out, eq_terms, env);
             }
         }
         Expr::Bracket(_, args) | Expr::Vector(args) | Expr::Set(args) => {
             for a in args {
-                rec_cb(a, out, eq_tau, eq_z, term, z_term);
+                rec_cb(a, out, eq_terms, env);
             }
         }
         Expr::Binder(_, bs, body) => {
             for b in bs {
-                rec_cb(&b.ty, out, eq_tau, eq_z, term, z_term);
+                rec_cb(&b.ty, out, eq_terms, env);
             }
-            rec_cb(body, out, eq_tau, eq_z, term, z_term);
+            rec_cb(body, out, eq_terms, env);
         }
         Expr::Recursor(s, cases) => {
-            rec_cb(s, out, eq_tau, eq_z, term, z_term);
+            rec_cb(s, out, eq_terms, env);
             for (_, b) in cases {
-                rec_cb(b, out, eq_tau, eq_z, term, z_term);
+                rec_cb(b, out, eq_terms, env);
             }
         }
         Expr::Matrix(rows) => {
             for r in rows {
                 for c in r {
-                    rec_cb(c, out, eq_tau, eq_z, term, z_term);
+                    rec_cb(c, out, eq_terms, env);
                 }
             }
         }
@@ -1763,25 +1576,21 @@ fn rec_cb(
 }
 
 /// Walk one node's statements collecting glyph arities, sort-glyphs, and refs.
-#[allow(clippy::too_many_arguments)]
 fn visit_node(
     n: &Node,
     sigs: &mut HashMap<u32, GlyphSig>,
     sorts: &mut HashSet<u32>,
     seen: &mut HashSet<u32>,
-    genids: &HashSet<String>,
-    tau_sort_ids: &HashSet<String>,
-    z_ctor_ids: &HashSet<u32>,
-    z_sort_ids: &HashSet<String>,
+    env: &SortEnv,
 ) {
-    let mut visit = |e: &Expr| visit_expr(e, sigs, sorts, seen, genids, tau_sort_ids, z_ctor_ids, z_sort_ids);
+    let mut visit = |e: &Expr| visit_expr(e, sigs, sorts, seen, env);
     match n {
         Node::Axiom(a) => a.statements.iter().for_each(&mut visit),
         Node::Theorem(t) => {
             visit(&t.statement);
-            // Proof rows use glyphs the statement may not mention (e.g.
-            // T_BT_72's \ge_{0}^{\mathbb{Z}}); without their sigs the frame
-            // declares such an op `Prop → Prop` and rejects its ℤ argument.
+            // Proof rows use glyphs the statement may not mention; without their
+            // sigs the frame declares such an operator at the wrong arity and rejects
+            // its argument.
             for step in &t.proof {
                 if let qubitick_model::ProofStep::Chain { rows } = step {
                     for row in rows {
@@ -1806,37 +1615,28 @@ fn visit_node(
 }
 
 /// Collect arity/sort/reference info from one `Expr`.
-#[allow(clippy::too_many_arguments)]
 fn visit_expr(
     e: &Expr,
     sigs: &mut HashMap<u32, GlyphSig>,
     sorts: &mut HashSet<u32>,
     seen: &mut HashSet<u32>,
-    genids: &HashSet<String>,
-    tau_sort_ids: &HashSet<String>,
-    z_ctor_ids: &HashSet<u32>,
-    z_sort_ids: &HashSet<String>,
+    env: &SortEnv,
 ) {
-    visit_expr_scoped(e, sigs, sorts, seen, genids, tau_sort_ids, &HashSet::new(), z_ctor_ids, z_sort_ids, &HashSet::new());
+    visit_expr_scoped(e, sigs, sorts, seen, env, &HashMap::new());
 }
 
-/// As [`visit_expr`], carrying which variables are bound to the GENERATED sort.
+/// As [`visit_expr`], carrying which variables are bound to which DECLARED sort.
 ///
-/// An operator's argument is frequently a plain metavariable — `plus_tau a tau_0`
-/// has `a` bound by the enclosing `∀ a : \tau` — so its sort can only be read from
-/// the binder scope, not from the argument expression alone.
-#[allow(clippy::too_many_arguments)]
+/// An operator's argument is frequently a plain metavariable — the `a` of `a + c0`
+/// is bound by the enclosing `∀ a : C` — so its sort can only be read from the binder
+/// scope, not from the argument expression alone.
 fn visit_expr_scoped(
     e: &Expr,
     sigs: &mut HashMap<u32, GlyphSig>,
     sorts: &mut HashSet<u32>,
     seen: &mut HashSet<u32>,
-    genids: &HashSet<String>,
-    tau_sort_ids: &HashSet<String>,
-    tau_vars: &HashSet<String>,
-    z_ctor_ids: &HashSet<u32>,
-    z_sort_ids: &HashSet<String>,
-    z_vars: &HashSet<String>,
+    env: &SortEnv,
+    vars: &HashMap<String, u32>,
 ) {
     match e {
         Expr::Sym(ac) => {
@@ -1846,81 +1646,69 @@ fn visit_expr_scoped(
         Expr::Apply(head, args) => {
             if head.primary != EQ_SYM {
                 seen.insert(head.primary);
-                let flags: Vec<bool> = args
+                let arg_carrier: Vec<Option<u32>> = args
                     .iter()
                     .map(|a| match a {
-                        Expr::Var(v) => tau_vars.contains(v) || z_vars.contains(v),
-                        // A LAMBDA (function) binder over the GENERATED sort, as in
-                        // `\bigcup_{t : \tau} A(t)`, passes a `tau → Prop` body. An
-                        // `Exists (fun t : \tau => …)` / `\forall` binder is itself a
-                        // PROP, not a tau-valued function — it must NOT type the
-                        // operand as `tau`.
+                        Expr::Var(v) => vars.get(v).copied(),
+                        // A LAMBDA (function) binder over a declared sort passes a
+                        // `C → Prop` body. An `Exists (fun c : C => ...)` is itself a
+                        // PROP, not a sort-valued function, so it must NOT type its
+                        // operand.
                         Expr::Binder(qubitick_model::BinderKind::Lambda, bs, _) => bs
                             .iter()
-                            .any(|b| tau_sort_ids.contains(&render_head_name(&b.ty))),
-                        _ => genids.contains(&render_head_name(a)),
+                            .filter_map(|b| head_id(&b.ty))
+                            .find_map(|id| env.carrier_of_head(id)),
+                        other => head_id(other).and_then(|id| env.carrier_of_head(id)),
                     })
                     .collect();
-
-                let z_flags: Vec<bool> = args
-                    .iter()
-                    .map(|a| match a {
-                        Expr::Var(v) => z_vars.contains(v),
-                        Expr::Sym(ac) => z_ctor_ids.contains(&ac.primary),
-                        Expr::Apply(h, _) => z_ctor_ids.contains(&h.primary),
-                        _ => false,
-                    })
-                    .collect();
-                sigs.entry(head.primary).or_default().merge(args, &flags, &z_flags);
+                sigs.entry(head.primary)
+                    .or_default()
+                    .merge(args, &arg_carrier);
             }
             for a in args {
-                visit_expr_scoped(a, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+                visit_expr_scoped(a, sigs, sorts, seen, env, vars);
             }
         }
         Expr::Bracket(id, args) => {
             seen.insert(*id);
             for a in args {
-                visit_expr_scoped(a, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+                visit_expr_scoped(a, sigs, sorts, seen, env, vars);
             }
         }
         Expr::Binder(_, binders, body) => {
-            // A binder whose type IS the generated sort introduces tau-typed
-            // variables; a binder over \mathbb{Z} introduces ℤ-typed ones.
-            let mut body_env = tau_vars.clone();
-            let mut body_env_z = z_vars.clone();
+            // A binder whose type IS a declared sort introduces variables of that
+            // sort for the body.
+            let mut body_env = vars.clone();
             for b in binders {
-                let tname = render_head_name(&b.ty);
-                if z_sort_ids.contains(&tname) {
-                    body_env_z.extend(b.vars.iter().cloned());
-                }
-                if genids.contains(&tname) || tau_sort_ids.contains(&tname)
-                {
-                    body_env.extend(b.vars.iter().cloned());
+                if let Some(carrier) = head_id(&b.ty).and_then(|id| env.carrier_of_head(id)) {
+                    for v in &b.vars {
+                        body_env.insert(v.clone(), carrier);
+                    }
                 }
             }
             for b in binders {
                 // Binder types are sorts; record their head symbol as a sort.
                 mark_sort_of(&b.ty, sorts, seen);
-                visit_expr_scoped(&b.ty, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+                visit_expr_scoped(&b.ty, sigs, sorts, seen, env, vars);
             }
-            visit_expr_scoped(body, sigs, sorts, seen, genids, tau_sort_ids, &body_env, z_ctor_ids, z_sort_ids, &body_env_z);
+            visit_expr_scoped(body, sigs, sorts, seen, env, &body_env);
         }
         Expr::Recursor(s, cases) => {
-            visit_expr_scoped(s, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+            visit_expr_scoped(s, sigs, sorts, seen, env, vars);
             for (_, b) in cases {
-                visit_expr_scoped(b, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+                visit_expr_scoped(b, sigs, sorts, seen, env, vars);
             }
         }
         Expr::Matrix(rows) => {
             for r in rows {
                 for c in r {
-                    visit_expr_scoped(c, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+                    visit_expr_scoped(c, sigs, sorts, seen, env, vars);
                 }
             }
         }
         Expr::Vector(els) | Expr::Set(els) => {
             for a in els {
-                visit_expr_scoped(a, sigs, sorts, seen, genids, tau_sort_ids, tau_vars, z_ctor_ids, z_sort_ids, z_vars);
+                visit_expr_scoped(a, sigs, sorts, seen, env, vars);
             }
         }
     }
@@ -1928,11 +1716,7 @@ fn visit_expr_scoped(
 
 /// Record `e`'s head symbol as a sort (it is used as a binder type).
 fn mark_sort_of(e: &Expr, sorts: &mut HashSet<u32>, seen: &mut HashSet<u32>) {
-    let id = match e {
-        Expr::Sym(ac) => ac.primary,
-        Expr::Apply(h, _) => h.primary,
-        _ => return,
-    };
+    let Some(id) = head_id(e) else { return };
     seen.insert(id);
     sorts.insert(id);
 }
@@ -2120,7 +1904,6 @@ fn emit_lean_text_impl(
     opts: &Options,
 ) -> Result<String> {
     let target = LeanTarget::new(namespace);
-
     // A glyph used BOTH bare and applied (e.g. `\mathfrak{L}` vs `\mathfrak{L}(t)`)
     // gets a deterministic lean-side split: the APPLIED use is encoded as
     // `{base}_fn : Prop → … → Prop` (the Ledger function), the bare use stays
@@ -2135,14 +1918,8 @@ fn emit_lean_text_impl(
     let relational_split_map: std::collections::HashMap<u32, (Vec<String>, Expr)> = {
         use qubitick_model::Expr as E2;
         let is_iff = |h: &qubitick_model::AtomicComposite| {
-            let id = h.primary;
-            texes_with(Facet::LeftIff)
-                .chain(texes_with(Facet::RightIff))
-                .any(|t| {
-                    ctx.by_tex(t)
-                        .and_then(|rows| rows.first())
-                        .is_some_and(|r| r.id as u32 == id)
-                })
+            ctx.by_id(h.primary as i64)
+                .is_some_and(|r| qubitick_model::format::is_iff(&r.tex))
         };
         let mut m = std::collections::HashMap::new();
         for n in nodes {
@@ -2174,14 +1951,8 @@ fn emit_lean_text_impl(
     let relational_iffs: std::collections::HashMap<u32, (Vec<String>, Expr)> = {
         use qubitick_model::Expr as E;
         let is_iff = |h: &qubitick_model::AtomicComposite| {
-            let id = h.primary;
-            texes_with(Facet::LeftIff)
-                .chain(texes_with(Facet::RightIff))
-                .any(|t| {
-                    ctx.by_tex(t)
-                        .and_then(|rows| rows.first())
-                        .is_some_and(|r| r.id as u32 == id)
-                })
+            ctx.by_id(h.primary as i64)
+                .is_some_and(|r| qubitick_model::format::is_iff(&r.tex))
         };
         let mut m = std::collections::HashMap::new();
         for n in nodes {
@@ -2297,45 +2068,42 @@ fn emit_lean_text_impl(
                 }
             }
         }
-        let mut binder_prefix = String::new();
+let mut binder_prefix = String::new();
         if !free_vars.is_empty() {
+            // The sort of a free variable is the declared sort whose constructor
+            // takes it, and the `Prop` carrier otherwise. The frame types the same
+            // glyphs the same way, so the assumed lemma agrees with it.
+            let sort_env = SortEnv::of(ctx, nodes);
             let sort_of = |v: &str| -> String {
                 use qubitick_model::Expr as E;
-                fn walk(e: &E, v: &str, resolver: &impl Fn(u32) -> String) -> Option<String> {
+                fn walk(e: &E, v: &str) -> Option<u32> {
                     match e {
                         E::Apply(h, args) => {
-                            if let Some(_i) = args.iter().position(|a| matches!(a, E::Var(x) if x == v))
-                            {
-                                let n = resolver(h.primary);
-                                if n.contains("mathbb_Z") {
-                                    return Some("mathbb_Z".into());
-                                }
-                                if n.contains("_tau") {
-                                    return Some("tau".into());
-                                }
+                            if args.iter().any(|a| matches!(a, E::Var(x) if x == v)) {
+                                return Some(h.primary);
                             }
-                            args.iter().find_map(|a| walk(a, v, resolver))
+                            args.iter().find_map(|a| walk(a, v))
                         }
                         E::Binder(_, bs, b) => {
                             if bs.iter().any(|bd| bd.vars.iter().any(|x| x == v)) {
                                 None
                             } else {
-                                walk(b, v, resolver)
+                                walk(b, v)
                             }
                         }
-                        E::Bracket(_, els) => els.iter().find_map(|a| walk(a, v, resolver)),
-                        E::Recursor(sc, cases) => walk(sc, v, resolver)
-                            .or_else(|| cases.iter().find_map(|(_, b)| walk(b, v, resolver))),
-                        E::Matrix(rows) => rows
-                            .iter()
-                            .find_map(|r| r.iter().find_map(|x| walk(x, v, resolver))),
-                        E::Vector(elems) | E::Set(elems) => {
-                            elems.iter().find_map(|x| walk(x, v, resolver))
+                        E::Bracket(_, els) => els.iter().find_map(|a| walk(a, v)),
+                        E::Recursor(sc, cases) => walk(sc, v)
+                            .or_else(|| cases.iter().find_map(|(_, b)| walk(b, v))),
+                        E::Matrix(rows) => {
+                            rows.iter().find_map(|r| r.iter().find_map(|x| walk(x, v)))
                         }
+                        E::Vector(elems) | E::Set(elems) => elems.iter().find_map(|x| walk(x, v)),
                         E::Sym(_) | E::Var(_) => None,
                     }
                 }
-                walk(&s, v, &|id| crate::resolver(ctx, &fn_names)(id))
+                walk(&s, v)
+                    .and_then(|id| sort_env.carrier_of_head(id))
+                    .map(|c| crate::resolver(ctx, &fn_names)(c))
                     .unwrap_or_else(|| "Prop".into())
             };
             for v in &free_vars {
@@ -2377,7 +2145,6 @@ fn emit_lean_text_impl(
         arity: frame_arity,
         declared: frame_declared,
         types: known_types,
-        seen: frame_seen,
     } = symbol_declarations(ctx, &collect, emit_nodes, &fn_names, opts);
     let mut body = String::new();
     if inline {
@@ -2473,21 +2240,10 @@ fn emit_lean_text_impl(
                 if !defines_its_glyph(ctx, d) {
                     continue;
                 }
-                // The frame declares the generated environments itself (the tick
-                // sequence, the integer sequence, a formation's carrier and
-                // constructors). A definition node that names one of them would
+                // The frame declares a formation's carrier and its constructors
+                // itself. A definition node that names one of those glyphs would
                 // declare it a second time.
                 if frame_declared.contains(&definition_decl_name(ctx, d, &fn_names)) {
-                    continue;
-                }
-                // The ℤ inductive + constructor aliases (emitted in the frame by
-                // symbol_declarations) ARE the definitions of these glyphs; an own
-                // `def mathbb_Z : Type := Prop` / macro would collide with it.
-                let dname = crate::lean_name_of(ctx, d.symbol.primary);
-                if matches!(
-                    dname.as_str(),
-                    "mathbb_Z" | "mathbb_Z___0" | "mathbb_Z__plus" | "mathbb_Z__minus"
-                ) {
                     continue;
                 }
                 body.push_str(&crate::definition::emit_definition_in(
@@ -2499,13 +2255,6 @@ fn emit_lean_text_impl(
                     &frame_sorts,
                     &formations,
                     &known_types,
-                    // The same permission set the frame uses when IT emits a
-                    // recursor def: every symbol this module mentions may appear in
-                    // the recursive bodies. Without it the node path refused the
-                    // recursor (`+_{\mathbb{Z}^{+}}` references `\uparrow`), the
-                    // glyph degraded to an axiom, and every `[\equiv]` row that
-                    // closed by kernel conversion stopped closing.
-                    &frame_seen,
                 )?);
                 body.push('\n');
             }
@@ -2551,10 +2300,10 @@ fn emit_lean_text_impl(
     // ground, meshed), so a module cannot be emitted without them.
     //
     // `autoImplicit false`: with Lean's default ON, an unresolved lowercase
-    // identifier becomes a fresh implicit variable — so a module that never declares
-    // `\mathbb{Z}` or `tau` still checks, with every mention a *different* variable
-    // and the corpus's sorts hypothetical. Turning it off is what makes the per-file
-    // check a check of the frame rather than of a guess.
+    // identifier becomes a fresh implicit variable — so a module that never declares a
+    // carrier still checks, with every mention of it a *different* variable and the
+    // corpus's sorts hypothetical. Turning it off is what makes the per-file check a
+    // check of the frame rather than of a guess.
     //
     // `linter.defProp false`: a corpus theorem is emitted as `def N : Prop := ...`
     // (the nullity encoding is a proof, not a type). That is deliberate, and the
@@ -2954,7 +2703,7 @@ mod tests {
             "Prop → Prop → Prop",
             "(Prop)",
             "(Prop) → (Prop) → Prop",
-            // Prop-SORTED, which is the question this predicate answers: no tau/Z/E sort appears
+            // Prop-SORTED, which is the question this predicate answers: no carrier appears
             "(Prop → Prop)",
             "  Prop  ",
         ] {
@@ -2963,9 +2712,9 @@ mod tests {
         for ty in [
             "",
             "Type",
-            "tau → Prop",
-            "mathbb_Z → Prop",
-            "Prop → tau",
+            "C → Prop",
+            "D → Prop",
+            "Prop → C",
             // a function INTO Prop from a function is not flat `Prop`: the Eq would be over a
             // higher-order value, and the `∀ (v : Prop)` binder shape would not fit it
             "(Prop → Prop) → Prop",
@@ -3010,5 +2759,101 @@ mod tests {
         assert!(out.contains("class Realm extends ISA"));
         assert!(out.contains("class Capacity extends Realm"));
     }
-}
 
+    /* THE ONE WAY AN INDUCTIVE APPEARS IS A FORMATION THE CORPUS DECLARES.
+     *
+     * The fixture declares its own carrier (`W = p ∨ q ∨ r ∨ s`) and its own
+     * operator (`Type: W \to W`). Nothing here is a glyph the emitter knows: the
+     * inductive, the constructor aliases and the operator's type all come from those
+     * two declarations, and a corpus that declares no formation gets no inductive. */
+    #[test]
+    fn a_declared_formation_is_the_only_inductive_and_types_its_operators() {
+        use qubitick_db::queries::SymbolRow;
+        use qubitick_model::{
+            AtomicComposite, CtorDecl, DBlockIR, Definition, FormBody, SymbolKind,
+        };
+        let row = |id: i64, tex: &str, lean: &str, kind: &str, home: i64| SymbolRow {
+            id,
+            scope: "Era0/Strata0".into(),
+            tex: tex.into(),
+            display: tex.into(),
+            lean_name: lean.into(),
+            trigger: None,
+            kind: kind.into(),
+            role: None,
+            precedence: None,
+            home_node: home,
+            elab: None,
+            binder_kind: None,
+            facets: 0,
+        };
+        let ctx = Ctx::from_rows(
+            "Era0/Strata0",
+            vec![
+                row(1, "\\mathcal{W}", "W", "formation", 10),
+                row(2, "\\mathbf{p}", "p", "ctor", 10),
+                row(3, "\\mathbf{q}", "q", "ctor", 10),
+                row(4, "\\mathbf{r}", "r", "ctor", 10),
+                row(5, "\\mathbf{s}", "s", "ctor", 10),
+                row(6, "\\oplus", "oplus", "primitive", 11),
+            ],
+        );
+        let ctors = [2u32, 3, 4, 5]
+            .iter()
+            .map(|id| CtorDecl {
+                constructor: AtomicComposite::new(*id),
+                args: vec![],
+            })
+            .collect();
+        let formation = Node::Definition(Definition {
+            base: NodeBase {
+                kind: NodeKind::Definition,
+                ..base(10, "D.W")
+            },
+            symbol: AtomicComposite::new(1),
+            extra_symbols: vec![],
+            d_block: DBlockIR {
+                kind: SymbolKind::Formation,
+                form: Some(FormBody::Formation(ctors)),
+                ..Default::default()
+            },
+            tag: qubitick_model::PhysOrMath::Math,
+        });
+        // `Type: \mathcal{W} \to \mathcal{W}`: the arrow carries the reserved id a
+        // signature's arrow gets when no glyph declares it.
+        let carrier = || Expr::Sym(AtomicComposite::new(1));
+        let op = Node::Definition(Definition {
+            base: NodeBase {
+                kind: NodeKind::Definition,
+                ..base(11, "D.Op")
+            },
+            symbol: AtomicComposite::new(6),
+            extra_symbols: vec![],
+            d_block: DBlockIR {
+                kind: SymbolKind::Primitive,
+                sig: Some(Expr::Apply(
+                    AtomicComposite::new(0),
+                    vec![carrier(), carrier()],
+                )),
+                ..Default::default()
+            },
+            tag: qubitick_model::PhysOrMath::Math,
+        });
+        let out = emit_lean_text(
+            &ctx,
+            &[formation, op],
+            "Qubitick.HL",
+            &mut RuleTable::new(),
+        )
+        .unwrap();
+        assert!(
+            out.contains("set_option genInjectivity false in\ninductive W : Type"),
+            "{out}"
+        );
+        for c in ["p", "q", "r", "s"] {
+            assert!(out.contains(&format!("def {c} : W := W.{c}\n")), "{out}");
+        }
+        // An operator whose authored signature returns the carrier is typed with it.
+        assert!(out.contains("axiom oplus : (W) → W\n"), "{out}");
+    }
+}

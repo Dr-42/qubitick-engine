@@ -15,7 +15,7 @@ use rusqlite::Connection;
 
 /// Compatibility stamp for `DDL`. Any other value means the file on disk was
 /// built by a different schema, and since it is a cache, it is rebuilt.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Bring the connection up to the current schema.
 ///
@@ -254,6 +254,10 @@ CREATE TABLE form_bodies (
   form_kind TEXT NOT NULL
     CHECK (form_kind IN ('MacroExpr','Recursive','Formation','Bracket')),
   body_expr_id INTEGER,
+  -- A FORMATION's constructors, as JSON: [{"constructor": <symbol id>, "args": [<symbol id>...]}].
+  -- Without it the ctor list died with the .qbit text, so a formation loaded as CONTEXT
+  -- (every axiom/theorem module) looked like a plain definition and emitted no inductive.
+  ctors TEXT,
   open_delim TEXT,
   close_delim TEXT,
   FOREIGN KEY (symbol_id) REFERENCES symbols(id),

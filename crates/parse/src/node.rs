@@ -331,7 +331,10 @@ fn formation_of_expr(ctx: &Ctx, e: &Expr, glyph: Option<&str>) -> Option<Vec<Cto
         return None;
     }
     // RHS must be a disjunction-of-atoms (or a single atom).
-    let vee = ctx.by_tex("\\vee").and_then(|r| r.first()).map(|r| r.id as u32);
+    // A formation's alternatives are separated by the corpus's own connective: the
+    // declaration says which glyph that is (`Role: connective`), and nothing here
+    // names one.
+    let vee = ctx.declared_with_facet(Facet::Connective).map(|r| r.id as u32);
     let mut ctors: Vec<CtorDecl> = Vec::new();
     fn collect(tree: &Expr, vee: Option<u32>, out: &mut Vec<CtorDecl>) -> bool {
         match tree {
@@ -344,6 +347,21 @@ fn formation_of_expr(ctx: &Ctx, e: &Expr, glyph: Option<&str>) -> Option<Vec<Cto
             }
             Expr::Apply(h2, args2) if Some(h2.primary) == vee && args2.len() == 2 => {
                 collect(&args2[0], vee, out) && collect(&args2[1], vee, out)
+            }
+            // A CONSTRUCTOR WITH ARGUMENTS (`^+ \tau`, `\mathbb{Z}^{+} \tau`): the
+            // head is the constructor and the arguments are the sorts it is declared
+            // over, which is what makes a RECURSIVE formation expressible.
+            Expr::Apply(h2, args2) if !args2.is_empty() => {
+                let mut args = Vec::new();
+                for a in args2 {
+                    let Expr::Sym(s) = a else { return false };
+                    args.push(s.primary);
+                }
+                out.push(CtorDecl {
+                    constructor: h2.clone(),
+                    args,
+                });
+                true
             }
             _ => false,
         }
@@ -466,7 +484,9 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
                 // Sema: is an Eq-level relation; it is the atom's meaning.
                 let exclude = symbol_id_for_glyph(ctx, glyph.as_deref());
                 crate::parser::exclude_connective(exclude);
+                crate::parser::in_sema_body(true);
                 let parsed = parse_expr_ok(ctx, v);
+                crate::parser::in_sema_body(false);
                 crate::parser::exclude_connective(0);
                 match parsed {
                     Some(e) => sema = Some(e),
@@ -665,9 +685,10 @@ fn definition_symbol_id(ctx: &Ctx, glyph: Option<&str>, sema: Option<&Expr>) -> 
 
 /// Whether the symbol `id` is the linking connective in this context.
 fn is_left_iff(ctx: &Ctx, id: u32) -> bool {
-    ctx.by_id(id as i64).is_some_and(|r| {
-        ctx.has_facet(&r.tex, Facet::LeftIff)
-    })
+    // The iff a `Sema:` is linked with is the declaration FORMAT's token, not a
+    // corpus classification: no corpus declares `\leftrightarrow` away.
+    ctx.by_id(id as i64)
+        .is_some_and(|r| qubitick_model::format::is_iff(&r.tex))
 }
 
 /// Whether a Sema is a relation headed by the linking connective
@@ -814,17 +835,20 @@ fn symbol_id_for_glyph(ctx: &Ctx, glyph: Option<&str>) -> u32 {
                     // modified operator (`-_{\mathbb{Z}}`) would wrongly declare the
                     // sort glyph named inside its own subscript.
                     if let Some(r) = ctx.by_id(*id as i64) {
+                        // The base sorts are the ones the CORPUS declares, longest
+                        // match first — no glyph list decides what a sort is. A STAGE
+                        // is a BRACED mod (`\mathbb{Z}_{\hat B}`): an unbraced tail is
+                        // a different glyph of the corpus (`\tau_0`, `\mathbb{Z}^+` are
+                        // constructors it declares, not stages of the sort).
                         let mut best: Option<(usize, u32)> = None;
-                        for tex in qubitick_model::corpus::texes_with(
-                            qubitick_model::corpus::Facet::Sort,
-                        ) {
-                            if r.tex.len() > tex.len()
-                                && r.tex.starts_with(tex)
-                                && best.is_none_or(|(l, _)| tex.len() > l)
-                                && let Some(base) =
-                                    ctx.by_tex(tex).and_then(|rows| rows.first())
-                            {
-                                best = Some((tex.len(), base.id as u32));
+                        for sort in ctx.declared_sorts() {
+                            let tex = sort.tex.as_str();
+                            let stage = r
+                                .tex
+                                .strip_prefix(tex)
+                                .is_some_and(|tail| tail.starts_with("_{") || tail.starts_with("^{"));
+                            if stage && best.is_none_or(|(l, _)| tex.len() > l) {
+                                best = Some((tex.len(), sort.id as u32));
                             }
                         }
                         if let Some((_, bid)) = best {
@@ -956,15 +980,15 @@ fn split_cites(rest: &str) -> (String, Vec<(String, Vec<String>, bool)>) {
 
             for group in inner.split(',') {
                 // Detect LaTeX reverse symbols
-                let is_rev = group.contains("\\ulcorner")
+                let is_rev = group.contains(qubitick_model::format::CITE_OPEN)
                     || group.contains("\\leftarrow")
                     || group.contains("\\gets")
                     || group.contains("←");
 
                 // Strip them to get the clean name (e.g., T.BT.47)
                 let cleaned = group
-                    .replace("\\ulcorner", "")
-                    .replace("\\urcorner", "")
+                    .replace(qubitick_model::format::CITE_OPEN, "")
+                    .replace(qubitick_model::format::CITE_CLOSE, "")
                     .replace("\\leftarrow", "")
                     .replace("\\gets", "")
                     .replace("←", "");
@@ -1015,9 +1039,11 @@ fn cite_to_enum(name: &str) -> CiteName {
        read it as one. The corners are stripped here, where citations are read, rather than in each
        caller. */
     let name = name.trim();
-    let name = match name.strip_prefix("\\ulcorner") {
+    let name = match name.strip_prefix(qubitick_model::format::CITE_OPEN) {
         Some(rest) => {
-            let inner = rest.strip_suffix("\\urcorner").unwrap_or(rest);
+            let inner = rest
+                .strip_suffix(qubitick_model::format::CITE_CLOSE)
+                .unwrap_or(rest);
             inner.trim().split_whitespace().next().unwrap_or(inner.trim())
         }
         None => name,
@@ -1099,19 +1125,16 @@ fn pattern_expr_of(ctx: &Ctx, src: &str) -> Expr {
     Expr::Var(s.to_string())
 }
 
-/// Whether `pattern`'s head is a \mathbb{Z} constructor glyph.
-fn pattern_is_z(ctx: &Ctx, pat: &Expr) -> bool {
+/// The sort a case PATTERN belongs to, when its head is a constructor the corpus
+/// declares — the induction family, read from the declaration rather than a name.
+fn pattern_family(ctx: &Ctx, pat: &Expr) -> Option<i64> {
     let ctor = match pat {
         Expr::Sym(ac) => ac.primary,
         Expr::Apply(ac, _) => ac.primary,
-        _ => return false,
+        _ => return None,
     };
-    qubitick_model::corpus::texes_with(qubitick_model::corpus::Facet::ZCtorDual).any(|tex| {
-        ctx.by_tex(tex)
-            .and_then(|rows| rows.first())
-            .map(|r| r.id as u32 == ctor)
-            .unwrap_or(false)
-    })
+    ctx.by_id(ctor as i64)?;
+    ctx.carrier_of_ctor(ctor as i64).map(|s| s.id)
 }
 
 /// Parse an induction header `\mu v` at `start`, consuming its case groups and
@@ -1135,7 +1158,7 @@ fn parse_induction_at(
     let mut current_pattern: Option<qubitick_model::Pattern> = None;
     let mut chain_buf: Vec<String> = Vec::new();
     let mut body_steps: Vec<ProofStep> = Vec::new();
-    let mut family: Option<bool> = None; // Some(true) = ℤ
+    let mut family: Option<i64> = None; // the declared sort the cases belong to
     // The current level's established case-binder name. Two `\mapsto` groups of
     // the SAME family can still belong to DIFFERENT induction levels (an outer
     // `\mathbb{Z}^{-} n` after an inner `\mu a` whose last case is also
@@ -1189,15 +1212,15 @@ fn parse_induction_at(
         if let Some((pat_str, _)) = t.split_once("\\mapsto").or_else(|| t.split_once("↦")) {
             let pat_expr = parse_expr_ok(ctx, pat_str.trim())
                 .unwrap_or_else(|| pattern_expr_of(ctx, pat_str));
-            let is_z = pattern_is_z(ctx, &pat_expr);
-            // A pattern of the OTHER family ends this induction (it belongs to an
-            // enclosing induction).
-            if let Some(f) = family {
-                if f != is_z {
+            let this_family = pattern_family(ctx, &pat_expr);
+            // A pattern of the OTHER declared sort ends this induction (it belongs to
+            // an enclosing induction).
+            if let (Some(f), Some(this)) = (family, this_family) {
+                if f != this {
                     break;
                 }
-            } else {
-                family = Some(is_z);
+            } else if family.is_none() {
+                family = this_family;
             }
             // Nested same-family levels: a `\mapsto` whose binder changes from
             // this level's established one belongs to the ENCLOSING induction
@@ -1660,8 +1683,11 @@ fn is_separator(ctx: &Ctx, tk: &str) -> bool {
     ) {
         return true;
     }
-    if qubitick_model::corpus::is_any_class(tk) {
-        return true; // the engine's own glyphs: arrows, the iff, the generated sorts
+    if qubitick_model::format::is_iff(tk)
+        || qubitick_model::format::is_arrow(tk)
+        || qubitick_model::format::is_binder(tk)
+    {
+        return true; // the declaration format's own tokens
     }
     ctx.by_tex(tk).is_some_and(|rows| {
         let row = &rows[0];
@@ -1808,7 +1834,13 @@ mod formtests {
             vec![
                 row(qubitick_model::EQ_SYM as i64, "="),
                 row(1, "\\mathcal{W}"),
-                declaring(row(2, "\\vee"), "infix"),
+                // The formation's alternatives are separated by the corpus's declared
+                // CONNECTIVE — the fixture states that the way a declaration would.
+                {
+                    let mut vee = declaring(row(2, "\\vee"), "infix");
+                    vee.facets |= Facet::Connective.bits();
+                    vee
+                },
                 row(10, "\\mathbf{p}"),
                 row(11, "\\mathbf{q}"),
             ],
@@ -1818,7 +1850,14 @@ mod formtests {
         let Node::Definition(d) = &nodes[0] else {
             panic!("expected a Definition, got {:?}", nodes);
         };
-        assert_eq!(d.d_block.kind, SymbolKind::Formation);
+        assert_eq!(
+            d.d_block.kind,
+            SymbolKind::Formation,
+            "form={:?} elab={:?} sig={:?}",
+            d.d_block.form,
+            d.d_block.elab_rule,
+            d.d_block.sig
+        );
         match &d.d_block.form {
             Some(FormBody::Formation(ctors)) => {
                 assert_eq!(ctors.len(), 2, "two constructors from the ∨-tree");

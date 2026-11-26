@@ -17,6 +17,7 @@
 //!   CLI, the API and the client all report in
 
 pub mod corpus;
+pub mod format;
 pub mod diag;
 pub mod expr;
 pub mod ids;

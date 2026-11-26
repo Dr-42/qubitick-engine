@@ -1,91 +1,49 @@
-//! The glyphs the ENGINE generates — and nothing else.
+//! The classification a DECLARATION may state about its glyph.
 //!
-//! The emitter generates Lean for a fixed family of things: the tick sort and its
-//! successors, the Z sort with its element constructors, the arrows it renders as
-//! function types, the two iff spellings a `Sema:` is written with, and the bracket
-//! bars of a citation. Those glyphs are the engine's own, so the engine names them
-//! here, and [`texes_with`] / [`is_class`] answer questions about them.
+//! A corpus declares its own mathematics, and the engine carries the declarations
+//! faithfully. [`Facet`] is the small vocabulary a `Role:` line speaks — `relation`,
+//! `connective`, `collector`, `null`, `nullity` — plus the binary-operator bit that
+//! the glyph line's fixity implies. Ingestion writes those bits per symbol and the
+//! engines read them from the DB (`Ctx::has_facet`, `Ctx::declared_with_facet`).
 //!
-//! A corpus's MATHEMATICS is not here. An operator, a relation, the empty element
-//! and the nullity operator are what a corpus's own declaration states (`Role:` in
-//! a node), ingestion persists them per symbol, and the engines read them from the
-//! DB: `Ctx::has_facet` consults the declared row, `Ctx::declared_with_facet` finds
-//! the row a corpus marked. `+`, `×`, `\cap` and `\Delta` are absent by design —
-//! a corpus that uses one declares it.
+//! There is no glyph list here. Nothing in the engine says `\cap` is an operator or
+//! `\mathbb{Z}` is a sort: that sentence belongs to the corpus, and a corpus that
+//! writes a glyph declares it first. The tokens a declaration is written WITH — the
+//! `=`, the iff that links a `Sema:`, the arrow of a `Type:` signature, the
+//! quantifiers — are the declaration FORMAT's and live in [`crate::format`].
 //!
 //! ## Extending it
 //!
-//! - Add a glyph the ENGINE generates: add one row to [`PUBLIC_SYMBOL_CLASSES`], or
-//!   set a facet bit on a row already there.
-//! - Add a brand-new kind of special symbol: add a [`Facet`] bit, then teach one
-//!   engine to ask `is_class(tex, facet)` / iterate `texes_with(facet)`.
-//! - Add a classification a CORPUS may state: add a `DeclaredRole` variant in
-//!   `symbol.rs`, read it in the parser, and persist its facet in ingestion.
+//! - A classification a corpus may state: add a [`crate::DeclaredRole`] variant in
+//!   `symbol.rs`, read it in the parser, persist its facet in ingestion, and ask for
+//!   it through `Ctx::has_facet`.
+//! - A glyph: never here. A corpus declares it.
 
-/// A semantic facet a symbol carries. Facets are independent flags, so one glyph
-/// can play several roles at once.
+/// A classification a declaration states about its glyph. Facets are independent
+/// flags, so one glyph can play several roles at once (a binary operator that is also
+/// the nullity operator).
 ///
-/// The sort and constructor facets come from the engine's own table, and ingestion
-/// sets them for the glyphs a corpus uses; the operator, relation, collector, null
-/// and nullity facets are what a corpus's `Role:` declaration sets, and reading them
-/// means reading the declaration (`Ctx::has_facet`).
+/// Every bit is set by ingestion from the corpus's own declaration; nothing else can
+/// set one, and no glyph is classified without one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Facet {
-    /// `\tau` — the generated tick sort.
-    SortTau,
-    /// `\mathbb{Z}` — the generated integer sort.
-    SortZ,
-    /// Any sort / type-carrier glyph (`\tau`, `\mathbb{Z}`, `\mathbb{Q}`, …).
-    Sort,
-    /// `\tau_0` — the nullary tick base constructor.
-    TickNull,
-    /// `^+` — the tick's own unary successor (single family).
-    Succ,
-    /// `^+`/`\uparrow`/`\downarrow` — heads whose operands are τ-typed.
-    TauConsume,
-    /// The full τ-term vocabulary: base + successor + the `tick` spellings.
-    TickTerm,
-    /// Generated-sort constructor tags used to recognise a constructor-headed arg.
-    GenTag,
-    /// Braced ℤ element constructors (`\mathbb{Z}_{0}`, `\mathbb{Z}^{+}`, `\mathbb{Z}^{-}`).
-    ZCtor,
-    /// ℤ element constructors including the corpus's no-brace variants.
-    ZCtorDual,
-    /// `\leftrightarrow` — the iff connective (peel + define).
-    LeftIff,
-    /// `\iff` — alternate iff spelling (define only).
-    RightIff,
-    /// Arrow glyphs rendered as Lean function types.
-    Arrow,
-    /// Arrow glyphs the theorem rewriter unwinds (adds `\Longrightarrow`).
-    RewriteArrow,
-    /// Arrow glyphs the rewrite-compile goal-unpacker treats as implications.
-    CompileImp,
     /// A binary operator head: set from the fixity a declaration states (`infix`).
     BinOp,
-    /// The carrier's empty element, as a declaration states (`Role: null`).
-    Null,
-    /// A collector / bracketing glyph: a bracket the engine generates (the citation
-    /// bars `\Vert`, `\ulcorner`, `\urcorner`), or one a declaration states
-    /// (`Role: collector`).
-    Collector,
-    /// The nullity operator a proof rewrites through, as a declaration states
-    /// (`Role: nullity`).
-    Nullity,
     /// A propositional connective: a glyph whose own declaration says
     /// `Role: connective`, binding looser than `=` and below the relations.
     Connective,
     /// A relation between two terms — a glyph whose own declaration says
     /// `Role: relation`.
     ///
-    /// A relation binds LOOSER than the arithmetic it compares and looser than `=`:
-    /// without this the flat infix fold read `D.BT.76`'s
-    /// `a \cdot_{\mathbb{Z}} d \le_{\mathbb{Z}} c \cdot_{\mathbb{Z}} b` as
-    /// `((a \cdot_Z d) \le_Z c) \cdot_Z b`, so the definition of the rational
-    /// order applied `\cdot_Z` to a proposition. The parser asks for this facet
-    /// through `is_logic_connective`, the same way it asks for the boolean-ring
-    /// connectives.
+    /// A relation binds looser than the arithmetic it compares and looser than `=`,
+    /// which is what keeps `a \cdot_Z d \le_Z c \cdot_Z b` from folding left.
     Relation,
+    /// A collector / bracketing glyph (`Role: collector`).
+    Collector,
+    /// The carrier's empty element (`Role: null`).
+    Null,
+    /// The nullity operator a proof rewrites through (`Role: nullity`).
+    Nullity,
 }
 
 impl Facet {
@@ -95,79 +53,6 @@ impl Facet {
     pub const fn bits(self) -> u32 {
         1u32 << (self as u8)
     }
-}
-
-/// `tex -> set of facet bits` for the glyphs the ENGINE itself generates.
-///
-/// Everything here is the emitter's own machinery — the tick and Z sorts with their
-/// constructors, the arrows, the two iff spellings a `Sema:` is written with, and
-/// the bracket bars. A row says "the engine knows this glyph", never "this glyph is
-/// mathematics".
-///
-/// A corpus's own notation is NOT here. An operator, a relation, the empty element
-/// and the nullity operator are what a `Role:` declaration states, and they arrive
-/// in the DB's `symbols` table: [`is_class`] is the engine's own fallback, and
-/// `Ctx::has_facet` reads a declared row first. Adding a row here cannot classify a
-/// corpus's glyph — `+` and `×` belong to the algebra starter, and the engine has
-/// never heard of them.
-pub const PUBLIC_SYMBOL_CLASSES: &[(&str, u32)] = &[
-    // -- generated tick sort --
-    ("\\tau", bits(Facet::SortTau) | bits(Facet::Sort)),
-    ("\\tau_0", bits(Facet::TickNull) | bits(Facet::TickTerm) | bits(Facet::GenTag)),
-    ("^+", bits(Facet::Succ) | bits(Facet::TauConsume) | bits(Facet::TickTerm) | bits(Facet::GenTag)),
-    ("tick", bits(Facet::TickTerm)),
-    ("\\uparrow", bits(Facet::TauConsume) | bits(Facet::TickTerm)),
-    ("\\downarrow", bits(Facet::TauConsume) | bits(Facet::TickTerm)),
-    // -- generated Z sort --
-    ("\\mathbb{Z}", bits(Facet::SortZ) | bits(Facet::Sort)),
-    ("\\mathbb{Q}", bits(Facet::Sort)),
-    ("\\mathfrak{E}", bits(Facet::Sort)),
-    ("\\mathbb{V}", bits(Facet::Sort)),
-    ("\\mathbb{E}", bits(Facet::Sort)),
-    ("\\mathbb{Z}_{0}", bits(Facet::ZCtor) | bits(Facet::ZCtorDual)),
-    ("\\mathbb{Z}^{+}", bits(Facet::ZCtor) | bits(Facet::ZCtorDual)),
-    ("\\mathbb{Z}^{-}", bits(Facet::ZCtor) | bits(Facet::ZCtorDual)),
-    ("\\mathbb{Z}_0", bits(Facet::ZCtorDual)),
-    ("\\mathbb{Z}^+", bits(Facet::ZCtorDual)),
-    ("\\mathbb{Z}^-", bits(Facet::ZCtorDual)),
-    // -- arrows --
-    ("\\to", bits(Facet::Arrow) | bits(Facet::RewriteArrow) | bits(Facet::CompileImp)),
-    ("\\rightarrow", bits(Facet::Arrow) | bits(Facet::RewriteArrow) | bits(Facet::CompileImp)),
-    ("\\longrightarrow", bits(Facet::Arrow) | bits(Facet::RewriteArrow)),
-    ("\\Longrightarrow", bits(Facet::RewriteArrow) | bits(Facet::CompileImp)),
-    // -- iff connectives --
-    ("\\leftrightarrow", bits(Facet::LeftIff)),
-    ("\\iff", bits(Facet::RightIff)),
-    // -- collector / bracketing glyphs --
-    ("\\Vert", bits(Facet::Collector)),
-    ("\\ulcorner", bits(Facet::Collector)),
-    ("\\urcorner", bits(Facet::Collector)),
-];
-
-const fn bits(f: Facet) -> u32 {
-    f.bits()
-}
-
-/// Every registered tex carrying `facet`, in table order.
-pub fn texes_with(facet: Facet) -> impl Iterator<Item = &'static str> {
-    PUBLIC_SYMBOL_CLASSES
-        .iter()
-        .filter(move |(_, bits)| *bits != 0 && *bits & facet.bits() != 0)
-        .map(|(tex, _)| *tex)
-}
-
-/// Whether `tex` carries `facet`.
-pub fn is_class(tex: &str, facet: Facet) -> bool {
-    PUBLIC_SYMBOL_CLASSES
-        .iter()
-        .any(|(t, bits)| *t == tex && *bits != 0 && *bits & facet.bits() != 0)
-}
-
-/// Whether a tex is any of the facets (not used yet, provided for callers that
-pub fn is_any_class(tex: &str) -> bool {
-    PUBLIC_SYMBOL_CLASSES
-        .iter()
-        .any(|(t, bits)| *t == tex && *bits != 0)
 }
 
 /// The punctuation alphabet that can be an OPERATOR in the corpus surface.
@@ -234,38 +119,6 @@ pub fn braced_group_count(src: &[u8], mut i: usize, n: usize) -> usize {
 /// `\bigcup`/`\bigcap` are deliberately ABSENT: a set-fold renders as the valid
 /// Lean `fun v : T => body` (Lambda), whereas the `Integral` kind is the ASCII
 /// placeholder LeanEmission §7.1 reserves for summation/integration glyphs.
-pub const BINDER_KIND_CLASSES: &[(&str, &str)] = &[
-    ("\\sum", "Integral"),
-    ("\\prod", "Integral"),
-    ("\\int", "Integral"),
-    ("\\oint", "Integral"),
-    ("\\lim", "Limit"),
-];
-
-/// The BinderKind label for a binder-shaped `\command` tex, or None if unknown.
-pub fn binder_kind_of(tex: &str) -> Option<&'static str> {
-    let cmd = tex.strip_prefix('\\')?;
-    let head: String = cmd
-        .chars()
-        .take_while(|c| c.is_ascii_alphabetic() || *c == '@')
-        .collect();
-    if head.is_empty() {
-        return None;
-    }
-    let key = format!("\\{head}");
-    BINDER_KIND_CLASSES
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| *v)
-}
-
-pub const Z_CTOR_ALIASES: &[(&str, &str)] = &[
-    ("\\mathbb{Z}_{0}", "mathbb_Z.zero"),
-    ("\\mathbb{Z}_0", "mathbb_Z.zero"),
-    ("\\mathbb{Z}^{+}", "mathbb_Z.plus"),
-    ("\\mathbb{Z}^{-}", "mathbb_Z.minus"),
-];
-
 /// The glyph a definition's `Sema:` defines.
 ///
 /// A `Sema:` states the defined glyph in one of two shapes, and both peel the
@@ -352,72 +205,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn facet_lists_reproduce_engine_predicates() {
-        // recursor extra: SortTau ∪ GenTag = { \tau, \tau_0, ^+ }
-        let mut rec: Vec<&str> = texes_with(Facet::SortTau)
-            .chain(texes_with(Facet::GenTag))
-            .collect();
-        rec.sort();
-        rec.dedup();
-        assert_eq!(rec, vec!["\\tau", "\\tau_0", "^+"]);
-
-        // tau_term = TickTerm
+    fn the_facet_vocabulary_is_the_declarations_and_nothing_more() {
+        // Six classifications, all of them things a `Role:` line can say (BinOp is
+        // what `infix` implies). A seventh bit can only arrive with a new
+        // `DeclaredRole`, i.e. with a surface a corpus can actually write.
         assert_eq!(
-            texes_with(Facet::TickTerm).collect::<Vec<_>>(),
-            vec!["\\tau_0", "^+", "tick", "\\uparrow", "\\downarrow"]
+            [
+                Facet::BinOp,
+                Facet::Connective,
+                Facet::Relation,
+                Facet::Collector,
+                Facet::Null,
+                Facet::Nullity,
+            ]
+            .iter()
+            .map(|f| f.bits())
+            .collect::<Vec<_>>(),
+            vec![1, 2, 4, 8, 16, 32]
         );
+    }
 
-        // tau_consuming / is_tick_body = TauConsume
-        assert_eq!(
-            texes_with(Facet::TauConsume).collect::<Vec<_>>(),
-            vec!["^+", "\\uparrow", "\\downarrow"]
-        );
-        // tick's own successor = Succ (single family)
-        assert_eq!(
-            texes_with(Facet::Succ).collect::<Vec<_>>(),
-            vec!["^+"]
-        );
-
-        // genids = GenTag
-        assert_eq!(
-            texes_with(Facet::GenTag).collect::<Vec<_>>(),
-            vec!["\\tau_0", "^+"]
-        );
-
-        // exclude_ctor_dual = ZCtorDual (six variants)
-        assert_eq!(texes_with(Facet::ZCtorDual).count(), 6);
-        assert!(texes_with(Facet::ZCtorDual).all(|t| t.starts_with("\\mathbb{Z}")));
-
-        // THE TABLE HOLDS THE ENGINE'S GLYPHS ONLY. No operator, relation, empty
-        // element or nullity operator: `+`, `×`, `\cap` and `\Delta` are a
-        // corpus's, and a corpus that uses one declares it (`Role:`).
-        assert_eq!(texes_with(Facet::BinOp).count(), 0);
-        assert_eq!(texes_with(Facet::Relation).count(), 0);
-        assert_eq!(texes_with(Facet::Null).count(), 0);
-        assert_eq!(texes_with(Facet::Nullity).count(), 0);
-        for t in ["\\cap", "\\Delta", "\\times", "\\varnothing", "\\subseteq", "\\le", "\\land", "\\lor"] {
-            assert!(!is_any_class(t), "{t} is a corpus glyph, not the engine's");
-        }
-        assert!(!is_class("\\to", Facet::BinOp));
-
-        // single-sort access
-        assert!(is_class("\\tau", Facet::SortTau));
-        assert!(!is_class("\\tau", Facet::Arrow));
-        assert!(!is_class("\\whatever", Facet::Arrow));
-
-        // sorts (type carriers)
-        for t in ["\\tau", "\\mathbb{Z}", "\\mathbb{Q}", "\\mathfrak{E}", "\\mathbb{V}", "\\mathbb{E}"] {
-            assert!(is_class(t, Facet::Sort), "{t} is a Sort");
-        }
-        assert!(!is_class("\\cap", Facet::Sort));
-
-        // arrow subsets are distinct per engine
-        assert_eq!(texes_with(Facet::Arrow).count(), 3);
-        assert_eq!(texes_with(Facet::RewriteArrow).count(), 4);
-        assert_eq!(texes_with(Facet::CompileImp).count(), 3);
-        assert!(!is_class("\\Longrightarrow", Facet::Arrow));
-        assert!(is_class("\\Longrightarrow", Facet::RewriteArrow));
-        assert!(is_class("\\Longrightarrow", Facet::CompileImp));
-        assert!(!is_class("\\longrightarrow", Facet::CompileImp));
+    #[test]
+    fn only_format_punctuation_can_head_a_declared_operator() {
+        // What a corpus may use as an operator GLYPH is the format's business (a
+        // bracket or a period is grammar); which of them a corpus actually declares
+        // is the corpus's.
+        assert!(is_operator_punct('+'));
+        assert!(is_operator_punct('×'));
+        assert!(is_operator_punct('*'));
+        // A caret is punctuation the format accepts, which is why `^+` can be one
+        // glyph; whether a corpus declares one is the corpus's sentence.
+        assert!(is_operator_punct('^'));
+        assert!(!is_operator_punct('('));
+        assert!(!is_operator_punct(','));
     }
 }

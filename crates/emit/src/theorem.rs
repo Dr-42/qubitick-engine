@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use qubitick_ctx::Ctx;
-use qubitick_model::corpus::{texes_with, Facet};
+use qubitick_model::corpus::Facet;
 use qubitick_model::{AtomicComposite, EQ_SYM, Expr, Theorem};
 /// The idents an expression uses WITHOUT binding them.
 ///
@@ -75,40 +75,48 @@ pub(crate) fn free_var_sort(
     v: &str,
     fn_names: &std::collections::HashMap<u32, String>,
 ) -> String {
-    fn walk(e: &Expr, v: &str, resolver: &impl Fn(u32) -> String) -> Option<String> {
+    fn walk(
+        ctx: &Ctx,
+        e: &Expr,
+        v: &str,
+        resolver: &impl Fn(u32) -> String,
+    ) -> Option<String> {
         match e {
             Expr::Apply(h, args) => {
                 if args.iter().any(|a| matches!(a, Expr::Var(x) if x == v)) {
+                    // Which single carrier this operator belongs to comes from the
+                    // corpus: the declared sort whose generated name the operator's
+                    // own name is built on. No sort is named here.
                     let n = resolver(h.primary);
-                    if n.contains("mathbb_Z") {
-                        return Some("mathbb_Z".into());
-                    }
-                    if n.contains("_tau") {
-                        return Some("tau".into());
+                    if let Some(sort) = ctx
+                        .declared_sorts()
+                        .find(|s| !s.lean_name.is_empty() && n.contains(&s.lean_name))
+                    {
+                        return Some(sort.lean_name.clone());
                     }
                 }
-                args.iter().find_map(|a| walk(a, v, resolver))
+                args.iter().find_map(|a| walk(ctx, a, v, resolver))
             }
             Expr::Binder(_, bs, b) => {
                 if bs.iter().any(|bd| bd.vars.iter().any(|x| x == v)) {
                     None
                 } else {
-                    walk(b, v, resolver)
+                    walk(ctx, b, v, resolver)
                 }
             }
-            Expr::Bracket(_, els) => els.iter().find_map(|a| walk(a, v, resolver)),
-            Expr::Recursor(sc, cases) => walk(sc, v, resolver)
-                .or_else(|| cases.iter().find_map(|(_, b)| walk(b, v, resolver))),
+            Expr::Bracket(_, els) => els.iter().find_map(|a| walk(ctx, a, v, resolver)),
+            Expr::Recursor(sc, cases) => walk(ctx, sc, v, resolver)
+                .or_else(|| cases.iter().find_map(|(_, b)| walk(ctx, b, v, resolver))),
             Expr::Matrix(rows) => rows
                 .iter()
-                .find_map(|r| r.iter().find_map(|x| walk(x, v, resolver))),
+                .find_map(|r| r.iter().find_map(|x| walk(ctx, x, v, resolver))),
             Expr::Vector(elems) | Expr::Set(elems) => {
-                elems.iter().find_map(|x| walk(x, v, resolver))
+                elems.iter().find_map(|x| walk(ctx, x, v, resolver))
             }
             Expr::Sym(_) | Expr::Var(_) => None,
         }
     }
-    walk(e, v, &|id| crate::resolver(ctx, fn_names)(id)).unwrap_or_else(|| "Prop".into())
+    walk(ctx, e, v, &|id| crate::resolver(ctx, fn_names)(id)).unwrap_or_else(|| "Prop".into())
 }
 
 /// The three A1 rows the nullity bridge needs, found by SHAPE.
@@ -524,11 +532,7 @@ pub fn unfold_relational(
             E::Apply(ac, _) => ac.primary,
             _ => return false,
         };
-        texes_with(Facet::Sort).any(|t| {
-            ctx.by_tex(t)
-                .and_then(|rows| rows.first())
-                .is_some_and(|r| r.id as u32 == head)
-        })
+        ctx.is_declared_sort(head as i64)
     };
     match e {
         Expr::Apply(h, args) => {
@@ -592,17 +596,13 @@ fn outer_binder_vars(ctx: &Ctx, e: &Expr) -> Vec<String> {
     // the SAME names the proof compiler notes (`h`, `h1`, … — see
     // rewrite/compile.rs), so a proof citing `[h]` resolves. `a = b \to c` is
     // bound `fun a b h => …` with `h : Eq a b`.
-    let is_arrow = |id: u32, resolved: &str| -> bool {
+    let is_arrow = |id: u32, _resolved: &str| -> bool {
+        // An implication is the declaration FORMAT's arrow token, found by the glyph
+        // the corpus writes — not by the Lean name it happened to resolve to.
         id == 0
-            || matches!(
-                resolved,
-                "to" | "rightarrow" | "Longrightarrow" | "implies" | "impl"
-            )
-            || texes_with(Facet::RewriteArrow).any(|t| {
-                ctx.by_tex(t)
-                    .and_then(|rows| rows.first())
-                    .is_some_and(|r| r.id as u32 == id)
-            })
+            || ctx
+                .by_id(id as i64)
+                .is_some_and(|r| qubitick_model::format::is_implication(&r.tex))
     };
     let mut k = 0usize;
     while let Expr::Apply(h, args) = cur {

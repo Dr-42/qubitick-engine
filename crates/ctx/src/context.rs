@@ -100,24 +100,20 @@ impl Ctx {
 
     /// Check if a symbol (by its tex) has a given facet.
     ///
-    /// D9: the corpus declaration is the answer. If the corpus has a DECLARED row
-    /// for this tex (a definition with a D-block, or a primitive/formation/bracket
-    /// kind, or an operator with a declared role), its stored facet bitmask is
-    /// authoritative — the engine's own table is only consulted for the glyphs the
-    /// ENGINE generates (its sorts, arrows and bracket bars), which no corpus can
-    /// declare. A use-only row (kind="notation", no role, no elab) is not a
-    /// declaration and names no facet.
+    /// D9: the corpus's declaration is the answer, and there is no fallback. A
+    /// DECLARED row (a D-block, a non-notation kind, a role, or a facet bit) carries
+    /// its facets; a use-only row is the mention of a glyph nothing declares and
+    /// names no facet.
     pub fn has_facet(&self, tex: &str, facet: Facet) -> bool {
-        if let Some(rows) = self.by_tex.get(tex) {
-            let row = &rows[0];
-            if Self::row_is_declared(row) {
-                row.facets & facet.bits() != 0
-            } else {
-                qubitick_model::corpus::is_class(tex, facet)
-            }
-        } else {
-            qubitick_model::corpus::is_class(tex, facet)
-        }
+        // The DECLARATION is the only answer. A row the corpus never declared says
+        // nothing, and the engine owns no table to consult instead.
+        self.by_tex
+            .get(tex)
+            .map(|rows| {
+                let row = &rows[0];
+                Self::row_is_declared(row) && row.facets & facet.bits() != 0
+            })
+            .unwrap_or(false)
     }
 
     /// Whether the corpus DECLARES this glyph, rather than only using it.
@@ -136,6 +132,47 @@ impl Ctx {
         // A facet is a claim about the glyph, so a row carrying one is a declaration
         // too: that is what ingestion writes from a corpus's `Role:`.
         row.elab.is_some() || row.kind != "notation" || row.role.is_some() || row.facets != 0
+    }
+
+    /// Every sort the corpus DECLARES: a formation (an inductive the emitter generates)
+    /// or a `Type:` declaration (an opaque carrier). Deterministic by id.
+    ///
+    /// This is what the emitter means by "a sort" — there is no glyph list behind it.
+    pub fn declared_sorts(&self) -> impl Iterator<Item = &SymbolRow> {
+        let mut rows: Vec<&SymbolRow> = self
+            .by_id
+            .values()
+            .filter(|r| matches!(r.kind.as_str(), "formation" | "type"))
+            .collect();
+        rows.sort_by_key(|r| r.id);
+        rows.into_iter()
+    }
+
+    /// Every constructor the corpus DECLARES: a ctor of one of its formations.
+    pub fn declared_ctors(&self) -> impl Iterator<Item = &SymbolRow> {
+        let mut rows: Vec<&SymbolRow> = self
+            .by_id
+            .values()
+            .filter(|r| r.kind == "ctor")
+            .collect();
+        rows.sort_by_key(|r| r.id);
+        rows.into_iter()
+    }
+
+    /// The sort a ctor belongs to: the declared formation that declares it.
+    ///
+    /// Ingestion records a formation's constructors with the formation node as their
+    /// `home_node`, so the family is the declared sort sharing it.
+    pub fn carrier_of_ctor(&self, ctor_id: i64) -> Option<&SymbolRow> {
+        let ctor = self.by_id(ctor_id)?;
+        self.declared_sorts()
+            .find(|s| s.kind == "formation" && s.home_node == ctor.home_node)
+    }
+
+    /// Whether `id` is a declared sort (formation or `Type:` carrier).
+    pub fn is_declared_sort(&self, id: i64) -> bool {
+        self.by_id(id)
+            .is_some_and(|r| matches!(r.kind.as_str(), "formation" | "type"))
     }
 
     /// The lowest-id DECLARED row carrying `facet`.

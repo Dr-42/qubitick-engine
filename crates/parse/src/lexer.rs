@@ -135,37 +135,20 @@ pub struct LexError {
 }
 
 
-/// The LaTeX control word for a Unicode math glyph, when there is an obvious one.
+/// The control word for a Unicode token of the DECLARATION FORMAT.
 ///
-/// A corpus writes its symbols one way; a human typing a query or pasting from a
-/// paper writes them the other way. Saying which is which is most of the fix.
+/// A person writes `→` and `∀` where the format writes `\to` and `\forall`, so the
+/// lexer accepts both — that is input normalisation of the format's own alphabet, and
+/// it stops there. Which glyph a corpus writes for an operator, a relation, a
+/// collector or a sort is the CORPUS's business: it declares the spelling it uses, and
+/// the engine carries no dictionary from `∩` to `\cap`, because that dictionary is
+/// the corpus's mathematics.
 fn latex_name_of(c: char) -> Option<&'static str> {
     Some(match c {
-        '∩' => "\\cap",
-        '∪' => "\\cup",
-        'Δ' => "\\Delta",
-        '∅' => "\\varnothing",
-        '∧' => "\\wedge",
-        '∨' => "\\vee",
-        '¬' => "\\lnot",
         '→' => "\\to",
         '↔' => "\\leftrightarrow",
         '∀' => "\\forall",
         '∃' => "\\exists",
-        '∈' => "\\in",
-        '⊆' => "\\subseteq",
-        '⟨' => "\\langle",
-        '⟩' => "\\rangle",
-        '≡' => "\\equiv",
-        '×' => "\\times",
-        '≤' => "\\le",
-        '≥' => "\\ge",
-        '𝔈' => "\\mathfrak{E}",
-        'τ' => "\\tau",
-        'σ' => "\\sigma",
-        'ρ' => "\\rho",
-        'μ' => "\\mu",
-        'ν' => "\\nu",
         _ => return None,
     })
 }
@@ -260,12 +243,14 @@ pub fn lex(src: &str, ctx: &Ctx) -> Result<Vec<Token>, LexError> {
                 i += 1;
             }
             b'^' => {
-                // `^+` is the corpus's tick/successor glyph (a prefix operator on a
-                // tick variable), not a superscript marker.
-                if i + 1 < n && bytes[i + 1] == b'+' {
+                // `^` followed by an operator character is ONE symbol the corpus may
+                // declare (`^+`, `^*`, ...); otherwise `^` starts a superscript. The
+                // rule is the format's, and it names no glyph.
+                if i + 1 < n && qubitick_model::corpus::is_operator_punct(bytes[i + 1] as char) {
                     let start = i;
+                    let tex = format!("^{}", bytes[i + 1] as char);
                     i += 2;
-                    resolve_symbol(&mut tokens, "^+", start, i, ctx)?;
+                    resolve_symbol(&mut tokens, &tex, start, i, ctx)?;
                 } else {
                     tokens.push(Token::Superscript(Span::new(i, i + 1)));
                     i += 1;

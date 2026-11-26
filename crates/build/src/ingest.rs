@@ -14,46 +14,10 @@ use anyhow::{Context, Result};
 use qubitick_db::hash::hash_symbol;
 use qubitick_db::write::write_expr;
 use qubitick_model::{Node, NodeKind};
-use qubitick_model::corpus::{Facet, is_operator_punct};
+use qubitick_model::corpus::is_operator_punct;
 
 use rusqlite::Connection;
 
-/// Compute the facet bitmask for a symbol from its tex and kind.
-///
-/// This REPLACES the hardcoded PUBLIC_SYMBOL_CLASSES table in corpus.rs.
-/// The bits are stable and match the Facet enum in corpus.rs.
-fn compute_facets(tex: &str, _kind: &str) -> u32 {
-
-    let mut bits = 0u32;
-    // Sort carriers
-    if matches!(tex, r"\tau" | r"\mathbb{Z}" | r"\mathbb{Q}" | r"\mathfrak{E}" | r"\mathbb{V}" | r"\mathbb{E}") {
-        bits |= 1 << (Facet::Sort as u8);
-        if tex == r"\tau" { bits |= 1 << (Facet::SortTau as u8); }
-        if tex == r"\mathbb{Z}" { bits |= 1 << (Facet::SortZ as u8); }
-    }
-    // Tau constructors and vocabulary
-    if tex == r"\tau_0" { bits |= (1 << (Facet::TickNull as u8)) | (1 << (Facet::TickTerm as u8)) | (1 << (Facet::GenTag as u8)); }
-    if tex == "^+" { bits |= (1 << (Facet::Succ as u8)) | (1 << (Facet::TauConsume as u8)) | (1 << (Facet::TickTerm as u8)) | (1 << (Facet::GenTag as u8)); }
-    if tex == "tick" { bits |= 1 << (Facet::TickTerm as u8); }
-    if matches!(tex, r"\uparrow" | r"\downarrow") { bits |= (1 << (Facet::TauConsume as u8)) | (1 << (Facet::TickTerm as u8)); }
-    // Z constructors
-    if matches!(tex, r"\mathbb{Z}_{0}" | r"\mathbb{Z}^{+}" | r"\mathbb{Z}^{-}") { bits |= (1 << (Facet::ZCtor as u8)) | (1 << (Facet::ZCtorDual as u8)); }
-    if matches!(tex, r"\mathbb{Z}_0" | r"\mathbb{Z}^+" | r"\mathbb{Z}^-") { bits |= 1 << (Facet::ZCtorDual as u8); }
-    // Arrows
-    if matches!(tex, r"\to" | r"\rightarrow" | r"\longrightarrow") { bits |= (1 << (Facet::Arrow as u8)) | (1 << (Facet::RewriteArrow as u8)) | (1 << (Facet::CompileImp as u8)); }
-    if tex == r"\Longrightarrow" { bits |= (1 << (Facet::RewriteArrow as u8)) | (1 << (Facet::CompileImp as u8)); }
-    // Iff connectives
-    if tex == r"\leftrightarrow" { bits |= 1 << (Facet::LeftIff as u8); }
-    if tex == r"\iff" { bits |= 1 << (Facet::RightIff as u8); }
-    // Collector / bracketing glyphs
-    if matches!(tex, r"\Vert" | r"\ulcorner" | r"\urcorner") { bits |= 1 << (Facet::Collector as u8); }
-    // THE OPERATOR VOCABULARY IS NOT HERE. An operator, a relation, the empty
-    // element and the nullity operator are what a corpus's own declaration states
-    // (`Role:`), and `persist_definition_metadata` writes those bits from the
-    // declaration it read. The glyph SHAPE gives the fixity (an infix operator is a
-    // binary operator); nothing gives a glyph a mathematical meaning but a node.
-    bits
-}
 /// Outcome counters of one corpus ingestion.
 #[derive(Debug, Clone, Default)]
 pub struct IngestReport {
@@ -298,11 +262,31 @@ pub fn ingest_file_symbols(
                 decl as i64,
                 claim.home,
                 sh.to_le_bytes().to_vec(),
-                compute_facets(&claim.tex, &claim.kind) as i64
+                0i64
             ],
         )?;
     }
     Ok(FileSymbols { written, in_ledger: true })
+}
+
+/// The per-file contexts and symbol-hash maps, rebuilt after the metadata pass.
+fn rebuild_entry_ctxs(
+    conn: &qubitick_db::Db,
+    entries: &[Entry],
+    project_root: &Path,
+) -> Result<Vec<(qubitick_ctx::Ctx, HashMap<u32, u128>)>> {
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
+        let (er, st) = era_strata_of(project_root, &e.path);
+        let scope = format!("{er}/Strata{st}");
+        let c = qubitick_ctx::build_ctx(conn, &scope)?;
+        let sh: HashMap<u32, u128> = c
+            .symbols()
+            .map(|r| (r.id as u32, hash_symbol(&r.scope, &r.tex, &r.kind)))
+            .collect();
+        out.push((c, sh));
+    }
+    Ok(out)
 }
 
 pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<IngestReport> {
@@ -451,21 +435,11 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
                 decl as i64,
                 c.home,
                 sh.to_le_bytes().to_vec(),
-                compute_facets(&c.tex, &c.kind) as i64
+                0i64
             ],
         )?;
     }
     // Stamp the GENERATED sort constructors that are used prefix-style (`^+ x`,
-    // `\mathbb{Z}^{+} n`, `\mathbb{Z}^{-} n`) with role="prefix" in the DB.
-    // They are engine substrate (no corpus definition to derive a role from), so
-    // the engine records their role here — after which the parser is purely
-    // DB-driven for prefix-ness with no hardcoded glyph fallback.
-    for tex in ["\\mathbb{Z}^{+}", "\\mathbb{Z}^{-}", "^+"] {
-        tx.execute(
-            "UPDATE symbols SET role = 'prefix' WHERE tex = ?1 AND role IS NULL",
-            rusqlite::params![tex],
-        )?;
-    }
     // Reserve the model-level equality symbol (`model::EQ_SYM`) so structured
     // `=` expressions can be stored (symbols.id FK on exprs.symbol_id). It is
     // GLOBAL scope so every era's statements can use it.
@@ -487,23 +461,16 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
     tx.commit()?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
+    // The per-file contexts the two passes read: rebuilt between them, because a
+    // declaration is classified against the declarations already written.
+    let mut entry_ctxs: Vec<(qubitick_ctx::Ctx, HashMap<u32, u128>)> =
+        rebuild_entry_ctxs(conn, &entries, project_root)?;
+
     // ---- Phase C: re-parse with the full context; write exprs + req ---------
     // Each node is re-parsed with a symbol context for its OWN scope (own + global
     // + ancestor + within-era earlier strata), so a file can cite symbols declared
     // in a prior stratum/era. Hashes are scope-independent, so reconstruction at
     // read time agrees with these write-time hashes regardless of build scope.
-    let mut entry_ctxs: Vec<(qubitick_ctx::Ctx, HashMap<u32, u128>)> = Vec::new();
-    for e0 in &entries {
-        let (er, st) = era_strata_of(project_root, &e0.path);
-        let entry_scope = format!("{er}/Strata{st}");
-        let c = qubitick_ctx::build_ctx(conn, &entry_scope)?;
-        let sh: HashMap<u32, u128> = c
-            .symbols()
-            .map(|r| (r.id as u32, hash_symbol(&r.scope, &r.tex, &r.kind)))
-            .collect();
-        entry_ctxs.push((c, sh));
-    }
-
     // ---- Pass 1 of Phase C: persist D-block METADATA (elab/binder_kind/
     // mod_roles/role) from every Definition. This must run BEFORE the parse
     // contexts are (re)built, so the parser's dispatch — which reads the DB —
@@ -517,29 +484,104 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
         let precedence: Vec<Vec<String>> = crate::canon::read(project_root)?
             .map(|c| c.precedence)
             .unwrap_or_default();
+        // TWO ROUNDS, because a declaration is classified against OTHER declarations:
+        // a formation is recognisable only when the connective separating its
+        // constructors is already declared, and that connective may live in another
+        // file. Round one writes every node's roles and facets; round two re-parses
+        // with them in the context, which is when a formation becomes a formation and
+        // its constructors become ctors.
+        for round in 0..2 {
+            if round > 0 {
+                entry_ctxs = rebuild_entry_ctxs(conn, &entries, project_root)?;
+            }
+            let tx = conn.unchecked_transaction()?;
+            for (i, e) in entries.iter().enumerate() {
+                let (ctx, _h) = &entry_ctxs[i];
+                let src = std::fs::read_to_string(&e.path)?;
+                let nodes = qubitick_parse::parse_content(ctx, &src)?;
+                if let Some(Node::Definition(d)) = nodes.first() {
+                    persist_definition_metadata(&tx, ctx, &src, d, &precedence)?;
+                }
+            }
+            tx.commit()?;
+        }
+    }
+    // Rebuild the contexts so they carry the freshly persisted D-block metadata.
+    entry_ctxs = rebuild_entry_ctxs(conn, &entries, project_root)?;
+
+    // ---- Pass 2: DECLARATION FACTS (the declaring node owns its glyph) ------
+    //
+    // Two facts the earlier passes cannot state, because both are cross-file:
+    // - a glyph's HOME is the node that DECLARES it, not the first node that used it
+    //   (Phase B registers whichever use came first, which made the declaring node
+    //   unattributable);
+    // - a formation's constructors are ctors of that formation — including a ctor
+    //   that also has a declaration of its own (`\tau_0` with `Type: \tau`), whose
+    //   node would otherwise leave it looking like a primitive.
+    {
         let tx = conn.unchecked_transaction()?;
         for (i, e) in entries.iter().enumerate() {
+            let node_id = (i + 1) as i64;
             let (ctx, _h) = &entry_ctxs[i];
             let src = std::fs::read_to_string(&e.path)?;
             let nodes = qubitick_parse::parse_content(ctx, &src)?;
-            if let Some(Node::Definition(d)) = nodes.first() {
-                persist_definition_metadata(&tx, ctx, &src, d, &precedence)?;
+            let Some(Node::Definition(d)) = nodes.first() else {
+                continue;
+            };
+            if d.symbol.primary == 0 {
+                continue;
+            }
+            let sid = d.symbol.primary as i64;
+            let Some(row) = ctx.by_id(sid) else { continue };
+            let hash = hash_symbol(&row.scope, &row.tex, d.d_block.kind.as_str());
+            tx.execute(
+                "UPDATE symbols SET kind = ?1, home_node = ?2, symbol_hash = ?3 WHERE id = ?4",
+                rusqlite::params![
+                    d.d_block.kind.as_str(),
+                    node_id,
+                    hash.to_le_bytes().to_vec(),
+                    sid
+                ],
+            )?;
+        }
+        // THE CONSTRUCTORS LAST: a ctor may have a declaration node of its own
+        // (`\tau_0` with `Type: \tau`), and that node's kind was just written above.
+        // Reading the formations again, after every glyph's own declaration has been
+        // recorded, is what makes "this glyph is a constructor of that formation" win.
+        for (i, e) in entries.iter().enumerate() {
+            let node_id = (i + 1) as i64;
+            let (ctx, _h) = &entry_ctxs[i];
+            let src = std::fs::read_to_string(&e.path)?;
+            let nodes = qubitick_parse::parse_content(ctx, &src)?;
+            let Some(Node::Definition(d)) = nodes.first() else {
+                continue;
+            };
+            let Some(qubitick_model::FormBody::Formation(ctors)) = &d.d_block.form else {
+                continue;
+            };
+            for c in ctors {
+                let cid = c.constructor.primary as i64;
+                if cid == 0 {
+                    continue;
+                }
+                let chash = tx
+                    .query_row("SELECT scope, tex FROM symbols WHERE id = ?1", [cid], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })
+                    .ok()
+                    .map(|(scope, tex)| hash_symbol(&scope, &tex, "ctor"));
+                tx.execute(
+                    "UPDATE symbols SET kind = 'ctor', home_node = ?1, symbol_hash = ?2 WHERE id = ?3",
+                    rusqlite::params![node_id, chash.unwrap_or(0).to_le_bytes().to_vec(), cid],
+                )?;
             }
         }
         tx.commit()?;
     }
-    // Rebuild the contexts so they carry the freshly persisted D-block metadata.
-    let mut entry_ctxs: Vec<(qubitick_ctx::Ctx, HashMap<u32, u128>)> = Vec::new();
-    for e0 in &entries {
-        let (er, st) = era_strata_of(project_root, &e0.path);
-        let entry_scope = format!("{er}/Strata{st}");
-        let c = qubitick_ctx::build_ctx(conn, &entry_scope)?;
-        let sh: HashMap<u32, u128> = c
-            .symbols()
-            .map(|r| (r.id as u32, hash_symbol(&r.scope, &r.tex, &r.kind)))
-            .collect();
-        entry_ctxs.push((c, sh));
-    }
+    // The facts above change kinds and hashes, so the contexts are rebuilt once more
+    // before any expr is written.
+    entry_ctxs = rebuild_entry_ctxs(conn, &entries, project_root)?;
+
 
     let mut report = IngestReport {
         files: entries.len(),
@@ -662,12 +704,10 @@ fn persist_definition_metadata(
     }
     let sid = d.symbol.primary as i64;
     let apply_form = d.d_block.apply_form.map(|a| a.as_str());
-    let binder_kind: Option<&str> = if rule.as_str() == "Binder" {
-        ctx.by_id(sid)
-            .and_then(|r| qubitick_model::corpus::binder_kind_of(&r.tex))
-    } else {
-        None
-    };
+    // A binder's KIND is the parser's structural read of its subscript
+    // (`_{i : T}` binds a `fun`, `_{x \to 0}` a limit); the engine no longer picks a
+    // label out of the glyph's spelling, so nothing is recorded here.
+    let binder_kind: Option<&str> = None;
     tx.execute(
         "INSERT INTO symbol_elab_rules (symbol_id, rule, apply_form, binder_kind)
          VALUES (?1,?2,?3,?4)
@@ -720,6 +760,19 @@ fn persist_definition_metadata(
         tx.execute(
             "UPDATE symbols SET role = ?1, facets = ?2, precedence = ?3 WHERE id = ?4",
             rusqlite::params![fixity, facets as i64, level, sid],
+        )?;
+    }
+    // THE DECLARED KIND: a glyph can be a formation, a primitive or plain notation,
+    // and `d.d_block.kind` says which ONCE the node parses against a context that
+    // knows the corpus's declarations (a formation is only recognisable when the
+    // connective separating its constructors is declared). The symbol hash is derived
+    // from the kind, so both are written together, before any expr is stored.
+    if let Some(row) = ctx.by_id(sid) {
+        let kind = d.d_block.kind.as_str();
+        let hash = hash_symbol(&row.scope, &row.tex, kind);
+        tx.execute(
+            "UPDATE symbols SET kind = ?1, symbol_hash = ?2 WHERE id = ?3",
+            rusqlite::params![kind, hash.to_le_bytes().to_vec(), sid],
         )?;
     }
     Ok(())
@@ -811,23 +864,30 @@ fn persist_form_body(
     sema_eid: Option<i64>,
 ) -> anyhow::Result<()> {
     use qubitick_model::FormBody as F;
-    let (kind, body, open, close) = match form {
-        Some(F::MacroExpr(_)) => ("MacroExpr", sema_eid, None, None),
+    let (kind, body, open, close, ctors) = match form {
+        Some(F::MacroExpr(_)) => ("MacroExpr", sema_eid, None, None, None),
         // A Recursive form must reference a body expr (schema CHECK); skip it if
         // none was written rather than violate the constraint.
         Some(F::Recursive(_, _)) => match sema_eid {
-            Some(id) => ("Recursive", Some(id), None, None),
+            Some(id) => ("Recursive", Some(id), None, None, None),
             None => return Ok(()),
         },
-        Some(F::Formation(_)) => ("Formation", None, None, None),
-        Some(F::Bracket(o, c)) => ("Bracket", None, Some(o.clone()), Some(c.clone())),
+        Some(F::Formation(ctors)) => (
+            "Formation",
+            None,
+            None,
+            None,
+            Some(serde_json::to_string(ctors)?),
+        ),
+        Some(F::Bracket(o, c)) => ("Bracket", None, Some(o.clone()), Some(c.clone()), None),
         None => return Ok(()),
     };
     tx.execute(
-        "INSERT INTO form_bodies (symbol_id, form_kind, body_expr_id, open_delim, close_delim)
-         VALUES (?1,?2,?3,?4,?5)
+        "INSERT INTO form_bodies
+            (symbol_id, form_kind, body_expr_id, open_delim, close_delim, ctors)
+         VALUES (?1,?2,?3,?4,?5,?6)
          ON CONFLICT(symbol_id) DO NOTHING",
-        rusqlite::params![symbol_id, kind, body, open, close],
+        rusqlite::params![symbol_id, kind, body, open, close, ctors],
     )?;
     Ok(())
 }
@@ -1332,9 +1392,15 @@ fn control_words(src: &str) -> Vec<String> {
             i += 1;
             hand_mods(src, &mut i, &mut tex);
             out.push(tex);
-        } else if src.as_bytes()[i] == b'^' && src.as_bytes().get(i + 1) == Some(&b'+') {
-            // The corpus's tick glyph is written literally as `^+` (no `\command`).
-            out.push("^+".to_string());
+        } else if src.as_bytes()[i] == b'^'
+            && src
+                .as_bytes()
+                .get(i + 1)
+                .is_some_and(|b| is_operator_punct(*b as char))
+        {
+            // `^` + an operator character is ONE symbol the corpus may declare (`^+`,
+            // `^*`, ...). The rule is the format's; the glyph is the corpus's.
+            out.push(format!("^{}", src.as_bytes()[i + 1] as char));
             i += 2;
         } else if is_operator_punct(src.as_bytes()[i] as char) {
             // BARE OPERATOR PUNCTUATION RUN: a maximal sequence of OPERATOR_PUNCT characters.
@@ -1407,10 +1473,6 @@ fn command_tex(src: &str, i: &mut usize) -> Option<String> {
 
 /// Derive a valid Lean identifier from a LaTeX tex token.
 fn lean_name(tex: &str) -> String {
-    // The tick glyph `^+` sanitizes to nothing, so it gets a real name.
-    if tex == "^+" {
-        return "tick".to_string();
-    }
     // A numeric literal sanitizes to itself, but must not start a Lean ident.
     if tex.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return format!("num_{tex}");
@@ -1490,7 +1552,14 @@ fn lean_name(tex: &str) -> String {
     }
     let mut s = sanitize(tex);
     if s.is_empty() {
-        s = "sym".into();
+        // A glyph written only in punctuation the map above does not know still needs
+        // a name of its own: derive it from the codepoints, so two distinct glyphs
+        // never collide and the engine picks no word for either.
+        let mut suffix = String::new();
+        for c in tex.chars() {
+            suffix.push_str(&format!("{:x}", c as u32));
+        }
+        s = format!("sym_{suffix}");
     }
     if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
         s.insert(0, '_');
@@ -1741,14 +1810,25 @@ mod tests {
         .unwrap();
         let mut conn = qubitick_db::open_in_memory().unwrap();
         ingest_corpus(&mut conn, &dir).unwrap();
-        let kind: Option<String> = conn
+        // The elaboration rule IS recorded (the corpus declared a binder), and the
+        // KIND is not: no glyph list decides whether a binder reads as a fold, a
+        // limit or a plain `fun` — the parser reads that off the subscript's shape.
+        let rule: String = conn
             .query_row(
-                "SELECT binder_kind FROM symbol_elab_rules WHERE binder_kind IS NOT NULL LIMIT 1",
+                "SELECT rule FROM symbol_elab_rules WHERE rule = 'Binder' LIMIT 1",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(kind.as_deref(), Some("Integral"), "sum binder -> Integral");
+        assert_eq!(rule, "Binder");
+        let labelled: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM symbol_elab_rules WHERE binder_kind IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(labelled, 0, "no binder kind is a glyph's spelling");
         let _ = fs::remove_dir_all(&dir);
     }
 
