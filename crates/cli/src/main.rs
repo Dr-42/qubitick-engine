@@ -76,6 +76,8 @@ enum Commands {
     },
     /// Parse a single .qbit file into nodes (mirrors POST /api/parse).
     Parse { file: PathBuf },
+    /// Print what Lean says each constant of a file stands on (the axiom footprint).
+    Axioms { root: PathBuf, file: PathBuf },
     /// Print the Lean module a single .qbit file emits (debugging aid).
     Emit {
         file: PathBuf,
@@ -545,6 +547,35 @@ fn main() -> anyhow::Result<()> {
                     "nodes": nodes.len(),
                     "kinds": kinds,
                     "ast": format!("{nodes:?}"),
+                }))?
+            );
+        }
+        Commands::Axioms { root, file } => {
+            // THE FOOTPRINT IS LEAN'S, shown as it reports it. The ground a corpus is
+            // checked against decides it (Init names its own axioms; a bare prelude names
+            // none), so the same theorem can print two different footprints and both are
+            // true — which is what makes this a report and not a gate.
+            let mut db = qubitick_db::open_in_memory()?;
+            qubitick_build::ingest_corpus(&mut db, &root)?;
+            let scope = qubitick_build::pipeline::scope_of_path(&file);
+            let ctx = qubitick_ctx::build_ctx(&db, &scope)?;
+            let src_text = std::fs::read_to_string(&file)?;
+            let nodes = qubitick_parse::parse_content(&ctx, &src_text)?;
+            let names: Vec<String> = nodes.iter().map(|n| n.base().name.clone()).collect();
+            let emitted = qubitick_build::emit_file(&ctx, &db, &file)?;
+            let ground = qubitick_build::ground::for_check(&root).ok();
+            let footprints =
+                qubitick_build::lean_check::axioms_footprint(ground.as_deref(), &emitted, &names)?;
+            let rows: Vec<serde_json::Value> = footprints
+                .iter()
+                .map(|f| json!({ "name": f.name, "axioms": f.axioms }))
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "file": file.display().to_string(),
+                    "ground": ground.map(|g| g.display().to_string()),
+                    "footprints": rows,
                 }))?
             );
         }

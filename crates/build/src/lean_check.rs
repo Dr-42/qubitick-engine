@@ -54,11 +54,7 @@ pub fn check_file_diagnostics(
     // a project's own `HL.lean` is the point of the decoupling. Passing `None` is only for a
     // caller that has a FILE and no corpus, and it falls back the way the package does: a
     // `prelude/` above the file, else an explicit `QUBITICK_PRELUDE`, else the copy in this binary.
-    let prelude = ground
-        .map(|g| g.to_path_buf())
-        .or_else(|| find_prelude_dir(path))
-        .or_else(ground_cache)
-        .map(|p| p.canonicalize().unwrap_or(p));
+    let prelude = resolve_prelude(ground, path);
     if let Some(p) = &prelude {
         ensure_prelude(p)?;
     }
@@ -89,6 +85,140 @@ pub fn check_file_diagnostics(
         );
     }
     Ok(diagnostics)
+}
+
+/// The ground a Lean invocation runs against: the caller's assembled ground, else a
+/// `prelude/` above the file, else the copy in this binary.
+fn resolve_prelude(ground: Option<&Path>, path: &Path) -> Option<PathBuf> {
+    ground
+        .map(|g| g.to_path_buf())
+        .or_else(|| find_prelude_dir(path))
+        .or_else(ground_cache)
+        .map(|p| p.canonicalize().unwrap_or(p))
+}
+
+/// What one theorem STANDS ON, as Lean itself reports it.
+///
+/// Reported, never policed: an empty footprint is a fact about the ground (a bare prelude
+/// carries no axioms), and the names Lean's Init carries appear as they are. Nothing here
+/// can fail a build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Footprint {
+    /// The emitted constant's name.
+    pub name: String,
+    /// The axioms Lean reports for it — `[]` for a proof that stands on none.
+    pub axioms: Vec<String>,
+}
+
+/// Ask Lean what each named constant of an emitted module stands on.
+///
+/// The module text is handed to `lean` with one `#print axioms <name>` appended per name,
+/// against the same ground the check uses, and Lean's own lines are read back:
+///
+/// ```text
+/// 't4' depends on axioms: [propext, Classical.choice, Quot.sound]
+/// 't5' does not depend on any axioms
+/// ```
+///
+/// A name Lean does not know is an error here: the caller asked about a constant the module
+/// does not declare, and saying so beats reporting an empty footprint for it.
+pub fn axioms_footprint(
+    ground: Option<&Path>,
+    emitted: &str,
+    names: &[String],
+) -> Result<Vec<Footprint>> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut body = String::from(emitted);
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    let mut prints = String::new();
+    for n in names {
+        prints.push_str("#print axioms ");
+        prints.push_str(n);
+        prints.push('\n');
+    }
+    // THE PRINTS BELONG INSIDE THE MODULE'S NAMESPACE: an emitted module closes it with
+    // `end <Namespace>`, and a `#print axioms MulTwo` appended after that names a
+    // top-level constant that does not exist.
+    let text = match body.rfind("\nend ") {
+        Some(i) => {
+            let cut = i + 1;
+            format!("{}{}{}", &body[..cut], prints, &body[cut..])
+        }
+        None => format!("{body}{prints}"),
+    };
+    let n = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("qubitick-axioms-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let scratch = dir.join(format!("footprint-{n}.lean"));
+    std::fs::write(&scratch, &text)
+        .with_context(|| format!("writing scratch lean {}", scratch.display()))?;
+    let prelude = resolve_prelude(ground, &scratch);
+    if let Some(p) = &prelude {
+        ensure_prelude(p)?;
+    }
+    let mut cmd = std::process::Command::new("lean");
+    cmd.arg(&scratch);
+    if let Some(p) = &prelude {
+        cmd.env("LEAN_PATH", p);
+    }
+    let out = cmd
+        .output()
+        .with_context(|| format!("failed to spawn `lean` for {}", scratch.display()))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let footprints = footprint_lines(&stdout);
+    if footprints.len() != names.len() {
+        anyhow::bail!(
+            "lean reported {} footprints for {} names:\n{}{}",
+            footprints.len(),
+            names.len(),
+            stdout.trim(),
+            if stderr.trim().is_empty() { "" } else { stderr.trim() }
+        );
+    }
+    Ok(footprints)
+}
+
+/// Read Lean's `#print axioms` lines: a list of names, or an empty one.
+///
+/// Public because a caller may have Lean's output in hand already (a test, a log) and
+/// should read it the same way the engine does.
+pub fn footprint_lines(output: &str) -> Vec<Footprint> {
+    let mut out = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix('\'') else {
+            continue;
+        };
+        let Some((name, said)) = rest.split_once('\'') else {
+            continue;
+        };
+        if let Some(list) = said
+            .trim()
+            .strip_prefix("depends on axioms: [")
+            .and_then(|r| r.strip_suffix(']'))
+        {
+            out.push(Footprint {
+                name: name.to_string(),
+                axioms: list
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            });
+        } else if said.trim() == "does not depend on any axioms" {
+            out.push(Footprint {
+                name: name.to_string(),
+                axioms: Vec::new(),
+            });
+        }
+    }
+    out
 }
 
 /// Turn Lean's `file:line:col: error: …` lines into diagnostics.
