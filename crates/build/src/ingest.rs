@@ -31,6 +31,13 @@ pub struct IngestReport {
     /// axiom it means, and a name lookup cannot say which node — so they are
     /// reported rather than resolved silently. See `IngestReport::duplicates`.
     pub duplicates: Vec<Duplicate>,
+    /// Files a corpus has that this pass could NOT read, and why.
+    ///
+    /// A corpus OPENS with them: one bad file must not make the other three hundred
+    /// unopenable, and the sentence belongs to the file, not to the corpus. The build
+    /// reports each one against its own file (`parse.not-notation`, `coverage.unhomed`,
+    /// ...), which is where a person can act on it.
+    pub refused: Vec<(String, String)>,
 }
 
 /// What a corpus node was claimed twice by.
@@ -298,15 +305,27 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
     // ---- Phase A: canonical ledger order + declared/used symbols ------------
     let empty = qubitick_ctx::Ctx::from_rows("", vec![]);
     let mut entries: Vec<Entry> = Vec::new();
+    // Files this pass could not read, kept for the report (see `IngestReport::refused`).
+    let mut refused: Vec<(String, String)> = Vec::new();
     for path in &files {
         let src = std::fs::read_to_string(path)
             .with_context(|| format!("read {}", path.display()))?;
         qubitick_parse::tolerate_prose(true);
-        let nodes = qubitick_parse::parse_content(&empty, &src)
-            .with_context(|| format!("parse {}", path.display()));
+        let parsed = qubitick_parse::parse_content(&empty, &src);
         qubitick_parse::tolerate_prose(false);
-        let nodes = nodes?;
-        let node = nodes.first().context("empty parse result")?;
+        let nodes = match parsed {
+            Ok(nodes) => nodes,
+            Err(e) => {
+                // THE FILE IS REFUSED, NOT THE CORPUS. `report.refused` carries the
+                // sentence, and the build reports it against this file.
+                refused.push((path.display().to_string(), format!("{e:#}")));
+                continue;
+            }
+        };
+        let Some(node) = nodes.first() else {
+            refused.push((path.display().to_string(), "empty parse result".to_string()));
+            continue;
+        };
         let glyph = match node {
             Node::Definition(d) => {
                 Some((first_glyph_line(&src), d.d_block.kind.as_str().to_string()))
@@ -612,6 +631,7 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
         statements: 0,
         req_edges: 0,
         duplicates,
+        refused,
     };
 
     let tx = conn.unchecked_transaction()?;

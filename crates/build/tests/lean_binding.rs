@@ -100,9 +100,16 @@ fn a_ground_name_and_a_sema_at_once_is_refused() {
         "Era0/Strata0/Definitions/D_S_01_Both.qbit",
         "D.S.01. Both\n\\thing\nType: True\nSema:\n\\thing = \\thing\n",
     );
+    /* THE FILE IS REFUSED; THE CORPUS STILL OPENS. One bad file must not make the rest
+       unopenable — the sentence belongs to the file, and the build reports it there. */
     let mut db = qubitick_db::open_in_memory().unwrap();
-    let err = qubitick_build::ingest_corpus(&mut db, &dir).expect_err("both must be refused");
-    let said = format!("{err:#}");
+    let report = qubitick_build::ingest_corpus(&mut db, &dir).expect("the corpus still opens");
+    assert_eq!(report.nodes, 0, "the bad node is not in the ledger");
+    let (file, said) = report
+        .refused
+        .first()
+        .expect("and it is recorded as refused");
+    assert!(file.ends_with("D_S_01_Both.qbit"), "the file is named: {file}");
     assert!(
         said.contains("both") && said.contains("means one thing"),
         "the refusal says which two things the node did: {said}"

@@ -65,8 +65,15 @@ pub fn definition_cycles(conn: &qubitick_db::Db, corpus: &Path) -> Result<Vec<De
         if !ctxs.contains_key(&scope) {
             ctxs.insert(scope.clone(), qubitick_ctx::build_ctx(conn, &scope)?);
         }
-        let text = std::fs::read_to_string(&file)?;
-        let nodes = qubitick_parse::parse_content(&ctxs[&scope], &text)?;
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        /* A FILE THE CORPUS CANNOT READ HAS NO DEFINITIONS TO CYCLE. It is reported against
+           itself by the build (`report.refused`, `coverage.unhomed`, `parse.not-notation`);
+           aborting here would make one bad file hide every other file's answer. */
+        let Ok(nodes) = qubitick_parse::parse_content(&ctxs[&scope], &text) else {
+            continue;
+        };
         for node in &nodes {
             let qubitick_model::Node::Definition(def) = node else {
                 continue;

@@ -71,10 +71,19 @@ fn refused_row_diagnostics(ctx: &Ctx, path: &Path) -> Result<Vec<Diagnostic>> {
         }
         Err(e) => {
             let said = format!("{e:#}");
+            /* ONE CODE PER KINDS OF REFUSAL, so a client can act on it without reading the
+               sentence: an undeclared operator is a missing D node, a bad header is a typo in
+               the first line, and `Type:`+`Sema:` on one node is a node that says two things. */
             let code = if said.contains("is used as an operator") {
                 "parse.operator.undeclared"
-            } else {
+            } else if said.contains("unknown node header") {
+                "parse.header"
+            } else if said.contains("cannot carry both") {
+                "parse.type-and-sema"
+            } else if said.contains("is not notation") {
                 "parse.not-notation"
+            } else {
+                "parse.refused"
             };
             Ok(vec![
                 Diagnostic::error(Phase::Parse, code, said).in_file(file)
@@ -255,8 +264,16 @@ fn file_diagnostics_cached(
     // TOLERANT: this is the pass that REPORTS a file's problems, so it must survive them.
     // A row the parser refuses is reported below, with the parser's own sentence.
     qubitick_parse::tolerate_prose(true);
-    let nodes = qubitick_parse::parse_content(ctx, &src)?;
+    let parsed = qubitick_parse::parse_content(ctx, &src);
     qubitick_parse::tolerate_prose(false);
+    let nodes = match parsed {
+        Ok(nodes) => nodes,
+        // THE FILE THAT DOES NOT PARSE HAS ONE DIAGNOSTIC, AND IT IS ITS OWN. The tolerant
+        // flag covers a row the parser reads as prose; a header it cannot read, or a node
+        // that says two contradictory things, is refused outright — and a report that
+        // aborted here would say nothing at all about the file, or about the corpus.
+        Err(_) => return refused_row_diagnostics(ctx, path),
+    };
     let file = path.display().to_string();
     let mut out: Vec<Diagnostic> = crate::cites::dangling(conn, ctx, headers, &nodes)?
         .into_iter()
@@ -895,10 +912,16 @@ pub fn run_pipeline(
                 // report can name precisely, and a build that says only "emit failed"
                 // hides the sentence the corpus needs.
                 let mut diagnostics = file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
-                diagnostics.insert(
-                    0,
-                    Diagnostic::error(Phase::Emit, "emit.failed", e.clone()).in_file(path.clone()),
-                );
+                /* ONE SENTENCE PER DEFECT. The file's own diagnostics already carry the
+                   parser's refusal, with the specific code for it; the emit failure is the
+                   same sentence again, so it is added only when it says something new. */
+                if !diagnostics.iter().any(|d| d.message == *e) {
+                    diagnostics.insert(
+                        0,
+                        Diagnostic::error(Phase::Emit, "emit.failed", e.clone())
+                            .in_file(path.clone()),
+                    );
+                }
                 results.push(BuildFileResult {
                     path: path.clone(),
                     ok: false,
