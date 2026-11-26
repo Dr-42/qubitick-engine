@@ -24,7 +24,7 @@ pub struct SymbolRow {
     pub elab: Option<String>,
     /// The BinderKind (Lambda/Integral/Limit/…) when elab is `Binder`.
     pub binder_kind: Option<String>,
-    /// Facet bitmask (replaces hardcoded PUBLIC_SYMBOL_CLASSES in corpus.rs).
+    /// Facet bitmask: the classifications the corpus's own declarations state.
     pub facets: u32,
 }
 

@@ -48,8 +48,7 @@ pub enum Facet {
 
 impl Facet {
     /// The single-bit mask for this facet. Public so callers outside the crate
-    /// (e.g. `Ctx::has_facet`) can test stored facet bitmasks without depending
-    /// on the private `PUBLIC_SYMBOL_CLASSES` table.
+    /// (e.g. `Ctx::has_facet`) can test the bitmasks a declaration writes.
     pub const fn bits(self) -> u32 {
         1u32 << (self as u8)
     }

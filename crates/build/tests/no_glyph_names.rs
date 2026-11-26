@@ -1,14 +1,13 @@
 //! THE ENGINE NAMES NO MATHEMATICAL GLYPH — a guard, not a feature.
 //!
-//! The engine used to carry `PUBLIC_SYMBOL_CLASSES` (a tex -> facet table) and a second
-//! name list in `ingest::compute_facets`, and between them they decided that `\\cap` is
-//! an operator, `\\tau` is a sort and `\\mathbb{Z}` is an inductive. Both are gone: a
-//! corpus declares its own glyphs, and the only alphabet the engine still knows is the
-//! DECLARATION FORMAT's (`crate::format` in `qubitick-model`).
+//! A corpus declares every glyph it writes: an operator, a sort, a constructor, the
+//! empty element. The only alphabet the engine knows is the DECLARATION FORMAT's
+//! (`qubitick_model::format`), and no engine source may carry a corpus glyph as a
+//! string literal.
 //!
-//! This test reads the engine's own sources and fails if a corpus glyph comes back as a
-//! string literal in production code. It exists because the table grew back once
-//! already, quietly, as "substrate".
+//! So this test reads the engine's own sources and fails if a corpus glyph appears as a
+//! string literal in production code: the table this replaced grew back once, quietly,
+//! labelled "substrate".
 //!
 //! What it allows, and why:
 //! - `#[cfg(test)]` code: a fixture may write a glyph, but only one its corpus declares.

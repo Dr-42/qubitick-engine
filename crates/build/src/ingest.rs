@@ -1995,14 +1995,11 @@ mod tests {
     }
 
     #[test]
-    fn prefix_declaration_wins_over_builtin_binop_table() {
-        // D9: a corpus can declare a glyph that the SHIPPED table classifies as
-        // BinOp (e.g. \times) as a UNARY PREFIX operator, and the declaration wins.
-        // The shipped PUBLIC_SYMBOL_CLASSES says \times is BinOp, but the corpus
-        // declares it with a single operand: "times a". The parser must see it as
-        // prefix, not infix. This test asserts the declaration overrides the engine's
-        // fallback table — the point of D9 is that the corpus declaration IS the
-        // answer, not an OR with the builtin.
+    fn a_declaration_states_the_fixity_and_nothing_else_does() {
+        // A corpus declares `times a` — one operand after the glyph, so the glyph is a
+        // PREFIX operator. The engine carries no table that could call it binary, and
+        // the declaration is the whole answer: the parser reads `prefix`, and no
+        // BinOp facet is set for it.
         let dir = scratch_dir("prefix_wins");
         fs::write(
             dir.join("D_A_01_TimesPrefix.qbit"),
