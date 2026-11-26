@@ -33,7 +33,7 @@ fn corpus(dir: &Path) {
     wit(
         dir,
         "Era0/Strata0/Definitions/D_S_01_Or.qbit",
-        "D.S.01. Or\na \\vee b\nType: \\mathcal{P} \\to \\mathcal{P} \\to \\mathcal{P}\nRole: connective\n",
+        "D.S.01. Or\na \\vee b\nRole: connective\n",
     );
     wit(
         dir,
@@ -53,7 +53,7 @@ fn corpus(dir: &Path) {
     wit(
         dir,
         "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
-        "D.S.05. Plus\na \\oplus b\nType: \\tau \\to \\tau \\to \\tau\n",
+        "D.S.05. Plus\na \\oplus b\n",
     );
     // No A block: a law an A block states becomes a field of the GROUND's class, and a
     // class in the ground cannot be written over `\tau` — the formation is this corpus's,

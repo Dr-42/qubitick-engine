@@ -23,6 +23,15 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use qubitick_model::{Expr, Node};
 
+/// Which of the two corpus holes a [`Gap`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GapKind {
+    /// An A block writes a glyph no D node in its stratum declares.
+    Unhomed,
+    /// A `Type:` gives a glyph a signature and no ground name, and no `Sema:`.
+    NoGroundName,
+}
+
 /// One glyph an A block writes that no D node in its stratum homes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gap {
@@ -32,11 +41,21 @@ pub struct Gap {
     pub glyph: String,
     /// The era/stratum both sides are read in (`Era0/Strata0`).
     pub sector: String,
+    pub kind: GapKind,
 }
 
 impl Gap {
     /// The sentence the build reports.
     pub fn sentence(&self) -> String {
+        if self.kind == GapKind::NoGroundName {
+            return format!(
+                "`Type:` requires a ground name (e.g. `Type: ISA.Tick : \\mathsf{{Type}}`)\n  \
+                 or a `Sema:` body. A glyph with no home cannot be emitted.\n  \
+                 (`{}` in {} is declared with a signature and no name.)",
+                self.glyph,
+                self.file.display()
+            );
+        }
         format!(
             "`{}` appears in {}\n  but no D node in {} declares it.\n\
              Add a D node whose glyph line is `{}` with `Type:` or `Sema:`.",
@@ -59,6 +78,10 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
     let mut homed: HashMap<String, BTreeSet<u32>> = HashMap::new();
     // The A blocks: their sector, their file, and the glyphs they write.
     let mut writes: Vec<(String, PathBuf, BTreeSet<u32>)> = Vec::new();
+    // Definitions that give a glyph a signature and no home: `Type: <sig>` with no name
+    // and no `Sema:`. A constructor is exempt — its home is the formation that declares it.
+    let mut undared: Vec<(String, PathBuf, u32)> = Vec::new();
+    let mut ctors: BTreeSet<u32> = BTreeSet::new();
     for path in files {
         let sector = crate::pipeline::scope_of_path(path);
         if !scope_ctxs.contains_key(&sector) {
@@ -82,10 +105,17 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
                 for extra in &d.extra_symbols {
                     set.insert(extra.symbol.primary);
                 }
-                if let Some(qubitick_model::FormBody::Formation(ctors)) = &d.d_block.form {
-                    for c in ctors {
+                if let Some(qubitick_model::FormBody::Formation(cs)) = &d.d_block.form {
+                    for c in cs {
                         set.insert(c.constructor.primary);
+                        ctors.insert(c.constructor.primary);
                     }
+                }
+                if d.d_block.sig.is_some()
+                    && d.d_block.ground_name.is_none()
+                    && d.d_block.form.is_none()
+                {
+                    undared.push((sector.clone(), relative_to_corpus(path), d.symbol.primary));
                 }
             }
             Some(Node::Axiom(a)) => {
@@ -121,11 +151,28 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
                 file: relative_to_corpus(&file),
                 glyph: row.tex.clone(),
                 sector: sector.clone(),
+                kind: GapKind::Unhomed,
             };
             if !out.contains(&gap) {
                 out.push(gap);
             }
         }
+    }
+    for (sector, file, id) in undared {
+        if ctors.contains(&id) {
+            continue;
+        }
+        let glyph = scope_ctxs
+            .get(&sector)
+            .and_then(|c| c.by_id(id as i64))
+            .map(|r| r.tex.clone())
+            .unwrap_or_default();
+        out.push(Gap {
+            file,
+            glyph,
+            sector,
+            kind: GapKind::NoGroundName,
+        });
     }
     Ok(out)
 }

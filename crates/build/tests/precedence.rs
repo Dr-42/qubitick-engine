@@ -30,12 +30,24 @@ fn corpus(dir: &Path) {
     wit(
         dir,
         "Canon.qbit",
-        "P. school — the precedence corpus\nId: school\nNote: the charter orders the operators; nothing else decides.\nPrecedence: +\nPrecedence: ×\n",
+        "P. school — the precedence corpus\nId: school\nLeanDir: lean\nNote: the charter orders the operators; nothing else decides.\nPrecedence: +\nPrecedence: ×\n",
     );
+    /* `Type: plus` NAMES THE GROUND'S SYMBOL — a global one, not a field of an instance:
+       this corpus has no A block, so it has no class chain to hypothesize, and `R` would
+       name nothing. A global `def plus` is the whole story, and the engine declares none
+       of it. */
     wit(
         dir,
         "Era0/Strata0/Definitions/D_01_Add.qbit",
-        "D.S.01. Add\na + b\nType: \\mathfrak{R} \\to \\mathfrak{R} \\to \\mathfrak{R}\n",
+        "D.S.01. Add\na + b\nType: plus : \\mathfrak{R} \\to \\mathfrak{R} \\to \\mathfrak{R}\n",
+    );
+    wit(
+        dir,
+        "lean/Qubitick/HL.lean",
+        &format!(
+            "{}\n\ndef plus (a b : Prop) : Prop := a\n",
+            qubitick_build::ground::HL_LEAN
+        ),
     );
     wit(
         dir,

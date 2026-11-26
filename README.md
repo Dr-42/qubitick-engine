@@ -7,8 +7,9 @@ and it knows no mathematical glyph of any corpus. Everything a symbol means arri
 declaration the corpus writes.
 
 ```
-cargo test --workspace          38 targets · 278 tests · 2 ignored
-qubitick build <corpus>         4 files, verified 4, error_count 0   (the starter ship)
+cargo test --workspace          44 targets · 301 tests · 2 ignored
+qubitick build <corpus>         5 files, verified 5, error_count 0   (the starter ship)
+qubitick axioms <corpus> <file> "axioms": []    (the ship's theorem stands on nothing)
 ```
 
 ---
@@ -21,15 +22,35 @@ directories:
 ```
 my-corpus/
   Canon.qbit                     the charter
+  Era0/Strata0/Axioms/A1_Comm.qbit              an A block: vocabulary + composition
+  Era0/Strata0/Definitions/D_A_00_Carrier.qbit  a D block: where a glyph lives
   Era0/Strata0/Definitions/D_A_01_Add.qbit
   Era0/Strata0/Definitions/D_A_02_Mul.qbit
-  Era0/Strata0/Axioms/A1_Comm.qbit
-  Era0/Strata0/Theorems/T_A_01_MulTwo.qbit
-  prelude/Qubitick/HL.lean       OPTIONAL: this project's own ground
+  Era0/Strata0/Theorems/T_A_01_MulTwo.qbit      a T block: a proof
+  prelude/Qubitick/HL.lean       the ground: the ONE file the project owns
 ```
 
-`corpus-templates/algebra/` is the starter the binary carries, and the tutorial ship —
-the smallest corpus that builds: one primitive, one definition, one axiom, one theorem.
+Three kinds of node, and one file outside them:
+
+| node | is | emits |
+|---|---|---|
+| **A block** (`A.` header) | the raw vocabulary and composition grammar of the display | nothing |
+| **D block** (`D.` header) | a glyph's home: `Type:` (the ground has it) or `Sema:` (the corpus defines it) | `def` / `inductive`, or a reference |
+| **T block** (`T.` header) | a theorem over composed glyphs, with a `Proof:` chain | `theorem` |
+| **the ground** (`prelude/Qubitick/HL.lean`) | the interface and logic the corpus binds to | not emitted — imported |
+
+`corpus-templates/algebra/` is the starter the binary carries, and the tutorial ship — the
+smallest corpus that builds: a carrier, a primitive, a definition, an A block, a theorem,
+and the ground they are written against.
+
+### The ground
+
+One file, and the project's own. `qubitick seed <corpus> --preset init|mathlib|bare|custom`
+writes it; `qubitick scaffold <corpus>` suggests what the corpus's own blocks imply (the
+root class carrying the symbols they name, and one class per A block); `qubitick
+hash-ground` prints its hash, and `qubitick build --frozen <hash>` refuses a build whose
+ground is not that file. The engine has no preset awareness at build time: it sees a file,
+imports it, and hashes it.
 
 ### The charter
 
@@ -77,6 +98,18 @@ The header is `<kind>.<division>.<n>. <Name>` (`D.` definition, `A.` axiom, `T.`
 The first bare line is the **glyph line**. The fields a node may carry are a closed,
 short list: `Type:`, `Sema:`, `Role:`, `Proof:`, `Falsify:`, `Math:`, `Phys:`, and — for a
 calibration — `Symbol:`, `QUnits:`, `Dims:`, `Rate:`.
+
+`Type:` is where a glyph lives, and it takes the ground's name:
+
+```
+Type: ISA.Capacity                                   the ground declares it
+Type: ISA.Capacity : \mathfrak{V} \to \mathfrak{E}      ...with a signature
+```
+
+A `Type:` that is a signature and no name (`Type: \mathfrak{V} \to \mathfrak{E}`) gives the
+glyph no home, and the build says so. `Type:` and `Sema:` on one node is refused: a glyph
+means one thing — the ground declares it, or the corpus does. A `Type:` *signature* under a
+`Sema:` is a typed definition, which is a different question and stays legal.
 
 ---
 
@@ -126,10 +159,16 @@ is a collector.
 | `null` | the carrier's empty element (the rewriter anchors an equality on it) |
 | `nullity` | the nullity operator a proof rewrites through |
 
-**A binding** comes from `Lean:`: `Lean: HMul.hMul` says the glyph IS that name, so the
-engine declares nothing for it and every use renders it — a project that imports Mathlib
-calls Mathlib's notation and Mathlib's lemmas. A binding and a `Sema:` contradict each
-other (the ground declares the glyph, or the corpus does) and one node cannot say both.
+**A home** comes from `Type:`: `Type: HMul.hMul` says the glyph IS that name, so the engine
+declares nothing for it and every use renders it — a project that imports Mathlib calls
+Mathlib's notation and Mathlib's lemmas. A home and a `Sema:` contradict each other (the
+ground declares the glyph, or the corpus does) and one node cannot say both.
+
+A name reached through the ground's instance is written as one: `Type: R.plus` says the
+glyph is the `plus` of the structure a proof is parametric over, and the module writes
+`R.plus` — the `R` coming from the `section variable [R : ...]` every module of a corpus
+with an A block opens. The engine infers no instance from a class name and knows no model:
+whatever follows `Type:` is exactly what is rendered.
 
 **Type and form** come from `Type:` (a signature, so an operator is typed over its
 carrier) and from `Sema:` (a body). A `Sema:` whose alternatives are separated by a
@@ -158,24 +197,58 @@ is how a project builds on Init, on Mathlib, or on a previous development. A gro
 decides what the emitted *proofs* may call; it never decides what the corpus may *say*
 (the surface is the corpus's own).
 
+A ground is also where a corpus's classes live. An A block states laws, and a law becomes a
+field of a class in the ground — the structure every proof of that corpus is parametric
+over (`section variable [R : Comm]`). The engine writes none of that: `qubitick scaffold`
+suggests the chain, the project owns the file, and `--frozen` pins it. A corpus with A
+blocks and no chain in its ground is a corpus whose proofs name a class nothing declares,
+and Lean says so per file.
+
+### The coverage invariant
+
+`glyphs(A_era_stratum) ⊆ glyphs(D_era_stratum)` — every glyph an A block writes has a D
+node, in the same era/stratum, that declares it. Checked before any Lean is produced:
+
+```
+`\Delta` appears in Era0/Strata0/Axioms/A1_Realm.qbit
+  but no D node in Era0/Strata0 declares it.
+Add a D node whose glyph line is `a \Delta b` with `Type:` or `Sema:`.
+```
+
+An A block is grammar, and a terminal with no meaning cannot be resolved. The engine used
+to invent one — the `axiom` fallback — and this is the pass that refuses instead. The
+declaration format's own alphabet (`=`, the iff, the arrows, the quantifiers, the citation
+corners) is the engine's and is exempt: a corpus is never asked to declare the format it is
+written in.
+
 ---
 
 ## 5. What gets emitted
 
-Per file, in the file's own scope:
+Four constructs, and nothing else: `def`, `inductive`, `theorem`, and a reference.
 
-- **the symbol frame** — every glyph the module mentions gets a Lean name, an arity from
-  observed application, and a type from the authored `Type:` signature, the observed
-  arity, or `Prop`;
-- **a declared formation** — `set_option genInjectivity false in inductive C : Type | …`
-  with each constructor's declared argument sorts, plus one `def ctor : … := C.ctor` alias
-  per constructor, and a `C.rec` definition for an operator whose `Sema:` recurses on one
-  of them;
-- **axioms as a class chain**, and **definitions** as `noncomputable def` (or an `axiom`
-  when the body cannot be a term);
-- **theorems** as a `theorem`, with the proof's chain compiled to a term; an equality
+- **a definition** (`Sema:`) — `noncomputable def`, in the corpus's own scope;
+- **a formation** — `set_option genInjectivity false in inductive C : Type | ...` with each
+  constructor's declared argument sorts, plus one `def ctor : ... := C.ctor` alias per
+  constructor, and a `C.rec` definition for an operator whose `Sema:` recurses on one of
+  them;
+- **a theorem** — a `theorem`, with the proof's chain compiled to a term; an equality
   through the nullity operator is emitted in the nullity form the corpus's `Role:` marks;
-- **admitted theorems** as an axiom of the module plus a warning — stated, not proved.
+- **a reference** — a glyph whose home is the ground (`Type: ISA.Capacity`, `Type: R.plus`)
+  is declared by nobody in the corpus, and every use site writes the name the corpus wrote.
+
+The engine emits **no `axiom`**, ever — not for a primitive, not for a definition seen from
+another module, not for a sort word. A module that names a glyph another module defines
+**imports** that module, and the build compiles the corpus in dependency order so the import
+resolves. A glyph the engine cannot reach has no home, and that is a build error naming it.
+
+An A block emits **nothing at all**: it is vocabulary and composition, and its law becomes a
+field of a class in the ground (§4). Its glyphs must still be homed — see the coverage
+invariant in §4.
+
+**Admitted theorems** are the exception the corpus asks for: a `Proof:` that proves nothing
+is emitted as an axiom of its own module plus a warning, so the file still checks while the
+report counts what is assumed.
 
 ---
 
@@ -187,6 +260,10 @@ qubitick palette <root>            # per-symbol colours for the editor
 qubitick parse   <file>            # one file's AST
 qubitick emit    <file> --root R   # the Lean module a file emits
 qubitick build   <root>            # ingest, emit, and check every file with lean
+qubitick build   <root> --frozen H # ...and refuse unless the ground hashes to H
+qubitick scaffold <corpus>          # the class chain the A blocks imply, for the ground
+qubitick hash-ground <root>         # the ground file's hash, for --frozen
+qubitick seed    <corpus> --preset  # init | mathlib | bare | custom
 qubitick lake    <root>            # emit the corpus as one Lake package
 qubitick rows    <root> <file>     # the file's proof rows and their verdicts
 qubitick steps   <root> <expr>     # the rewrites the corpus can cite from an expression
@@ -204,33 +281,36 @@ qubitick axioms  <root> <file>     # what Lean says the file's theorems stand on
 
 ## 7. What a proof stands on
 
-The engine reports the **axiom footprint** Lean computes for each theorem — reported, never
-policed, and the ground decides the answer:
+The engine reports the **axiom footprint** Lean computes for each theorem. Under this
+architecture it is a **regression test on the ground**, not a budget meter: the engine emits
+no axiom, so anything that shows up came from the ground the project carries.
 
 ```console
 $ qubitick axioms corpus-templates/algebra corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit
 { "footprints": [ { "name": "Qubitick.HL.MulTwo",
-                    "axioms": ["plus", "times", "times_def"] } ] }
+                    "axioms": [] } ] }
 ```
 
+- On the ship, nothing. Its symbols are fields of the structure the proof is parametric
+  over, `times` unfolds to `R.plus a a`, and a class field is not an axiom.
 - On a project whose ground is `import Init`, a theorem that reaches `Classical` prints
   Init's three (`propext`, `Classical.choice`, `Quot.sound`).
-- On the engine's bare prelude, a theorem of kernel reflexivity prints **nothing** — an
-  empty list, not an error.
-- The names are the corpus's own admissions when the corpus makes them: `plus` is a
-  `Type:` primitive, `times`/`times_def` are a definition seen from a module that cannot
-  unfold it. Binding a glyph to what the ground already provides (`Lean: True`,
-  `Lean: HMul.hMul`) is how a corpus lowers that number.
+- On Mathlib, whatever Mathlib costs — usually the same trio.
+
+Given a frozen ground and a fixed corpus the answer is deterministic, so a change in it
+means someone edited the ground or the corpus. Both are git-tracked; both are visible.
 
 A theorem's footprint includes its **type**, not only its proof term.
 
 ## 8. Gates
 
 ```
-./toolchain cargo test --workspace        # 38 targets, 278 tests, 2 ignored
+./toolchain cargo test --workspace        # 44 targets, 301 tests, 2 ignored
 ./toolchain cargo clippy --workspace --all-targets
 ./toolchain cargo build -p qubitick-cli
-./toolchain ./target/debug/qubitick build corpus-templates/algebra   # built 4, verified 4
+./toolchain ./target/debug/qubitick build corpus-templates/algebra   # built 5, verified 5
+./toolchain ./target/debug/qubitick axioms corpus-templates/algebra \
+    corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit  # "axioms": []
 ```
 
 The tests that state a promise rather than a detail:
@@ -244,7 +324,10 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
 | `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
 | `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, and the build reports the row |
-| `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship prints its own admissions |
+| `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship stands on nothing |
+| `crates/build/tests/coverage.rs` | an A-block glyph with no D node fails naming it; the shipped ship homes every glyph its A blocks write; and `scaffold` writes the chain |
+| `crates/build/tests/emission_surface.rs` | no module emits an `axiom`; a ground-named glyph declares nothing; a sort word is a literal; a cross-module definition is imported; a `Type:` with no name is refused |
+| `crates/build/tests/freeze.rs` | the ground hash is stable and follows the file; `--frozen` accepts its own hash and refuses another; every preset is a ground |
 | `crates/parse/tests/proof_surface.rs` | `⊢ <term>` closes a proof, `∎` ends it, and prose is refused by name |
 
 `./toolchain` is the build wrapper: it provisions the pinned Rust and borrows the corpus's
@@ -285,3 +368,13 @@ corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
 - Ingestion never refuses a corpus: it builds the ledger from what it can read, and the
   refusal reaches the report per file. A corpus with a bad row opens; its build fails.
 - A corpus that writes an undeclared glyph still *opens*; its build reports the refusal.
+- **A corpus with A blocks needs a ground that carries their chain.** A law an A block
+  states becomes a field of a class in the ground, so a corpus that has blocks and no
+  chain is a corpus whose proofs name a class nothing declares — reported per file, not
+  invented. `qubitick scaffold` is how a project gets one; `--frozen` is how it stays
+  the file the project chose.
+- **A class in the ground cannot be written over a type a module declares.** A law about a
+  corpus's own formation (`\tau = \tau_0 \vee (^+ \tau)`) is a T block, not an A block:
+  the inductive lives in its node's module, and the ground is compiled before it.
+- The freeze covers the ground file, not the charter: `Canon.qbit` stays editable while
+  `--frozen` holds.

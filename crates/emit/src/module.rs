@@ -2317,9 +2317,9 @@ let mut binder_prefix = String::new();
             }
             None => {
                 return Err(anyhow::anyhow!(
-                    "`{lean}` is named here but no module declares it: a glyph the \
-                     emitter cannot reach has no home, and the engine writes no `axiom` \
-                     in its place. Give it a D node with `Type:` or `Sema:`."
+                    "`Type:` requires a ground name (e.g. `Type: ISA.Tick : \\mathsf{{Type}}`)\n  \
+                     or a `Sema:` body. A glyph with no home cannot be emitted.\n  \
+                     (`{lean}` is named in this module and nothing declares it.)"
                 ));
             }
         }

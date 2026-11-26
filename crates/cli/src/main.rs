@@ -49,7 +49,36 @@ enum Commands {
         latex: bool,
     },
     /// Build the project (mirrors POST /api/build).
-    Build { root: PathBuf },
+    Build {
+        root: PathBuf,
+        /// Refuse to build unless the project's ground file hashes to this.
+        ///
+        /// The freeze: a ground is the one file that carries a corpus's assumptions, so
+        /// `--frozen` pins it. `qubitick hash-ground` prints the value.
+        #[arg(long)]
+        frozen: Option<String>,
+    },
+    /// Print the ground a corpus's A blocks imply — the class chain, as a suggestion.
+    ///
+    /// The engine writes no `class` itself: this is what a project drops into its own
+    /// `HL.lean` under the contract preset, then edits freely.
+    Scaffold {
+        root: PathBuf,
+        /// The namespace to wrap the chain in.
+        #[arg(long, default_value = "Qubitick.HL")]
+        namespace: String,
+        /// Write it to `<root>/Qubitick/HL.lean` instead of printing it.
+        #[arg(long)]
+        write: bool,
+    },
+    /// Print the hash of a corpus's ground file, for `build --frozen`.
+    HashGround { root: PathBuf },
+    /// Seed a corpus's ground from a preset: `init`, `mathlib`, `bare`, or `custom`.
+    Seed {
+        root: PathBuf,
+        #[arg(long, default_value = "init")]
+        preset: String,
+    },
     /// Check that a project's own `HL.lean` satisfies the emitter's contract.
     ///
     /// Emission stays term mode and names a fixed set of declarations; a project may
@@ -276,11 +305,14 @@ fn main() -> anyhow::Result<()> {
                 );
             }
         }
-        Commands::Build { root } => {
+        Commands::Build { root, frozen } => {
+            let root_path = PathBuf::from(&root);
+            if let Some(expected) = &frozen {
+                qubitick_build::presets::check_frozen(&root_path, expected)?;
+            }
             // Populate the corpus DB + a real symbol context so glyphs resolve and
             // statements parse structurally (not the empty-CTX fallback path).
             let mut db = qubitick_db::open_in_memory()?;
-            let root_path = PathBuf::from(&root);
             let report = qubitick_build::ingest_corpus(&mut db, &root_path)?;
             let files: Vec<PathBuf> = qubitick_build::walk_qbit(&root);
             // the ground the corpus is checked against: our base, with the charter's `LeanDir`
@@ -590,6 +622,33 @@ fn main() -> anyhow::Result<()> {
                     "footprints": rows,
                 }))?
             );
+        }
+        Commands::Scaffold {
+            root,
+            namespace,
+            write,
+        } => {
+            let root_path = PathBuf::from(&root);
+            let mut db = qubitick_db::open_in_memory()?;
+            qubitick_build::ingest_corpus(&mut db, &root_path)?;
+            let text = qubitick_build::scaffold::scaffold(&db, &root_path, &namespace)?;
+            if write {
+                let path = qubitick_build::presets::ground_file(&root_path, "prelude");
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&path, format!("{text}\n"))?;
+                eprintln!("scaffold: wrote {}", path.display());
+            } else {
+                println!("{text}");
+            }
+        }
+        Commands::HashGround { root } => {
+            println!("{}", qubitick_build::presets::hash(&root)?);
+        }
+        Commands::Seed { root, preset } => {
+            let path = qubitick_build::presets::seed(&root, &preset)?;
+            eprintln!("seed: wrote {} from the `{preset}` preset", path.display());
         }
         Commands::Emit { file, root } => {
             // Same DB + CTX the build path uses, so the printed module matches
