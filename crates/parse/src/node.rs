@@ -181,7 +181,7 @@ fn split_fields(lines: &[&str]) -> Vec<(String, String)> {
                (see the note in crates/parse/src/lexer.rs::FieldKind). */
             match key.as_str() {
                 "symbol" | "qunits" | "dims" | "rate"      // a calibration's own fields
-                | "sema" | "type" | "role"                 // a definition's body and classification
+                | "sema" | "type" | "role" | "lean"        // a definition's body, classification, binding
                 | "proof"                                  // a theorem's block
                 | "falsify"                                // an axiom's refutation protocol
                 | "math" | "phys" => {                     // prose, kept as a note
@@ -469,6 +469,7 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
     let mut sema: Option<Expr> = None;
     let mut sig: Option<Expr> = None;
     let mut role: Option<qubitick_model::DeclaredRole> = None;
+    let mut lean_binding: Option<String> = None;
     let mut glyph_tokens: Vec<String> = Vec::new();
     // Pre-scan the bare glyph line (`a \leftrightarrow b`) so we know the
     // defniendum's head token BEFORE parsing the `Sema:`. The head connective is
@@ -501,6 +502,16 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
                     None => bail!("Type: failed to parse as a signature: {v}"),
                 }
             }
+            "lean" => {
+                // `Lean:` binds the glyph to a name the ground already has. The name is
+                // used verbatim (a dotted name is a namespace path, not a typo), and the
+                // engine defines nothing for the glyph.
+                let name = v.trim();
+                if name.is_empty() {
+                    bail!("Lean: needs the Lean name the glyph is");
+                }
+                lean_binding = Some(name.to_string());
+            }
             "role" => {
                 // Role: classifies the glyph for the parser and the rewriter. The
                 // engine ships no such classification, so an unknown word is an
@@ -530,7 +541,17 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
         .and_then(|e| formation_of_expr(ctx, e, glyph.as_deref()))
         .map(|c| !c.is_empty())
         .unwrap_or(false);
-    let kind = if is_formation {
+    let kind = if lean_binding.is_some() {
+        // A BOUND glyph is what the ground says it is: there is nothing for the engine
+        // to define, so a body would contradict the binding.
+        if sema.is_some() {
+            bail!(
+                "a declaration either binds its glyph to a Lean name (`Lean:`) or defines it (`Sema:`); `{}` does both",
+                base.name
+            );
+        }
+        SymbolKind::Bound
+    } else if is_formation {
         SymbolKind::Formation
     } else if sig.is_some() && sema.is_none() {
         SymbolKind::Primitive
@@ -562,6 +583,7 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
             None
         },
         role,
+        lean_binding,
         ..Default::default()
     };
 

@@ -543,6 +543,16 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
                     sid
                 ],
             )?;
+            // A BOUND glyph takes the Lean name the declaration binds it to, so every
+            // use renders that name — the ground's, not a sanitised spelling of the
+            // corpus's. The symbol hash stays as it is: it is derived from the scope,
+            // the tex and the kind, never from the name.
+            if let Some(bound) = &d.d_block.lean_binding {
+                tx.execute(
+                    "UPDATE symbols SET lean_name = ?1 WHERE id = ?2",
+                    rusqlite::params![bound, sid],
+                )?;
+            }
         }
         // THE CONSTRUCTORS LAST: a ctor may have a declaration node of its own
         // (`\tau_0` with `Type: \tau`), and that node's kind was just written above.
@@ -1218,7 +1228,7 @@ fn is_field_keyword(k: &str) -> bool {
     matches!(
         k.trim().to_ascii_lowercase().as_str(),
         "symbol" | "qunits" | "dims" | "rate"
-            | "sema" | "type" | "role"
+            | "sema" | "type" | "role" | "lean"
             | "proof"
             | "falsify"
             | "math" | "phys"

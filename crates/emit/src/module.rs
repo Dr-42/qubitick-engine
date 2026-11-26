@@ -794,6 +794,14 @@ fn glyph_type(
     sigs.get(&id).cloned().unwrap_or_default().ty(name_of)
 }
 
+/// Whether the corpus BINDS this glyph to a Lean name that already exists.
+///
+/// A bound glyph is declared by the project's ground, so the frame declares nothing for
+/// it — the name is used as it stands.
+fn is_bound(ctx: &Ctx, id: u32) -> bool {
+    ctx.by_id(id as i64).is_some_and(|r| r.kind == "bound")
+}
+
 fn symbol_declarations(
     ctx: &Ctx,
     nodes: &[Node],
@@ -1171,6 +1179,13 @@ fn symbol_declarations(
         if extra_defined.contains(&lean) || !emitted_names.insert(lean.clone()) {
             continue;
         }
+        // A BOUND glyph (`Lean: HMul.hMul`) is declared BY THE GROUND. The frame
+        // declares nothing for it — an `axiom HMul.hMul` beside Mathlib's own
+        // declaration is a clash, and the point of the binding is to call what the
+        // ground provides.
+        if is_bound(ctx, id) {
+            continue;
+        }
         // The declaration format's arrow declares no constant: Lean's `→` is built in.
         if is_format_arrow(ctx, id) {
             continue;
@@ -1196,17 +1211,8 @@ fn symbol_declarations(
                 // module does not elaborate.
                 continue;
             }
-            // The order-theoretic truth constants are emitted REDUCIBLE (`≡ True`,
-            // `≡ False`) so a `[\equiv]` row ends at a provable object and a
-            // Prop-goal chain can close via `trivial`.
-            if lean == "top" {
-                out.push_str("def top : Prop := True\n");
-            } else if lean == "bot" {
-                out.push_str("def bot : Prop := False\n");
-            } else {
-                declared_types.insert(lean.clone(), ty.clone());
-                out.push_str(&format!("axiom {lean} : {ty}\n"));
-            }
+            declared_types.insert(lean.clone(), ty.clone());
+            out.push_str(&format!("axiom {lean} : {ty}\n"));
         }
     }
     // Every ordinary frame declaration counts as declared too.

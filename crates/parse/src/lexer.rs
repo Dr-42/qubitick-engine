@@ -92,6 +92,8 @@ pub enum FieldKind {
     Type,
     /// definition: the glyph's classification (`infix`, `relation`, `null`, ...)
     Role,
+    /// definition: the Lean name the glyph IS, instead of one the engine defines
+    Lean,
     /// theorem: the proof block
     Proof,
     /// axiom: the refutation protocol
@@ -115,6 +117,7 @@ impl FieldKind {
             "Sema" => FieldKind::Sema,
             "Type" => FieldKind::Type,
             "Role" => FieldKind::Role,
+            "Lean" => FieldKind::Lean,
             "Proof" => FieldKind::Proof,
             "Falsify" => FieldKind::Falsify,
             "Math" => FieldKind::Math,

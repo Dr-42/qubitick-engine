@@ -20,6 +20,9 @@ pub enum SymbolKind {
     Macro,
     Primitive,
     BracketFn,
+    /// A glyph BOUND to a Lean name that already exists (`Lean: HMul.hMul`): the
+    /// ground declares it, so the engine declares nothing and renders the name.
+    Bound,
 }
 
 impl SymbolKind {
@@ -32,6 +35,7 @@ impl SymbolKind {
             SymbolKind::Macro => "macro",
             SymbolKind::Primitive => "primitive",
             SymbolKind::BracketFn => "bracketfn",
+            SymbolKind::Bound => "bound",
         }
     }
 }
@@ -236,6 +240,13 @@ pub struct DBlockIR {
     pub mod_roles: ModRoleTable,
     pub elab_rule: Option<ElabRule>,
     pub apply_form: Option<ApplyForm>,
+    /// `Lean:` — a Lean name the glyph IS, instead of one the engine defines.
+    ///
+    /// The declaration binds to something the project's ground already carries
+    /// (Mathlib's `HMul.hMul`, Lean's `And`), so emission declares nothing for the
+    /// glyph and every use renders the bound name: what the corpus calls is what the
+    /// ground provides, with the ground's own lemmas available to the proof.
+    pub lean_binding: Option<String>,
     /// `Role:` — the classification the declaration states for its glyph.
     ///
     /// Absent means the declaration did not classify it, and the engine falls back
@@ -253,6 +264,7 @@ impl Default for DBlockIR {
             mod_roles: ModRoleTable::default(),
             elab_rule: None,
             apply_form: None,
+            lean_binding: None,
             role: None,
         }
     }
