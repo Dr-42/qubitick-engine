@@ -272,9 +272,19 @@ An A block emits **nothing at all**: it is vocabulary and composition, and its l
 field of a class in the ground (§4). Its glyphs must still be homed — see the coverage
 invariant in §4.
 
-**Admitted theorems** are the exception the corpus asks for: a `Proof:` that proves nothing
-is emitted as an axiom of its own module plus a warning, so the file still checks while the
-report counts what is assumed.
+**Admitted theorems** are the exception the corpus asks for. A T block with no `Proof:` rows
+(absent, empty, or `\sorry`) is a theorem that is *stated and not proved*; the emitter writes
+`axiom <Name> : <statement>` in that node's own module, so the file still checks — the ground
+stays free of `sorryAx` and of anything that proves anything, the assumption is local and
+named, and `#print axioms` points straight at it. The build attaches one `proof.admitted`
+warning at the node's line and counts it in the report's `admitted`, so a green `verified`
+cannot read as "proved".
+
+A theorem that CITES another **imports** it: the cited theorem's own module has the real
+`def`, and the citation applies it. What the citing module does not do is declare an assumed
+lemma — that was an engine-written `axiom <Name> : <statement>` in every module that cited
+anything, and it is gone (the rewrite still loads the statement, because it has to know what
+the citation says).
 
 ---
 

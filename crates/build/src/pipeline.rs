@@ -277,6 +277,9 @@ pub fn emit_file_cached(
 ) -> Result<String> {
     let mut opts = qubitick_emit::Options::inline();
     opts.home_modules = (*home_modules(conn, cache, &corpus_root(path))?).clone();
+    // A cited theorem is IMPORTED, so the module does not declare an assumed lemma for
+    // it: `emit_file_with` appends the cited modules to `extra_imports` below.
+    opts.declare_cited = false;
     emit_file_with(ctx, conn, path, cache, &opts)
 }
 
@@ -470,12 +473,22 @@ pub fn emit_file_with(
             }
         }
     }
-    // Cite previously-proven theorems: load each `[T.BT.<n>]` statement so the
-    // module can declare it as an assumed lemma and use it as a rewrite.
+    /* CITE A THEOREM BY IMPORTING IT, NOT BY ASSUMING IT.
+     *
+     * A module that cites `[T.BT.1]` used to declare `axiom <Name> : <statement>` — an
+     * engine-written assumption in the citing module, which is the same disease the
+     * `times`/`times_def` pair was. The cited theorem's own module has the real `def`, so
+     * the citing module imports it (the import graph does the ordering) and the citation
+     * applies the proof that exists. The statement is still loaded, because the rewrite
+     * needs to know what the citation says. */
     let mut thm_index: std::collections::HashMap<u32, (String, qubitick_model::Expr)> =
         std::collections::HashMap::new();
+    let mut cited_imports: Vec<String> = Vec::new();
     for div in cited {
         if let Some(t) = crate::axioms::load_theorem(conn, ctx, ctx.scope(), div)? {
+            if !cited_imports.contains(&t.module) {
+                cited_imports.push(t.module.clone());
+            }
             thm_index.insert(div, (t.name.clone(), t.statement));
         }
     }
@@ -527,6 +540,12 @@ pub fn emit_file_with(
         )?;
         return Ok(emitted);
     }
+    let mut opts = opts.clone();
+    for m in &cited_imports {
+        if !opts.extra_imports.contains(m) {
+            opts.extra_imports.push(m.clone());
+        }
+    }
     let emitted = qubitick_emit::emit_lean_text_split_with(
         ctx,
         &context,
@@ -535,7 +554,7 @@ pub fn emit_file_with(
         &def_index,
         &thm_index,
         &mut rules,
-        opts,
+        &opts,
     )?;
     Ok(emitted)
 }

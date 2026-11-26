@@ -179,3 +179,69 @@ fn a_type_with_no_ground_name_and_no_sema_is_refused() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_cited_theorem_is_imported_and_an_admitted_one_is_named() {
+    if !lean_is_here() {
+        eprintln!("skipping: lean not found");
+        return;
+    }
+    /* TWO THEOREMS, ONE CITING THE OTHER, AND ONE ADMITTED.
+     *
+     * A citation used to make the citing module declare `axiom <Name> : <statement>` — an
+     * assumption written by the engine, which is why `#print axioms` on a proved theorem
+     * named its neighbour. The cited module has the real `def`, so the citing module
+     * imports it. And a theorem with no proof rows is admitted: an `axiom` of its OWN
+     * module, counted, and warned about — the one axiom the corpus asks for. */
+    let dir = root("citation");
+    wit(
+        &dir,
+        "Canon.qbit",
+        "P. cite\nId: cite\nKind: project\nModule: Qubitick.HL\nLeanDir: prelude\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_A_00_Carrier.qbit",
+        "D.A.00. Carrier\n\\mathfrak{R}\nType: E\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_A_01_Add.qbit",
+        "D.A.01. Add\na + b\nType: R.plus : \\mathfrak{R} \\to \\mathfrak{R} \\to \\mathfrak{R}\n",
+    );
+    // A primitive the corpus declares and never defines: the ground's, as a field.
+    wit(
+        &dir,
+        "prelude/Qubitick/HL.lean",
+        &format!(
+            "{}\n\ndef E : Type := Prop\n\nclass ISA where\n  plus : E → E → E\n",
+            qubitick_build::ground::HL_LEAN
+        ),
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Axioms/A1_Comm.qbit",
+        "A1. Comm\n\\forall a b : \\mathfrak{R}, a + b = b + a\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Theorems/T_A_01_Refl.qbit",
+        "T.A.01. Refl\n\\forall a : \\mathfrak{R}, a + a = a + a\nProof:\na + a\n  \u{22a2} fun a => Eq.refl (R.plus a a)\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Theorems/T_A_02_Cites.qbit",
+        "T.A.02. Cites\n\\forall a b : \\mathfrak{R}, a + b = a + b\nProof:\na + b\n  = a + b    [T.A.01]\n",
+    );
+    let modules = emitted_all(&dir);
+    let (_, cited) = modules
+        .iter()
+        .find(|(f, _)| f.ends_with("T_A_02_Cites.qbit"))
+        .expect("the citing module");
+    assert!(
+        cited.contains("import Qubitick.Corpus.Era0.Strata0.Theorems.T_A_01_Refl"),
+        "the cited theorem's module is imported: {cited}"
+    );
+    assert!(!cited.contains("axiom"), "and no assumed lemma is written: {cited}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

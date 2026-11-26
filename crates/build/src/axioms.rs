@@ -340,6 +340,12 @@ pub struct CitedTheorem {
     pub division: u32,
     pub name: String,
     pub statement: qubitick_model::Expr,
+    /// The Lean module the theorem's own file becomes.
+    ///
+    /// A module that cites a theorem IMPORTS it — the cited `def` is the real one, so the
+    /// citation applies it rather than assuming it. This is what replaced declaring
+    /// `axiom <Name> : <statement>` in every module that cited it.
+    pub module: String,
 }
 
 /// Reconstruct, from the DB, the theorem `division` (statement + name) so it can
@@ -377,6 +383,8 @@ pub fn load_theorem(
             division,
             name: header.name.clone(),
             statement: (*expr).clone(),
+            module: crate::lake::module_name_of(&header.filename)
+                .unwrap_or_else(|| format!("Qubitick.Corpus.theorem_{division}")),
         }));
     }
     Ok(None)
