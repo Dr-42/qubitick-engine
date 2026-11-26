@@ -462,6 +462,54 @@ fn def_equation_arity(ctx: &Ctx, sema: &Expr) -> Option<usize> {
     None
 }
 
+/// The message a glyph with no home gets. The build reports it per file, so it names the
+/// file it is about; here it names what is missing.
+pub(crate) const TYPE_NO_NAME: &str = "`Type:` requires a ground name (e.g. `Type: ISA.Tick : \\mathsf{Type}`)\n  or a `Sema:` body. A glyph with no home cannot be emitted.";
+
+/// Split a `Type:` value into the ground name and the signature after it.
+///
+/// `Type:` takes the name of what the glyph IS, in the ground, and optionally a signature:
+///
+/// ```text
+/// Type: ISA.Capacity
+/// Type: ISA.Capacity : \mathfrak{V} \to \mathfrak{E}
+/// ```
+///
+/// A value that is not a name (`Type: \mathfrak{V} \to \mathfrak{E}`) returns `None`: it is
+/// a signature with no home, which only a `Sema:` can rescue.
+fn ground_name_of(raw: &str) -> Option<(String, String)> {
+    let (first, rest) = match raw.split_once(char::is_whitespace) {
+        Some((a, b)) => (a, b),
+        None => (raw, ""),
+    };
+    // `Sort u` is the one two-word form, and a universe level is not a name a corpus gets
+    // to spell: the whole value is the name.
+    if first == "Sort" {
+        return Some((raw.to_string(), String::new()));
+    }
+    if !is_lean_name(first) {
+        return None;
+    }
+    let rest = rest.trim_start();
+    if rest.is_empty() {
+        return Some((first.to_string(), String::new()));
+    }
+    // A name is only a name when nothing follows it or a `:` does: a dotted word in the
+    // middle of a signature is not a home.
+    let rest = rest.strip_prefix(':')?.trim();
+    Some((first.to_string(), rest.to_string()))
+}
+
+/// Whether a word can be a Lean name at a use site: dotted identifier segments, an `R.`
+/// prefix for a field of the section instance, and no glyph of the corpus's own.
+fn is_lean_name(w: &str) -> bool {
+    !w.is_empty()
+        && !w.contains('\\')
+        && w.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+        && w.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '\''))
+}
+
 /// Parse a Definition from the declarative surface (SurfaceFormat):
 /// header, a surface glyph line, an optional `Sema:` (Eq-level relation), and
 /// optional `Math:` prose.
@@ -469,7 +517,7 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
     let mut sema: Option<Expr> = None;
     let mut sig: Option<Expr> = None;
     let mut role: Option<qubitick_model::DeclaredRole> = None;
-    let mut lean_binding: Option<String> = None;
+    let mut ground_name: Option<String> = None;
     let mut glyph_tokens: Vec<String> = Vec::new();
     // Pre-scan the bare glyph line (`a \leftrightarrow b`) so we know the
     // defniendum's head token BEFORE parsing the `Sema:`. The head connective is
@@ -495,22 +543,44 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
                 }
             }
             "type" => {
-                // Type: is a pure symbolic LaTeX signature; it declares what
-                // the glyph's value/argument sort is (axiom-level primitives).
-                match parse_expr_ok(ctx, v) {
-                    Some(e) => sig = Some(e),
-                    None => bail!("Type: failed to parse as a signature: {v}"),
+                /* `Type:` GIVES THE GLYPH ITS HOME. Two forms:
+                 *
+                 *   Type: ISA.Capacity                          the ground declares it
+                 *   Type: ISA.Capacity : \mathfrak{V} \to \mathfrak{E}   ... with a signature
+                 *
+                 * A `Type:` whose value is a signature and not a name (`Type:
+                 * \mathfrak{V} \to \mathfrak{E}`) is a glyph with no home: it is
+                 * read as a signature here, and the build refuses it, because the
+                 * engine no longer invents a declaration for a glyph nobody homes. */
+                let raw = v.trim();
+                if raw.is_empty() {
+                    bail!("{}", TYPE_NO_NAME);
+                }
+                match ground_name_of(raw) {
+                    Some((name, rest)) => {
+                        ground_name = Some(name);
+                        if !rest.is_empty() {
+                            match parse_expr_ok(ctx, &rest) {
+                                Some(e) => sig = Some(e),
+                                None => bail!("Type: failed to parse `{rest}` as a signature"),
+                            }
+                        }
+                    }
+                    None => match parse_expr_ok(ctx, raw) {
+                        Some(e) => sig = Some(e),
+                        None => bail!("Type: failed to parse as a signature: {raw}"),
+                    },
                 }
             }
             "lean" => {
-                // `Lean:` binds the glyph to a name the ground already has. The name is
-                // used verbatim (a dotted name is a namespace path, not a typo), and the
-                // engine defines nothing for the glyph.
-                let name = v.trim();
-                if name.is_empty() {
-                    bail!("Lean: needs the Lean name the glyph is");
-                }
-                lean_binding = Some(name.to_string());
+                // `Lean:` was the binding directive before `Type:` took the name as its
+                // argument. It is retired: one construct says where a glyph lives, and a
+                // second spelling of it would be a second answer to the same question.
+                bail!(
+                    "`Lean:` is retired: the ground name is the argument of `Type:` now \
+                     (write `Type: {}`)",
+                    v.trim()
+                );
             }
             "role" => {
                 // Role: classifies the glyph for the parser and the rewriter. The
@@ -541,20 +611,19 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
         .and_then(|e| formation_of_expr(ctx, e, glyph.as_deref()))
         .map(|c| !c.is_empty())
         .unwrap_or(false);
-    let kind = if lean_binding.is_some() {
-        // A BOUND glyph is what the ground says it is: there is nothing for the engine
-        // to define, so a body would contradict the binding.
+    let kind = if ground_name.is_some() {
+        /* A glyph with a GROUND NAME has its home already: the ground declares it, so a
+           `Sema:` would be a second declaration of the same glyph — and a glyph means one
+           thing (the ground declares it, OR the corpus does). */
         if sema.is_some() {
             bail!(
-                "a declaration either binds its glyph to a Lean name (`Lean:`) or defines it (`Sema:`); `{}` does both",
-                base.name
+                "a node cannot carry both `Type:` (a ground name) and `Sema:`;\n  \
+                 a glyph means one thing (the ground declares it, OR the corpus does)."
             );
         }
         SymbolKind::Bound
     } else if is_formation {
         SymbolKind::Formation
-    } else if sig.is_some() && sema.is_none() {
-        SymbolKind::Primitive
     } else {
         SymbolKind::Notation
     };
@@ -583,7 +652,7 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
             None
         },
         role,
-        lean_binding,
+        ground_name,
         ..Default::default()
     };
 
@@ -1566,18 +1635,41 @@ mod tests {
     }
 
     #[test]
-    fn parses_type_only_primitive() {
-        // Axiom-level primitive: glyph line + Type: signature, no Sema:.
-        let src = "D.BT.08. Capacity\n\\mathsf{C}\nType: \\mathfrak{V} \\to \\mathfrak{V} \\to \\mathfrak{E}";
+    fn type_takes_the_ground_name() {
+        // `Type:` names what the glyph IS: the ground declares it, so there is no `Sema:`.
+        let src = "D.BT.08. Capacity\n\\mathsf{C}\nType: ISA.Capacity";
         let nodes = parse_content(&ctx(), src).unwrap();
         assert_eq!(nodes.len(), 1);
         if let Node::Definition(d) = &nodes[0] {
-            assert_eq!(d.d_block.kind, qubitick_model::SymbolKind::Primitive);
-            assert!(d.d_block.sig.is_some());
+            assert_eq!(d.d_block.kind, qubitick_model::SymbolKind::Bound);
+            assert_eq!(d.d_block.ground_name.as_deref(), Some("ISA.Capacity"));
+            assert!(d.d_block.sig.is_none(), "a name with no signature");
             assert!(d.d_block.form.is_none());
         } else {
             panic!("expected definition");
         }
+    }
+
+    #[test]
+    fn type_takes_a_name_and_a_signature() {
+        // The name comes first; the signature is what follows the `:`.
+        let src = "D.BT.08. Capacity\n\\mathsf{C}\nType: ISA.Capacity : \\mathfrak{V} \\to \\mathfrak{V} \\to \\mathfrak{E}";
+        let nodes = parse_content(&ctx(), src).unwrap();
+        let Node::Definition(d) = &nodes[0] else { panic!("expected definition") };
+        assert_eq!(d.d_block.kind, qubitick_model::SymbolKind::Bound);
+        assert_eq!(d.d_block.ground_name.as_deref(), Some("ISA.Capacity"));
+        assert!(d.d_block.sig.is_some(), "the signature survived the name");
+    }
+
+    #[test]
+    fn a_type_that_names_nothing_is_a_signature() {
+        // `Type: <signature>` names no ground symbol: the parser keeps it as a signature,
+        // and it is the build that refuses the glyph for having no home.
+        let src = "D.BT.08. Capacity\n\\mathsf{C}\nType: \\mathfrak{V} \\to \\mathfrak{E}";
+        let nodes = parse_content(&ctx(), src).unwrap();
+        let Node::Definition(d) = &nodes[0] else { panic!("expected definition") };
+        assert_eq!(d.d_block.ground_name, None);
+        assert!(d.d_block.sig.is_some());
     }
 
     #[test]

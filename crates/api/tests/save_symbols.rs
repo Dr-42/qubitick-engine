@@ -39,7 +39,7 @@ fn project(dir: &Path) {
     .unwrap();
     std::fs::write(
         dir.join("Era0/Strata0/Definitions/D_A_01_Twist.qbit"),
-        "D.A.01. Twist\n\\twist a\nType: \\mathfrak{E} \\to \\mathfrak{E}\n",
+        "D.A.01. Twist\n\\twist a\nType: E.plus : \\mathfrak{E} \\to \\mathfrak{E}\n",
     )
     .unwrap();
 }
@@ -65,9 +65,9 @@ async fn saving_a_definition_injects_its_symbol() {
         let conn = state.db.lock().unwrap();
         conn.query_row("SELECT kind FROM symbols WHERE tex = '\\twist'", [], |r| r.get(0)).ok()
     };
-    assert_eq!(kind_of(&state).as_deref(), Some("primitive"), "the boot ingest saw Type: only");
+    assert_eq!(kind_of(&state).as_deref(), Some("bound"), "the boot ingest saw a `Type:` that names a ground symbol");
 
-    /* THE SAVE: the same glyph, now with a Sema: — a definition rather than a primitive */
+    /* THE SAVE: the same glyph, now with a Sema: — the corpus defines it rather than naming the ground */
     let res = handlers_gap::post_file(
         st.clone(),
         Json(FileSaveReq {
@@ -106,7 +106,7 @@ async fn saving_a_file_outside_the_ledger_says_so() {
         st.clone(),
         Json(FileSaveReq {
             path: "Era0/Strata0/Definitions/D_A_02_New.qbit".to_string(),
-            content: "D.A.02. New\n\\fresh a\nType: \\mathfrak{E} \\to \\mathfrak{E}\n".to_string(),
+            content: "D.A.02. New\n\\fresh a\nType: E.plus : \\mathfrak{E} \\to \\mathfrak{E}\n".to_string(),
         }),
     )
     .await;

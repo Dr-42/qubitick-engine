@@ -2837,7 +2837,7 @@ mod tests {
             symbol: AtomicComposite::new(6),
             extra_symbols: vec![],
             d_block: DBlockIR {
-                kind: SymbolKind::Primitive,
+                kind: SymbolKind::Notation,
                 sig: Some(Expr::Apply(
                     AtomicComposite::new(0),
                     vec![carrier(), carrier()],

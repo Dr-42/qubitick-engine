@@ -182,9 +182,9 @@ pub struct FileSymbols {
  * ~10 s in a debug build, and a rebuild is `POST /api/build`'s job anyway). What a save can honestly do
  * is inject what THIS file knows, so the engine can parse the notation immediately:
  *
- *   · the glyph a definition DECLARES, upserted with its kind (`Type:` only -> `primitive`, a `Sema:`
- *     -> `notation`/`formation`, crates/parse/src/node.rs) and its lean name — saving is how an author
- *     edits their own definition, so the row has to follow;
+ *   · the glyph a definition DECLARES, upserted with its kind (a `Type:` that names the ground's symbol
+ *     -> `bound`, a `Sema:` -> `notation`/`formation`, crates/parse/src/node.rs) and its lean name —
+ *     saving is how an author edits their own definition, so the row has to follow;
  *   · every control word the file USES, insert-only: ingest gives a DECLARED glyph precedence over a
  *     use-only claim, and one file cannot see the corpus, but it must not demote a symbol another file
  *     has already declared.
@@ -557,7 +557,7 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             // use renders that name — the ground's, not a sanitised spelling of the
             // corpus's. The symbol hash stays as it is: it is derived from the scope,
             // the tex and the kind, never from the name.
-            if let Some(bound) = &d.d_block.lean_binding {
+            if let Some(bound) = &d.d_block.ground_name {
                 tx.execute(
                     "UPDATE symbols SET lean_name = ?1 WHERE id = ?2",
                     rusqlite::params![bound, sid],
@@ -790,7 +790,7 @@ fn persist_definition_metadata(
             rusqlite::params![fixity, facets as i64, level, sid],
         )?;
     }
-    // THE DECLARED KIND: a glyph can be a formation, a primitive or plain notation,
+    // THE DECLARED KIND: a glyph can be a formation, a glyph the ground declares or plain notation,
     // and `d.d_block.kind` says which ONCE the node parses against a context that
     // knows the corpus's declarations (a formation is only recognisable when the
     // connective separating its constructors is declared). The symbol hash is derived
@@ -1715,8 +1715,8 @@ mod tests {
      *
      * The save path exists because a corpus ingest is the wrong shape for a save (whole ledger, node
      * ids renumbered — ~10 s for 330 files). What it must NOT do is disagree with the ingest about what
-     * a symbol row is: this test saves a definition whose kind CHANGES (`Type:` only -> primitive, then
-     * a `Sema:` -> notation), so an upsert that forgot the kind, or an insert that hit the unique
+     * a symbol row is: this test saves a definition whose kind CHANGES (a `Type:` naming the ground's
+     * symbol -> bound, then a `Sema:` -> notation), so an upsert that forgot the kind, or an insert that hit the unique
      * `(scope, tex)` and bailed, is visible here.
      */
     #[test]
@@ -1726,7 +1726,7 @@ mod tests {
         let user = dir.join("T_A_01_Use.qbit");
         fs::write(
             &def,
-            "D.A.01. Twist\n\\twist a\nType: \\mathfrak{E} \\to \\mathfrak{E}\n",
+            "D.A.01. Twist\n\\twist a\nType: E.plus : \\mathfrak{E} \\to \\mathfrak{E}\n",
         )
         .unwrap();
         fs::write(&user, "T.A.01. Use\n\\forall a : \\mathfrak{E}, \\twist a = a\n").unwrap();
@@ -1741,7 +1741,7 @@ mod tests {
             )
             .unwrap()
         };
-        assert_eq!(kind_of(&conn), "primitive", "Type: only is a primitive");
+        assert_eq!(kind_of(&conn), "bound", "a `Type:` names the ground's symbol");
 
         /* the author saves the same glyph WITH a Sema: — it is a definition now, and the row follows
            (`written` counts changes: the file's own word is its own glyph, so the use-only claim

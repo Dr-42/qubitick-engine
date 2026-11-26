@@ -18,10 +18,9 @@ pub enum SymbolKind {
     Type,
     Notation,
     Macro,
-    Primitive,
     BracketFn,
-    /// A glyph BOUND to a Lean name that already exists (`Lean: HMul.hMul`): the
-    /// ground declares it, so the engine declares nothing and renders the name.
+    /// A glyph whose home is the ground (`Type: ISA.Capacity`): the ground declares
+    /// it, so the engine declares nothing and every use renders that name.
     Bound,
 }
 
@@ -33,7 +32,6 @@ impl SymbolKind {
             SymbolKind::Type => "type",
             SymbolKind::Notation => "notation",
             SymbolKind::Macro => "macro",
-            SymbolKind::Primitive => "primitive",
             SymbolKind::BracketFn => "bracketfn",
             SymbolKind::Bound => "bound",
         }
@@ -240,13 +238,13 @@ pub struct DBlockIR {
     pub mod_roles: ModRoleTable,
     pub elab_rule: Option<ElabRule>,
     pub apply_form: Option<ApplyForm>,
-    /// `Lean:` — a Lean name the glyph IS, instead of one the engine defines.
+    /// The GROUND NAME a `Type:` gives the glyph — `Type: ISA.Capacity`.
     ///
-    /// The declaration binds to something the project's ground already carries
-    /// (Mathlib's `HMul.hMul`, Lean's `And`), so emission declares nothing for the
-    /// glyph and every use renders the bound name: what the corpus calls is what the
-    /// ground provides, with the ground's own lemmas available to the proof.
-    pub lean_binding: Option<String>,
+    /// This is the glyph's home: the ground declares it (Mathlib's `HMul.hMul`,
+    /// Lean's `True`, the project's own `ISA.Capacity`), so the engine declares
+    /// nothing for the glyph and every use renders that name. A glyph with neither a
+    /// ground name nor a `Sema:` has no home, and the build refuses it.
+    pub ground_name: Option<String>,
     /// `Role:` — the classification the declaration states for its glyph.
     ///
     /// Absent means the declaration did not classify it, and the engine falls back
@@ -264,7 +262,7 @@ impl Default for DBlockIR {
             mod_roles: ModRoleTable::default(),
             elab_rule: None,
             apply_form: None,
-            lean_binding: None,
+            ground_name: None,
             role: None,
         }
     }

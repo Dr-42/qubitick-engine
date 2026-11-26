@@ -55,12 +55,12 @@ fn init_ground_corpus(dir: &Path) {
     wit(
         dir,
         "Era0/Strata0/Definitions/D_S_01_Truth.qbit",
-        "D.S.01. Truth\n\\truth\nLean: True\nRole: null\n",
+        "D.S.01. Truth\n\\truth\nType: True\nRole: null\n",
     );
     wit(
         dir,
         "Era0/Strata0/Definitions/D_S_02_Em.qbit",
-        "D.S.02. Em\n\\em\nLean: Classical.em\n",
+        "D.S.02. Em\n\\em\nType: Classical.em\n",
     );
     wit(
         dir,
@@ -76,7 +76,7 @@ fn bare_ground_corpus(dir: &Path) {
     wit(
         dir,
         "Era0/Strata0/Definitions/D_S_01_Truth.qbit",
-        "D.S.01. Truth\n\\truth\nLean: True\nRole: null\n",
+        "D.S.01. Truth\n\\truth\nType: True\nRole: null\n",
     );
     wit(
         dir,

@@ -15,7 +15,7 @@ use rusqlite::Connection;
 
 /// Compatibility stamp for `DDL`. Any other value means the file on disk was
 /// built by a different schema, and since it is a cache, it is rebuilt.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Bring the connection up to the current schema.
 ///
@@ -463,7 +463,7 @@ CREATE TABLE symbols (
   lean_name TEXT NOT NULL,
   trigger TEXT,
   kind TEXT NOT NULL
-    CHECK (kind IN ('formation','ctor','type','notation','macro','primitive','bracketfn','bound')),
+    CHECK (kind IN ('formation','ctor','type','notation','macro','bracketfn','bound')),
   role TEXT CHECK (role IN ('primary','ctor','notation-atom','extra','prefix','infix','collector','connective') OR role IS NULL),
   decl_order INTEGER,
   precedence INTEGER,

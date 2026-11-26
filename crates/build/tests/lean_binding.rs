@@ -1,6 +1,6 @@
 //! A DECLARATION MAY BIND ITS GLYPH TO A LEAN NAME THAT ALREADY EXISTS.
 //!
-//! `Lean: HMul.hMul` says the glyph IS that name: the engine declares nothing for it, so
+//! `Type: HMul.hMul` says the glyph IS that name: the engine declares nothing for it, so
 //! what a proof calls is what the project's ground provides — Mathlib's own notation and
 //! its own lemmas — instead of an `axiom` of ours sitting beside it.
 //!
@@ -29,7 +29,7 @@ fn corpus(dir: &Path) {
     wit(
         dir,
         "Era0/Strata0/Definitions/D_S_01_Truth.qbit",
-        "D.S.01. Truth\n\\truth\nLean: True\nRole: null\n",
+        "D.S.01. Truth\n\\truth\nType: True\nRole: null\n",
     );
     wit(
         dir,
@@ -95,21 +95,21 @@ fn the_bound_corpus_verifies_against_the_embedded_ground() {
 }
 
 #[test]
-fn binding_and_defining_at_once_is_refused() {
-    // A binding says the ground declares the glyph; a `Sema:` says the corpus does. One
-    // node cannot say both, and the refusal names the node.
+fn a_ground_name_and_a_sema_at_once_is_refused() {
+    // A named `Type:` says the ground declares the glyph; a `Sema:` says the corpus does.
+    // One node cannot say both, and the refusal says so.
     let dir = root("both");
     wit(&dir, "Canon.qbit", "P. a confused corpus\nId: confused\n");
     wit(
         &dir,
         "Era0/Strata0/Definitions/D_S_01_Both.qbit",
-        "D.S.01. Both\n\\thing\nLean: True\nSema:\n\\thing = \\thing\n",
+        "D.S.01. Both\n\\thing\nType: True\nSema:\n\\thing = \\thing\n",
     );
     let mut db = qubitick_db::open_in_memory().unwrap();
     let err = qubitick_build::ingest_corpus(&mut db, &dir).expect_err("both must be refused");
     let said = format!("{err:#}");
     assert!(
-        said.contains("binds") && said.contains("defines"),
+        said.contains("both") && said.contains("means one thing"),
         "the refusal says which two things the node did: {said}"
     );
     let _ = std::fs::remove_dir_all(&dir);
