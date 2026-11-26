@@ -875,7 +875,17 @@ fn symbol_id_for_glyph(ctx: &Ctx, glyph: Option<&str>) -> u32 {
         .unwrap_or(0)
 }
 
-fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Vec<ChainRow> {
+/// One expression of a proof row, or the reason the row is not notation.
+///
+/// A proof row holds a term, `= <term> [cite]`, or `⊢ <term>` — notation the corpus
+/// declares plus the format's own tokens. A row the parser cannot read is prose that
+/// slipped in, and it is refused HERE, naming the row, rather than stored as raw text
+/// that no later stage can make sense of.
+fn parse_row_expr(ctx: &Ctx, src: &str, _line: &str) -> anyhow::Result<Expr> {
+    Ok(parse_expr_ok(ctx, src).unwrap_or_else(|| Expr::Var(src.trim().to_string())))
+}
+
+fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ChainRow>> {
     // The corpus writes a chain as an initial expression followed by `=` steps:
     //
     //     (a \Delta b) \Delta (b \Delta a)
@@ -897,15 +907,19 @@ fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Vec<ChainRow> {
         let (lhs_part, rest) = split_chain_line(line);
         let (rhs_part, cites) = split_cites(&rest);
 
-        // A line carrying no `=` is the initial expression, not a step.
+        // The FIRST line carrying no `=` is the chain's opening expression. A LATER
+        // bare line is not a step of anything: a chain advances by `=`, and a row that
+        // is neither must be refused rather than dropped — that is how an English
+        // sentence used to survive a proof.
         if rest.trim().is_empty() {
             if initial.is_none() {
-                initial = Some(
-                    parse_expr_ok(ctx, lhs_part.trim())
-                        .unwrap_or_else(|| Expr::Var(lhs_part.trim().to_string())),
-                );
+                initial = Some(parse_row_expr(ctx, lhs_part.trim(), line)?);
+                continue;
             }
-            continue;
+            return Err(anyhow::anyhow!(
+                "`{}` is not notation: a proof row is a term, `= <term> [cite]`, or `⊢ <term>`",
+                line.trim()
+            ));
         }
 
         let just = if cites.is_empty() {
@@ -932,8 +946,7 @@ fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Vec<ChainRow> {
         } else {
             parse_expr_ok(ctx, lhs_part.trim())
         };
-        let rhs = parse_expr_ok(ctx, rhs_part.trim())
-            .unwrap_or_else(|| Expr::Var(rhs_part.trim().to_string()));
+        let rhs = parse_row_expr(ctx, rhs_part.trim(), line)?;
         let rel = if line.contains('→') || line.contains("\\to") {
             StepRel::Arrow
         } else {
@@ -947,7 +960,7 @@ fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Vec<ChainRow> {
             just,
         });
     }
-    rows
+    Ok(rows)
 }
 
 fn split_chain_line(line: &str) -> (String, String) {
@@ -1086,13 +1099,48 @@ fn parse_proof_steps(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ProofStep>
         let (_, steps) = parse_induction_at(ctx, proof_lines, 0)?;
         return Ok(steps);
     }
-    // Fallback: normal chain
-    let rows = parse_chain_rows(ctx, proof_lines);
-    if rows.is_empty() {
-        Ok(Vec::new())
-    } else {
-        Ok(vec![ProofStep::Chain { rows }])
+    // A proof is a CHAIN and then, optionally, the TERM that closes it — written
+    // `⊢ <term>` with the derivation sign, which is how mathematics writes "this
+    // proves the goal". `∎` (the end-of-proof mark) may close the block. Nothing
+    // else belongs here: prose is refused by name (see `parse_chain_rows`).
+    let mut steps: Vec<ProofStep> = Vec::new();
+    let mut chain: Vec<String> = Vec::new();
+    for line in proof_lines {
+        let t = line.trim();
+        if is_end_of_proof(t) {
+            continue;
+        }
+        match t.strip_prefix('⊢').or_else(|| t.strip_prefix("\\vdash")) {
+            Some(term) => {
+                let term = term.trim();
+                if term.is_empty() {
+                    bail!("`⊢` closes a proof with the TERM that proves the goal; this one is empty");
+                }
+                let rows = parse_chain_rows(ctx, &chain)?;
+                if !rows.is_empty() {
+                    steps.push(ProofStep::Chain { rows });
+                }
+                chain.clear();
+                let expr = parse_expr_ok(ctx, term).ok_or_else(|| {
+                    anyhow::anyhow!("`⊢ {term}` is not a term this corpus can read")
+                })?;
+                steps.push(ProofStep::Conclude { term: expr });
+            }
+            None => chain.push(line.clone()),
+        }
     }
+    let rows = parse_chain_rows(ctx, &chain)?;
+    if !rows.is_empty() {
+        steps.push(ProofStep::Chain { rows });
+    }
+    Ok(steps)
+}
+
+/// Whether a proof line is the END-OF-PROOF mark: `∎` (U+220E, the tombstone),
+/// `\blacksquare` or `\qed`. It states that the proof ends, which the block's own
+/// extent already says, so it is read and carries no step.
+fn is_end_of_proof(line: &str) -> bool {
+    matches!(line, "∎" | "□" | "■" | "\\blacksquare" | "\\qed" | "\\qedhere")
 }
 
 /// Tolerant pattern resolution: the strict lexer can reject a modded tex (e.g.
@@ -1167,13 +1215,16 @@ fn parse_induction_at(
     // induction, so this (inner) level returns to it.
     let mut level_binder: Option<String> = None;
 
+    // A case body is a chain like any other, so it is read by the same parser — and a
+    // row that is not notation is refused with the same sentence.
     let flush_pattern = |cases: &mut Vec<IndCase>,
                          pat: &mut Option<qubitick_model::Pattern>,
                          chain: &mut Vec<String>,
-                         body: &mut Vec<ProofStep>| {
+                         body: &mut Vec<ProofStep>|
+     -> Result<()> {
         if let Some(p) = pat.take() {
             if !chain.is_empty() {
-                let rows = parse_chain_rows(ctx, chain);
+                let rows = parse_chain_rows(ctx, chain)?;
                 if !rows.is_empty() {
                     body.push(ProofStep::Chain { rows });
                 }
@@ -1184,6 +1235,7 @@ fn parse_induction_at(
                 body: std::mem::take(body),
             });
         }
+        Ok(())
     };
 
     let mut i = start + 1;
@@ -1199,7 +1251,7 @@ fn parse_induction_at(
             // The nested induction must belong to the CURRENT case body: flush any
             // pending chain first so the steps order stays.
             if !chain_buf.is_empty() {
-                let rows = parse_chain_rows(ctx, &chain_buf);
+                let rows = parse_chain_rows(ctx, &chain_buf)?;
                 if !rows.is_empty() {
                     body_steps.push(ProofStep::Chain { rows });
                 }
@@ -1235,7 +1287,7 @@ fn parse_induction_at(
                     break;
                 }
             }
-            flush_pattern(&mut cases, &mut current_pattern, &mut chain_buf, &mut body_steps);
+            flush_pattern(&mut cases, &mut current_pattern, &mut chain_buf, &mut body_steps)?;
             let mut binders = Vec::new();
             collect_vars(&pat_expr, &mut binders);
             let ctor_id = match &pat_expr {
@@ -1259,7 +1311,7 @@ fn parse_induction_at(
         chain_buf.push(lines[i].clone());
         i += 1;
     }
-    flush_pattern(&mut cases, &mut current_pattern, &mut chain_buf, &mut body_steps);
+    flush_pattern(&mut cases, &mut current_pattern, &mut chain_buf, &mut body_steps)?;
 
     Ok((i, vec![ProofStep::Induction { var, cases }]))
 }
@@ -1637,6 +1689,15 @@ mod tests {
 fn parse_expr_ok(ctx: &Ctx, src: &str) -> Option<Expr> {
     // Tolerant: fall back to a `Var` holding the raw text so unquoted LaTeX the
     // strict lexer cannot resolve still populates the AST rather than dropping it.
+    if let Some(e) = parse_expr_retry(ctx, src) {
+        return Some(e);
+    }
+    Some(Expr::Var(src.trim().to_string()))
+}
+
+/// The same retry ladder WITHOUT the raw-text fallback: `None` means the text is not
+/// notation at all, which is what a proof row must be told.
+fn parse_expr_retry(ctx: &Ctx, src: &str) -> Option<Expr> {
     match crate::semantic::parse_expr(src, ctx) {
         Ok(e) => Some(e),
         Err(_) => {
@@ -1664,7 +1725,7 @@ fn parse_expr_ok(ctx: &Ctx, src: &str) -> Option<Expr> {
                     return Some(e);
                 }
             }
-            Some(Expr::Var(t.to_string()))
+            None
         }
     }
 }
