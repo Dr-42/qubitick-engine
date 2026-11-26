@@ -126,3 +126,43 @@ fn the_shipped_ship_homes_every_glyph_its_a_blocks_write() {
     assert!(said.is_empty(), "the ship covers its own grammar: {said:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+#[test]
+fn a_line_that_resolves_to_nothing_names_the_glyphs_it_writes() {
+    /* THE FALSE GREEN, CLOSED.
+     *
+     * A corpus that names a glyph NOTHING declares still opens: ingestion writes a use-only
+     * row, the parser keeps the statement it cannot read as an opaque `Var(<whole line>)`,
+     * and an A block emits nothing anyway — so the build came out `verified: 1, errors: 0`
+     * and said nothing at all about a statement that means nothing. The line's control words
+     * are read off its text now, and each one nothing declares is named. */
+    let dir = std::env::temp_dir().join(format!("qb-cov-unresolved-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Era0/Strata0/Axioms")).unwrap();
+    std::fs::write(dir.join("Canon.qbit"), "P. unresolved\nId: unresolved\n").unwrap();
+    std::fs::write(
+        dir.join("Era0/Strata0/Axioms/A1_Base.qbit"),
+        "A1. Base\n\\forall a b : \\mathfrak{E}, a \\Delta b = b \\Delta a\n",
+    )
+    .unwrap();
+
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let said: Vec<String> = qubitick_build::coverage::gaps(&db, &qubitick_build::walk_qbit(&dir))
+        .unwrap()
+        .into_iter()
+        .map(|g| g.sentence())
+        .collect();
+    assert!(
+        said.iter().any(|m| m.contains("`\\Delta`")),
+        "the operator the corpus never declares is named: {said:?}"
+    );
+    assert!(
+        said.iter().any(|m| m.contains("`\\mathfrak{E}`")),
+        "and so is the carrier: {said:?}"
+    );
+    assert!(
+        said.iter().all(|m| m.contains("never declares it")),
+        "each names the glyph and says the line resolves to nothing: {said:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -23,6 +23,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use qubitick_model::{Expr, Node};
 
+/// The separator between a glyph's symbol id and its text in an unresolved line's carry:
+/// `12<sep>\Delta`, or `-1<sep>\Delta` for a glyph with no row at all.
+const GLYPH_SEP: char = '\u{1}';
+
 /// Which of the two corpus holes a [`Gap`] names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GapKind {
@@ -30,6 +34,9 @@ pub enum GapKind {
     Unhomed,
     /// A `Type:` gives a glyph a signature and no ground name, and no `Sema:`.
     NoGroundName,
+    /// A statement that did not resolve at all: the parser kept the line as opaque text
+    /// because a glyph in it has no declaration.
+    Unresolved,
 }
 
 /// One glyph an A block writes that no D node in its stratum homes.
@@ -47,6 +54,16 @@ pub struct Gap {
 impl Gap {
     /// The sentence the build reports.
     pub fn sentence(&self) -> String {
+        if self.kind == GapKind::Unresolved {
+            return format!(
+                "`{}` is used in {}\n  but this corpus never declares it, so the line it is \
+                 in resolves to nothing and nothing can be emitted for it.\n  \
+                 Declare it with a D node whose glyph line is that glyph, and a `Type:` or \
+                 `Sema:`.",
+                self.glyph,
+                self.file.display()
+            );
+        }
         if self.kind == GapKind::NoGroundName {
             return format!(
                 "`Type:` requires a ground name (e.g. `Type: ISA.Tick : \\mathsf{{Type}}`)\n  \
@@ -81,6 +98,8 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
     // Definitions that give a glyph a signature and no home: `Type: <sig>` with no name
     // and no `Sema:`. A constructor is exempt — its home is the formation that declares it.
     let mut undared: Vec<(String, PathBuf, u32)> = Vec::new();
+    // Statements that resolved to nothing, paired with the sector and file they are in.
+    let mut unresolved: Vec<(String, PathBuf, Vec<String>)> = Vec::new();
     let mut ctors: BTreeSet<u32> = BTreeSet::new();
     for path in files {
         let sector = crate::pipeline::scope_of_path(path);
@@ -97,7 +116,29 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
             continue;
         };
         match nodes.first() {
+            Some(Node::Axiom(a)) => {
+                let mut declared: BTreeSet<u32> = BTreeSet::new();
+                for stmt in &a.statements {
+                    unresolved_stmt(ctx, &sector, path, stmt, &mut unresolved);
+                    glyphs(stmt, &mut declared);
+                }
+                writes.push((sector.clone(), path.clone(), declared));
+            }
+            // A THEOREM'S STATEMENT is read exactly as an A block's: a glyph nothing
+            // declares leaves the line as opaque text, and a green build would say
+            // nothing about it.
+            Some(Node::Theorem(t)) => {
+                unresolved_stmt(ctx, &sector, path, &t.statement, &mut unresolved);
+            }
             Some(Node::Definition(d)) => {
+                if let Some(qubitick_model::FormBody::MacroExpr(e)) = &d.d_block.form {
+                    unresolved_stmt(ctx, &sector, path, e, &mut unresolved);
+                }
+                for extra in &d.extra_symbols {
+                    if let Some(qubitick_model::FormBody::MacroExpr(e)) = &extra.d_block.form {
+                        unresolved_stmt(ctx, &sector, path, e, &mut unresolved);
+                    }
+                }
                 let set = homed.entry(sector.clone()).or_default();
                 set.insert(d.symbol.primary);
                 // A node may declare MORE than its glyph line: a formation's
@@ -117,13 +158,6 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
                 {
                     undared.push((sector.clone(), relative_to_corpus(path), d.symbol.primary));
                 }
-            }
-            Some(Node::Axiom(a)) => {
-                let mut declared: BTreeSet<u32> = BTreeSet::new();
-                for stmt in &a.statements {
-                    glyphs(stmt, &mut declared);
-                }
-                writes.push((sector.clone(), path.clone(), declared));
             }
             _ => {}
         }
@@ -152,6 +186,25 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
                 glyph: row.tex.clone(),
                 sector: sector.clone(),
                 kind: GapKind::Unhomed,
+            };
+            if !out.contains(&gap) {
+                out.push(gap);
+            }
+        }
+    }
+    for (sector, file, words) in unresolved {
+        let declared = homed.get(&sector);
+        for word in words {
+            let (id, tex) = word.split_once(GLYPH_SEP).unwrap_or(("-1", word.as_str()));
+            let id: i64 = id.parse().unwrap_or(-1);
+            if id >= 0 && declared.is_some_and(|d| d.contains(&(id as u32))) {
+                continue;
+            }
+            let gap = Gap {
+                file: file.clone(),
+                glyph: tex.to_string(),
+                sector: sector.clone(),
+                kind: GapKind::Unresolved,
             };
             if !out.contains(&gap) {
                 out.push(gap);
@@ -194,6 +247,122 @@ fn is_format_token(tex: &str) -> bool {
 /// Binder TYPES count: `\forall a b : \mathfrak{R}, ...` writes `\mathfrak{R}` even though
 /// it is not an operand — a carrier the corpus never homes is exactly the glyph this pass
 /// exists to name.
+/// The glyphs a statement the parser could NOT resolve writes, left to be judged with every
+/// other file's — a D node may be declared in a file the walk has not reached yet, and both
+/// paths through this pass must answer "declares it" the same way.
+///
+/// The line is read off its TEXT, because that is all there is: a statement that resolves to
+/// nothing is kept as an opaque `Var(<whole line>)`. And the glyphs are carried by name as
+/// well as by id, because the most undeclared glyph there is is the one with no row at all —
+/// the parse gave up before ingestion ever recorded it.
+/// Every symbol an expression writes, in the corpus's own vocabulary.
+///
+/// Binder TYPES count: `\forall a b : \mathfrak{R}, ...` writes `\mathfrak{R}` even though
+/// it is not an operand — a carrier the corpus never homes is exactly the glyph this pass
+/// exists to name.
+/// The glyphs a statement the parser could NOT resolve writes, left to be judged with every
+/// other file's — a D node may be declared in a file the walk has not reached yet, and both
+/// paths through this pass must answer "declares it" the same way.
+///
+/// The line is read off its TEXT, because that is all there is: a statement that resolves to
+/// nothing is kept as an opaque `Var(<whole line>)`. And a glyph is carried by name as well
+/// as by id, because the most undeclared glyph there is is the one with no row at all — the
+/// parse gave up before ingestion ever recorded it.
+///
+/// Every symbol an expression writes, in the corpus's own vocabulary.
+///
+/// Binder TYPES count: `\forall a b : \mathfrak{R}, ...` writes `\mathfrak{R}` even though
+/// it is not an operand — a carrier the corpus never homes is exactly the glyph this pass
+/// exists to name.
+/// Every symbol an expression writes, in the corpus's own vocabulary.
+///
+/// Binder TYPES count: `\forall a b : \mathfrak{R}, ...` writes `\mathfrak{R}` even though
+/// it is not an operand — a carrier the corpus never homes is exactly the glyph this pass
+/// exists to name.
+/// A statement the parser could not resolve, reported with the glyph that stopped it.
+///
+/// Every symbol an expression writes, in the corpus's own vocabulary.
+///
+/// Binder TYPES count: `\forall a b : \mathfrak{R}, ...` writes `\mathfrak{R}` even though
+/// it is not an operand — a carrier the corpus never homes is exactly the glyph this pass
+/// exists to name.
+fn unresolved_stmt(
+    ctx: &qubitick_ctx::Ctx,
+    sector: &str,
+    path: &Path,
+    e: &Expr,
+    out: &mut Vec<(String, PathBuf, Vec<String>)>,
+) {
+    let Expr::Var(raw) = e else { return };
+    // A real metavariable is one identifier. A whole line of source is not a variable.
+    if !raw.contains(char::is_whitespace) && !raw.contains('\\') {
+        return;
+    }
+    let mut words: Vec<String> = Vec::new();
+    for tex in control_words(raw) {
+        if is_format_token(&tex) {
+            continue;
+        }
+        let id = ctx
+            .by_tex(&tex)
+            .and_then(|rows| rows.first())
+            .map(|r| r.id)
+            .unwrap_or(-1);
+        words.push(format!("{id}{GLYPH_SEP}{tex}"));
+    }
+    if !words.is_empty() {
+        let entry = (sector.to_string(), relative_to_corpus(path), words);
+        if !out.contains(&entry) {
+            out.push(entry);
+        }
+    }
+}
+
+/// The LaTeX control words a line writes, with a font command's braced group glued on
+/// (`\mathfrak{E}` is one glyph, not `\mathfrak` plus `{E}`).
+fn control_words(raw: &str) -> Vec<String> {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            i += 1;
+        }
+        if i == start + 1 {
+            continue; // a lone backslash is not a control word
+        }
+        if i < bytes.len() && bytes[i] == b'{' {
+            let mut depth = 0usize;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+        let word = raw[start..i].to_string();
+        if !out.contains(&word) {
+            out.push(word);
+        }
+    }
+    out
+}
+
+/// Every symbol an expression writes, in the corpus's own vocabulary.
 fn glyphs(e: &Expr, out: &mut BTreeSet<u32>) {
     match e {
         Expr::Sym(a) => {

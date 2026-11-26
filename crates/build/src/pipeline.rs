@@ -795,9 +795,16 @@ pub fn run_pipeline(
     // corpus's own). Checking here — before emission — puts the error on the corpus side,
     // where the fix is, instead of letting a missing home reach the emitter and become an
     // `axiom` nobody chose.
-    let mut gaps: std::collections::HashMap<PathBuf, String> = std::collections::HashMap::new();
+    /* EVERY HOLE A FILE HAS, not the last one the pass found: a HashMap keyed by file kept
+       one sentence per file, so an A block with three undeclared glyphs named one of them. */
+    let mut uncovered: std::collections::HashMap<PathBuf, Vec<String>> =
+        std::collections::HashMap::new();
     for gap in crate::coverage::gaps(conn, files)? {
-        gaps.insert(gap.file.clone(), gap.sentence());
+        let said = gap.sentence();
+        let slot = uncovered.entry(gap.file.clone()).or_default();
+        if !slot.contains(&said) {
+            slot.push(said);
+        }
     }
     let mut cache = EmitCache::default();
     let mut scope_ctxs: std::collections::HashMap<String, qubitick_ctx::Ctx> =
@@ -805,8 +812,8 @@ pub fn run_pipeline(
     let prepared: Vec<Prepared> = files
         .iter()
         .map(|f| {
-            if let Some(sentence) = gaps.get(&crate::coverage::relative_to_corpus(f)) {
-                return Prepared::Uncovered(sentence.clone());
+            if let Some(sentences) = uncovered.get(&crate::coverage::relative_to_corpus(f)) {
+                return Prepared::Uncovered(sentences.join("\n\n"));
             }
             match scope_ctx(conn, f, &mut scope_ctxs) {
                 Ok(ctx) => match emit_file_cached(ctx, conn, f, &mut cache) {
