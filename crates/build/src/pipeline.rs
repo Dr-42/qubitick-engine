@@ -494,7 +494,7 @@ fn cached_sources(
 }
 
 /// The corpus root for a `.qbit` file: the ancestor holding `prelude/`.
-fn corpus_root(path: &Path) -> PathBuf {
+pub fn corpus_root(path: &Path) -> PathBuf {
     // Walk up until we find the directory that CONTAINS `prelude/` (the repo root).
     // The corpus files live under `project/Era0/...`, so their parents never sit
     // next to `prelude/`; the walk must reach the root that does.
@@ -671,18 +671,37 @@ pub fn run_pipeline(
     enum Prepared {
         Emitted(String),
         Failed(String),
+        /// An A block writes a glyph no D node in its stratum homes: the corpus has a
+        /// hole, and nothing is emitted for the file until it is filled.
+        Uncovered(String),
+    }
+    // PHASE 0 — COVERAGE, before a line of Lean exists.
+    //
+    // An A block is grammar, not claims; every terminal it writes must be homed by a D
+    // node in the same stratum (`Type:` for the ground's symbol, `Sema:` for the
+    // corpus's own). Checking here — before emission — puts the error on the corpus side,
+    // where the fix is, instead of letting a missing home reach the emitter and become an
+    // `axiom` nobody chose.
+    let mut gaps: std::collections::HashMap<PathBuf, String> = std::collections::HashMap::new();
+    for gap in crate::coverage::gaps(conn, files)? {
+        gaps.insert(gap.file.clone(), gap.sentence());
     }
     let mut cache = EmitCache::default();
     let mut scope_ctxs: std::collections::HashMap<String, qubitick_ctx::Ctx> =
         std::collections::HashMap::new();
     let prepared: Vec<Prepared> = files
         .iter()
-        .map(|f| match scope_ctx(conn, f, &mut scope_ctxs) {
-            Ok(ctx) => match emit_file_cached(ctx, conn, f, &mut cache) {
-                Ok(emitted) => Prepared::Emitted(emitted),
+        .map(|f| {
+            if let Some(sentence) = gaps.get(&crate::coverage::relative_to_corpus(f)) {
+                return Prepared::Uncovered(sentence.clone());
+            }
+            match scope_ctx(conn, f, &mut scope_ctxs) {
+                Ok(ctx) => match emit_file_cached(ctx, conn, f, &mut cache) {
+                    Ok(emitted) => Prepared::Emitted(emitted),
+                    Err(e) => Prepared::Failed(e.to_string()),
+                },
                 Err(e) => Prepared::Failed(e.to_string()),
-            },
-            Err(e) => Prepared::Failed(e.to_string()),
+            }
         })
         .collect();
 
@@ -738,6 +757,20 @@ pub fn run_pipeline(
     for (i, f) in files.iter().enumerate() {
         let path = f.display().to_string();
         match &prepared[i] {
+            Prepared::Uncovered(sentence) => {
+                let mut diagnostics = file_diagnostics_cached(conn, f, &mut scope_ctxs, &headers)?;
+                diagnostics.insert(
+                    0,
+                    Diagnostic::error(Phase::Scope, "coverage.unhomed", sentence.clone())
+                        .in_file(path.clone()),
+                );
+                results.push(BuildFileResult {
+                    path: path.clone(),
+                    ok: false,
+                    verified: false,
+                    diagnostics,
+                })
+            }
             Prepared::Failed(e) => {
                 // A file that could not be EMITTED still gets its own diagnostics: the
                 // reason the emit failed is often a row or a citation the rest of the
@@ -876,6 +909,10 @@ mod tests {
             "D.X.03. Empty\n\\varnothing\nRole: null\n",
         )
         .unwrap();
+        // The carrier and the unit: `A1. Base` writes both, and every glyph an A block
+        // writes needs a D node in its stratum (crates/build/src/coverage.rs).
+        std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\n").unwrap();
+        std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\n").unwrap();
     }
 
     #[test]
@@ -915,8 +952,8 @@ mod tests {
         let results = run_pipeline(&conn, &files, Some(&ground)).unwrap();
         assert_eq!(
             results.len(),
-            6,
-            "axiom + definition + theorem, plus the three declarations they use"
+            8,
+            "axiom + definition + theorem, plus the five declarations they use"
         );
         for r in &results {
             assert!(
@@ -983,7 +1020,7 @@ mod tests {
         let ground = crate::ground::for_check(&root).expect("the project's ground assembles");
         let results =
             run_pipeline(&conn, &crate::walk_qbit(&root), Some(&ground)).unwrap();
-        assert_eq!(results.len(), 6, "three nodes plus the three declarations they use");
+        assert_eq!(results.len(), 8, "three nodes plus the five declarations they use");
         for r in &results {
             assert!(
                 r.verified,
@@ -1078,7 +1115,7 @@ mod tests {
         crate::ingest_corpus(&mut conn, &root).unwrap();
         let ground = crate::ground::for_check(&root).unwrap();
         let results = run_pipeline(&conn, &crate::walk_qbit(&root), Some(&ground)).unwrap();
-        assert_eq!(results.len(), 6, "three nodes plus the three declarations they use");
+        assert_eq!(results.len(), 8, "three nodes plus the five declarations they use");
         for r in &results {
             assert!(
                 r.verified,

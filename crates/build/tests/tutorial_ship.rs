@@ -2,7 +2,7 @@
 //! school notation (+ and ×) — this is the fixture that must never rot.
 //!
 //! This test asserts that the engine's tutorial ship (corpus-templates/algebra/)
-//! builds 4 nodes, verifies 4, with 0 errors and 0 warnings. It uses the actual
+//! builds 5 nodes, verifies 5, with 0 errors and 0 warnings. It uses the actual
 //! `+` and `×` (U+00D7) characters as written in the tutorial, not control words
 //! like `\oplus`/`\otimes`. If this test fails, the tutorial is broken.
 
@@ -27,11 +27,11 @@ fn tutorial_ship_builds_with_school_notation() {
     let report = qubitick_build::ingest_corpus(&mut db, &corpus_root)
         .expect("ingest algebra corpus");
 
-    assert_eq!(report.nodes, 4, "algebra corpus has 4 nodes");
+    assert_eq!(report.nodes, 5, "algebra corpus has 5 nodes");
     assert!(report.is_clean(), "corpus has no ambiguous references: {:?}", report.duplicates);
 
     let files: Vec<PathBuf> = qubitick_build::walk_qbit(&corpus_root);
-    assert_eq!(files.len(), 4, "algebra corpus has 4 .qbit files");
+    assert_eq!(files.len(), 5, "algebra corpus has 5 .qbit files");
 
     let ground = qubitick_build::ground::for_check(&corpus_root).unwrap();
     let results = qubitick_build::run_pipeline(&db, &files, Some(&ground))
@@ -42,21 +42,26 @@ fn tutorial_ship_builds_with_school_notation() {
     let error_count: usize = results.iter().flat_map(|r| &r.diagnostics).filter(|d| d.is_error()).count();
     let warning_count = qubitick_build::warning_count(&results);
 
-    // The tutorial ship: 4 nodes, all built, all verified, no errors, no warnings.
-    assert_eq!(built, 4, "built: expected 4, got {built}");
-    assert_eq!(verified, 4, "verified: expected 4, got {verified}");
+    // The tutorial ship: 5 nodes, all built, all verified, no errors, no warnings.
+    assert_eq!(built, 5, "built: expected 5, got {built}");
+    assert_eq!(verified, 5, "verified: expected 5, got {verified}");
     assert_eq!(error_count, 0, "error_count: expected 0, got {error_count}; failures: {:?}", results.iter().filter(|r| !r.verified).map(|r| &r.diagnostics).collect::<Vec<_>>());
     assert_eq!(warning_count, 0, "warning_count: expected 0, got {warning_count}");
 
-    // Sanity: the files verified are exactly the four we expect.
+    // Sanity: the files verified are exactly the five we expect.
     let verified_files: Vec<&str> = results
         .iter()
         .filter(|r| r.verified)
         .map(|r| r.path.as_str())
         .collect();
-    assert_eq!(verified_files.len(), 4);
+    assert_eq!(verified_files.len(), 5);
     for f in &verified_files {
-        assert!(f.contains("A1_Comm") || f.contains("D_A_01_Add") || f.contains("D_A_02_Mul") || f.contains("T_A_01_MulTwo"),
+        assert!(
+            f.contains("A1_Comm")
+                || f.contains("D_A_00_Carrier")
+                || f.contains("D_A_01_Add")
+                || f.contains("D_A_02_Mul")
+                || f.contains("T_A_01_MulTwo"),
             "unexpected verified file: {f}");
     }
 }

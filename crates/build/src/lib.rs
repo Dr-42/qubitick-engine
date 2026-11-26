@@ -8,6 +8,7 @@ pub mod canon;
 pub mod cycles;
 pub mod cite_rules;
 pub mod cite_target;
+pub mod coverage;
 pub mod row_check;
 pub mod cites;
 pub mod file;

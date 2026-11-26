@@ -72,6 +72,19 @@ fn corpus(dir: &Path, declared: bool) {
         "Era0/Strata0/Definitions/D_03_Empty.qbit",
         "D.X.03. Empty\n\\varnothing\nRole: null\n",
     );
+    // The carrier: the axiom writes `\mathfrak{E}` as a binder sort, so the stratum must
+    // home it — every glyph an A block writes needs a D node (crates/build/src/coverage.rs).
+    wit(
+        dir,
+        "Era0/Strata0/Definitions/D_04_Carrier.qbit",
+        "D.X.04. Carrier\n\\mathfrak{E}\n",
+    );
+    // ...and the unit, which the axiom and the wedge both write.
+    wit(
+        dir,
+        "Era0/Strata0/Definitions/D_05_Unit.qbit",
+        "D.X.05. Unit\n\\mathbb{1}\n",
+    );
 }
 
 fn lean_is_here() -> bool {
@@ -130,11 +143,11 @@ fn the_same_corpus_verifies_once_the_glyphs_are_declared() {
         .filter(|d| d.is_error())
         .map(|d| format!("{}: {}", d.code, d.message))
         .collect();
-    assert_eq!(results.len(), 6, "three nodes and the three declarations they use");
+    assert_eq!(results.len(), 8, "three nodes and the five declarations they use");
     assert!(errors.is_empty(), "the declared corpus must build clean: {errors:?}");
     assert!(
         results.iter().all(|r| r.verified),
-        "all six verify: {:?}",
+        "all eight verify: {:?}",
         results.iter().filter(|r| !r.verified).map(|r| r.path.clone()).collect::<Vec<_>>()
     );
     let _ = std::fs::remove_dir_all(&dir);

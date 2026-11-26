@@ -52,6 +52,10 @@ fn declare_ops(dir: &Path) {
     std::fs::write(defs.join("D_00_Delta.qbit"), "D.X.00. Delta\na \\Delta b\nRole: nullity\n").unwrap();
     std::fs::write(defs.join("D_02_Cap.qbit"), "D.X.02. Cap\na \\cap b\n").unwrap();
     std::fs::write(defs.join("D_03_Empty.qbit"), "D.X.03. Empty\n\\varnothing\nRole: null\n").unwrap();
+    // THE CARRIER: `A1. Base` writes `\mathfrak{E}` as a binder sort, so the stratum must home
+    // it — every glyph an A block writes needs a D node (crates/build/src/coverage.rs).
+    std::fs::write(defs.join("D_04_Carrier.qbit"), "D.X.04. Carrier\n\\mathfrak{E}\n").unwrap();
+    std::fs::write(defs.join("D_05_Unit.qbit"), "D.X.05. Unit\n\\mathbb{1}\n").unwrap();
 }
 
 fn corpus(dir: &Path) {
@@ -174,6 +178,8 @@ async fn a_project_outside_every_root_is_wired_in_served_built_and_forgotten() {
             "Era0/Strata0/Definitions/D_01_Wedge.qbit",
             "Era0/Strata0/Definitions/D_02_Cap.qbit",
             "Era0/Strata0/Definitions/D_03_Empty.qbit",
+            "Era0/Strata0/Definitions/D_04_Carrier.qbit",
+            "Era0/Strata0/Definitions/D_05_Unit.qbit",
             "Era0/Strata0/Theorems/T_01_Self.qbit",
         ],
         "corpus-relative and sorted, and `Canon.qbit` is not a node: {files}"
@@ -188,11 +194,11 @@ async fn a_project_outside_every_root_is_wired_in_served_built_and_forgotten() {
     /* ---- THE PROMISE: it builds against ITS OWN ground ---- */
     let (status, built) = answer(handlers::post_build(st.clone(), Json(handlers::BuildReq { scope: None })).await).await;
     assert_eq!(status, 200, "a corpus that verifies is a 200: {built}");
-    assert_eq!(built["files"], json!(6), "three nodes and the three declarations they use");
+    assert_eq!(built["files"], json!(8), "three nodes and the five declarations they use");
     assert_eq!(
         built["verified"],
-        json!(6),
-        "all six verify against the project's own ground: {built}"
+        json!(8),
+        "all eight verify against the project's own ground: {built}"
     );
     assert_eq!(built["error_count"], json!(0));
 
@@ -363,12 +369,12 @@ async fn an_admitted_theorem_verifies_and_is_counted() {
     assert_eq!(status, 200, "{built}");
     assert_eq!(
         built["files"],
-        json!(7),
-        "three proved nodes, one admitted, and the three declarations: {built}"
+        json!(9),
+        "three proved nodes, one admitted, and the five declarations: {built}"
     );
     assert_eq!(
         built["verified"],
-        json!(7),
+        json!(9),
         "an admitted theorem still checks — it is an axiom of its own module: {built}"
     );
     assert_eq!(built["error_count"], json!(0), "{built}");
