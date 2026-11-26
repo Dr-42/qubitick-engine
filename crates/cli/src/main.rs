@@ -307,8 +307,12 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Build { root, frozen } => {
             let root_path = PathBuf::from(&root);
-            if let Some(expected) = &frozen {
-                qubitick_build::presets::check_frozen(&root_path, expected)?;
+            if let Some(expected) = &frozen
+                && let Some(frozen) =
+                    qubitick_build::presets::freeze_diagnostic(&root_path, expected)?
+            {
+                eprintln!("{}", frozen.render(&qubitick_build::report::DiskSources));
+                std::process::exit(1);
             }
             // Populate the corpus DB + a real symbol context so glyphs resolve and
             // statements parse structurally (not the empty-CTX fallback path).
@@ -317,7 +321,16 @@ fn main() -> anyhow::Result<()> {
             let files: Vec<PathBuf> = qubitick_build::walk_qbit(&root);
             // the ground the corpus is checked against: our base, with the charter's `LeanDir`
             // over it when the project ships its own `HL.lean` (crates/build/src/ground.rs)
-            let ground = qubitick_build::ground::for_check(&root_path)?;
+            /* THE GROUND IS THE FIRST THING THAT CAN REFUSE A BUILD, and it refuses for a
+               reason a person can act on: the file, and which of the 16 names it lacks.
+               Rendered like every other refusal, then exit 1 — not a bare `Error:` chain. */
+            let ground = match qubitick_build::ground::for_check(&root_path) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("{}", ground_refusal(&format!("{e:#}")));
+                    std::process::exit(1);
+                }
+            };
             // no context: the pipeline builds each file's own, from the scope its path implies
             let results = qubitick_build::run_pipeline(&db, &files, Some(&ground))?;
             /* THE REPORT A PERSON READS, rendered the way rustc and Lean print: a title,
@@ -696,6 +709,49 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The ground-contract refusal, in the shape a compiler prints.
+///
+/// The interesting part is WHICH names are missing, and they are missing by tier —
+/// `Eq` is a kernel gap and `lcErased` is codegen plumbing, and a reader who sees them
+/// in one comma-separated run cannot tell which. So the tiers are the `= help:` lines.
+fn ground_refusal(chain: &str) -> String {
+    use qubitick_model::{Diagnostic, Phase};
+    let missing: Vec<&str> = chain
+        .split_once("missing: ")
+        .map(|(_, rest)| rest.split(',').map(str::trim).collect())
+        .unwrap_or_default();
+    let mut d = Diagnostic::error(
+        Phase::Store,
+        "ground.contract",
+        "this project's ground does not carry the emitter's contract",
+    );
+    if missing.is_empty() {
+        // No list to group: say what the ground itself said, in one line.
+        return d
+            .hint(chain.trim().to_string())
+            .render(&qubitick_build::report::DiskSources);
+    }
+    for tier in [
+        qubitick_build::prelude_contract::Tier::Kernel,
+        qubitick_build::prelude_contract::Tier::Logic,
+        qubitick_build::prelude_contract::Tier::Codegen,
+    ] {
+        let names: Vec<&str> = qubitick_build::prelude_contract::REQUIRED
+            .iter()
+            .filter(|(name, t)| *t == tier && missing.iter().any(|m| m.starts_with(name)))
+            .map(|(name, _)| *name)
+            .collect();
+        if !names.is_empty() {
+            d = d.hint(format!("missing at the {} tier: {}", tier.label(), names.join(", ")));
+        }
+    }
+    d = d.hint(
+        "seed one (`qubitick seed <corpus> --preset init|mathlib|bare`), or add the names \
+         above to the project's own `HL.lean`",
+    );
+    d.render(&qubitick_build::report::DiskSources)
 }
 
 /// The scope a corpus-level command speaks in.

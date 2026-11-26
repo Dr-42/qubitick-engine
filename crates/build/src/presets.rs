@@ -91,9 +91,24 @@ pub fn seed(corpus: &Path, preset: &str) -> Result<PathBuf> {
 
 /// Refuse a build whose ground is not the one that was frozen.
 pub fn check_frozen(corpus: &Path, expected: &str) -> Result<()> {
+    match freeze_diagnostic(corpus, expected)? {
+        None => Ok(()),
+        Some(d) => anyhow::bail!("{}", d.message),
+    }
+}
+
+/// The refusal as a diagnostic, or `None` when the hashes agree.
+///
+/// The freeze exists so a proof cannot be finished by editing the ground, and the two
+/// hashes are the whole content of the refusal — so they go in the shape a reader can act
+/// on, not in a sentence: what changed, and both numbers.
+pub fn freeze_diagnostic(
+    corpus: &Path,
+    expected: &str,
+) -> Result<Option<qubitick_model::Diagnostic>> {
     let actual = hash(corpus)?;
     if actual == expected {
-        return Ok(());
+        return Ok(None);
     }
     let canon = crate::canon::read(corpus)?;
     let named = canon
@@ -101,8 +116,18 @@ pub fn check_frozen(corpus: &Path, expected: &str) -> Result<()> {
         .and_then(|c| c.lean_dir.as_ref())
         .map(|d| ground_file(corpus, d).display().to_string())
         .unwrap_or_else(|| "the shipped ground".to_string());
-    anyhow::bail!(
-        "`qubitick build --frozen {expected}` refused: ground file `{named}` has hash {actual}\n  \
-         Either update the frozen hash (if the change is intentional) or revert the ground."
-    )
+    Ok(Some(
+        qubitick_model::Diagnostic::error(
+            qubitick_model::Phase::Store,
+            "ground.frozen",
+            "the ground is not the file that was frozen",
+        )
+        .label(format!("hash {actual}"))
+        .hint(format!("{named} has hash {actual}, and the frozen hash is {expected}"))
+        .hint(
+            "update the frozen hash if the change is intentional, or revert the ground — the \
+             ground is where a corpus's assumptions live, so a proof cannot be finished by \
+             editing it",
+        ),
+    ))
 }

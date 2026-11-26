@@ -51,13 +51,16 @@ fn a_frozen_build_accepts_its_own_hash_and_refuses_another() {
     let hash = qubitick_build::presets::hash(&dir).unwrap();
     qubitick_build::presets::check_frozen(&dir, &hash).expect("the frozen hash matches");
 
-    let err = qubitick_build::presets::check_frozen(&dir, "0000000000000000")
-        .expect_err("a different hash is refused");
-    let said = format!("{err:#}");
-    assert!(said.contains("refused"), "{said}");
+    let d = qubitick_build::presets::freeze_diagnostic(&dir, "0000000000000000")
+        .expect("a readable ground")
+        .expect("a different hash is refused");
+    assert_eq!(d.code, "ground.frozen");
+    assert_eq!(d.message, "the ground is not the file that was frozen");
+    let said = d.hints.join("\n");
     assert!(said.contains("Qubitick/HL.lean"), "the refusal names the file: {said}");
+    assert!(said.contains(&hash), "and both hashes: {said}");
     assert!(
-        said.contains("Either update the frozen hash"),
+        said.contains("update the frozen hash"),
         "and says what a person can do about it: {said}"
     );
     let _ = std::fs::remove_dir_all(&dir);
