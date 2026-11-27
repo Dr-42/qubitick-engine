@@ -175,7 +175,11 @@ with an A block opens. The engine infers no instance from a class name and knows
 whatever follows `Type:` is exactly what is rendered.
 
 **Type and form** come from `Type:` (a signature, so an operator is typed over its
-carrier) and from `Sema:` (a body). A `Sema:` whose alternatives are separated by a
+carrier) and from `Sema:` (a body — and, where there is no signature, the RECIPE for the
+type: `\tau_0 \oplus b = b` applies `\oplus` to a constructor of `\tau` and equates the
+result with a metavariable, so `\oplus` is `\tau → \tau → \tau`. An operator whose only
+appearance is its own definition has no use site to be observed at, which is why the Sema
+is read; `crates/build/tests/declared_formation.rs` holds it). A `Sema:` whose alternatives are separated by a
 declared connective declares a **formation** — an inductive: `\tau = \tau_0 \vee (^+ \tau)`
 is a carrier with a nullary and a recursive constructor, and the emitter generates the
 Lean `inductive` and its constructor aliases.

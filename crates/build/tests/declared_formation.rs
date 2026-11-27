@@ -200,3 +200,40 @@ fn a_theorem_that_names_the_carrier_imports_the_formation_instead_of_repeating_i
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/* THE `Sema:` IS A RECIPE FOR THE OPERATOR'S TYPE, NOT ONLY FOR ITS BODY.
+ *
+ * `\tau_0 \oplus b = b` applies `\oplus` to a constructor of `\tau` and a metavariable
+ * and equates the result with that metavariable. Read as a recipe, that is
+ * `oplus : tau → tau → tau`. Read only from the operator's uses there is nothing to read —
+ * its single appearance IS this definition — and the frame declared it
+ * `Prop → Prop → Prop`, after which every statement mixing it with `\tau` was an
+ * application-type mismatch (`a has type tau but is expected to have type Prop`).
+ */
+#[test]
+fn the_sema_composes_the_operators_type() {
+    let dir = root("sema-type");
+    corpus(&dir);
+    // `\oplus` is this corpus's own operator over its own carrier, defined by one
+    // constructor equation: the shape that has no use site to be observed at.
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
+        "D.S.05. Plus\na \\oplus b\nSema:\n\\tau_0 \\oplus b = b\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let file = dir.join("Era0/Strata0/Definitions/D_S_05_Plus.qbit");
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the operator emits");
+
+    assert!(
+        emitted.contains("oplus : tau → tau → tau"),
+        "the Sema's own patterns type the operator over its carrier:\n{emitted}"
+    );
+    assert!(
+        !emitted.contains("Prop → Prop → Prop"),
+        "and never over the Prop fallback:\n{emitted}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

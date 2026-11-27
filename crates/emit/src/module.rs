@@ -661,6 +661,117 @@ pub fn render_type_expr(ctx: &Ctx, e: &Expr) -> String {
 /// carrier too: a `\frac`-style operator applied to two terms of a sort has two
 /// positions on it. Without this it is typed over the carrier and a definition whose
 /// own body applies it to sort-valued subterms cannot be typed at all.
+/// The carrier a leaf symbol IS, when the corpus gave it one: a nullary `Type:` names
+/// the sort that constant lives in (`\tau_0` is `Type: \tau`), and a formation's
+/// constructor lives in its carrier. A constant carries its sort into every argument
+/// position it occupies, which is what the patterns of a `Sema:` are made of.
+fn leaf_carriers(
+    ctx: &Ctx,
+    authored: &HashMap<u32, AuthoredType>,
+    env: &SortEnv,
+) -> HashMap<u32, u32> {
+    let mut out: HashMap<u32, u32> = HashMap::new();
+    for (id, auth) in authored {
+        if auth.args.iter().all(|a| a.is_none())
+            && let Some(res) = auth.res
+        {
+            out.insert(*id, res);
+        }
+    }
+    for id in env.ctors() {
+        if let Some(carrier) = env.carrier_of_head(id) {
+            out.insert(id, carrier);
+        }
+    }
+    let _ = ctx;
+    out
+}
+
+/// Read every definition's `Sema:` as a recipe for its operator's type.
+///
+/// Sections are `lhs = rhs` where `lhs` applies the operator being defined. The carrier
+/// each argument is written at comes from the pattern (a constant of a declared sort, or
+/// an application whose head returns one), and the section establishes the RESULT sort:
+/// a componentwise definition over `\tau` returns a `\tau`. Positions the patterns leave
+/// open take the carrier the section establishes, which is the reading that makes
+/// `\tau_0 \oplus b = b` say `b : \tau`.
+fn types_from_semas(
+    ctx: &Ctx,
+    nodes: &[Node],
+    sigs: &mut HashMap<u32, GlyphSig>,
+    env: &SortEnv,
+    authored: &HashMap<u32, AuthoredType>,
+) {
+    use qubitick_model::Expr;
+    let leaves = leaf_carriers(ctx, authored, env);
+    for n in nodes {
+        let Node::Definition(d) = n else { continue };
+        let Some(FormBody::MacroExpr(e)) = &d.d_block.form else {
+            continue;
+        };
+        // the sections: the body itself, or the conjuncts of a `\land` chain of them
+        let mut sections: Vec<&Expr> = Vec::new();
+        fn split<'a>(ctx: &Ctx, x: &'a Expr, out: &mut Vec<&'a Expr>) {
+            match x {
+                Expr::Apply(h, args)
+                    if args.len() == 2 && crate::module::is_conjunct_head(ctx, h.primary) =>
+                {
+                    split(ctx, &args[0], out);
+                    split(ctx, &args[1], out);
+                }
+                other => out.push(other),
+            }
+        }
+        split(ctx, e, &mut sections);
+        for section in sections {
+            let Expr::Apply(h, sides) = section else { continue };
+            if h.primary != EQ_SYM || sides.len() != 2 {
+                continue;
+            }
+            let Expr::Apply(head, args) = &sides[0] else { continue };
+            if head.primary != d.symbol.primary || args.is_empty() {
+                continue;
+            }
+            /* The carrier this section is written over: the first argument that is a
+               term of a declared sort, or the head of one. */
+            let mut section_carrier: Option<u32> = None;
+            let mut positions: Vec<(usize, u32)> = Vec::new();
+            for (i, a) in args.iter().enumerate() {
+                let c = match a {
+                    Expr::Sym(ac) => leaves.get(&ac.primary).copied(),
+                    other => head_id(other)
+                        .and_then(|id| leaves.get(&id).copied().or_else(|| env.carrier_of_head(id))),
+                };
+                if let Some(c) = c {
+                    section_carrier.get_or_insert(c);
+                    positions.push((i, c));
+                }
+            }
+            let Some(carrier) = section_carrier else { continue };
+            let sig = sigs.entry(head.primary).or_default();
+            if args.len() > sig.len {
+                sig.len = args.len();
+            }
+            sig.binder.resize(sig.len, false);
+            sig.arg_carrier.resize(sig.len, None);
+            for (i, c) in positions {
+                sig.arg_carrier[i] = Some(c);
+            }
+            /* A section that defines the operator over one carrier returns that carrier
+               — every position it left open included. `= b` with `b` a metavariable says
+               nothing on its own; the section it belongs to does. */
+            for slot in sig.arg_carrier.iter_mut() {
+                if slot.is_none() {
+                    *slot = Some(carrier);
+                }
+            }
+            if sig.res_carrier.is_none() {
+                sig.res_carrier = Some(carrier);
+            }
+        }
+    }
+}
+
 fn remark_arg_sorts(
     nodes: &[Node],
     sigs: &mut HashMap<u32, GlyphSig>,
@@ -977,6 +1088,22 @@ fn symbol_declarations(
         })
         .collect();
     remark_arg_sorts(nodes, &mut sigs, &connectives);
+    /* A `Sema:` COMPOSES ITS OPERATOR'S TYPE.
+     *
+     * Observation alone types an operator from the statements that USE it, which is
+     * enough for a glyph the corpus only applies — and useless for one whose single
+     * appearance is the definition that introduces it. `\tau_0 \oplus b = b` applies
+     * `\oplus` to a constructor of `\tau` and a metavariable, and equates the result
+     * with that metavariable: the argument sorts are the patterns', and the result sort is
+     * the carrier the section is written over. Read from the Sema, `\oplus` is
+     * `tau → tau → tau`; read from its uses, there are none to read, and the frame
+     * declared it `Prop → Prop → Prop` — after which every statement mixing it with `\tau`
+     * was an application-type mismatch.
+     *
+     * An IFF section is a RELATIONAL definition (`a \subseteq b \leftrightarrow …`): its
+     * result is a proposition and its arguments are the relation's operands, so it is left
+     * to the observation above. */
+    types_from_semas(ctx, nodes, &mut sigs, &env, &authored);
 
     // Every declared sort an emitted type NAMES. A carrier a type mentions has to
     // exist in the text even when no statement uses the carrier itself, and a
