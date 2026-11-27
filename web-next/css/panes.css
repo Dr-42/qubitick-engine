@@ -332,3 +332,10 @@
   cursor: pointer;
 }
 .goal .g-cite:hover { background: var(--wash-2); border-color: var(--acc, var(--cyan)); }
+
+/* the node's status chip in the Goal panel, with the diagnostic's code beside it. Same
+   vocabulary as the row verdict chips: a colour from the theme and a code in dim text. */
+.goal .g-chip.verified { color: var(--green); border-color: color-mix(in oklab, var(--green) 40%, var(--hair)); }
+.goal .g-chip.admitted { color: var(--amber); border-color: color-mix(in oklab, var(--amber) 40%, var(--hair)); }
+.goal .g-chip.error { color: var(--bad, var(--amber)); border-color: color-mix(in oklab, var(--bad, var(--amber)) 40%, var(--hair)); }
+.goal .gcode { color: var(--dim); font-size: 10px; letter-spacing: 0.02em; }

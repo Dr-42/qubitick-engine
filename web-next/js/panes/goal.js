@@ -108,6 +108,35 @@ export default {
       }).join(' ');
     }
 
+    /**
+     * THE NODE'S OWN STATUS, from the last corpus check: verified, admitted, or error with the
+     * diagnostic's code.
+     *
+     * A3 asks for it on this panel because the goal is what you look at while writing: "is what
+     * I am looking at actually proved" is the question the panel is already answering for the
+     * row, and the node's answer comes from the same report the Diagnostics panel lists. Nothing
+     * here re-derives a verdict — a file with an error is the error the build reported, and an
+     * admitted theorem is the `proof.admitted` warning the engine wrote.
+     */
+    function nodeStatus() {
+      const state = ctx.check ? ctx.check() : null;
+      const report = state && state.report ? state.report : null;
+      if (!report || !current.path) return null;
+      const want = String(current.path).replace(/^\.?\/?/, '');
+      const sameFile = (p) => String((p && p.span && p.span.file) || p || '').replace(/^\.?\/?/, '').endsWith(want);
+
+      for (const f of (report.failures || [])) {
+        if (!sameFile(f.path)) continue;
+        const first = (f.diagnostics || [])[0] || {};
+        return { kind: 'error', code: first.code || 'error', said: first.message || '' };
+      }
+      for (const w of (report.warnings || [])) {
+        if (!sameFile(w)) continue;
+        if (w.code === 'proof.admitted') return { kind: 'admitted', code: w.code, said: w.message || '' };
+      }
+      return { kind: 'verified', code: '', said: '' };
+    }
+
     /** Insert a citation at the editor's caret. The Goal panel OFFERS a citation; the editor
      *  owns the caret, so the panel asks it — `editor.insert` is that call (js/panes/editor.js). */
     function insertCite(cite) {
@@ -120,8 +149,14 @@ export default {
 
     /** What the corpus made of this position, as the tile shows it. */
     function answerHtml(g) {
-      if (!g) return localHtml();
+      const status = nodeStatus();
+      const statusRow = status
+        ? '<span class="g-chip ' + esc(status.kind) + '">' + esc(status.kind) + '</span>'
+          + (status.code ? ' <span class="gcode">' + esc(status.code) + '</span>' : '')
+        : '';
+      if (!g) return statusRow + (statusRow ? '<br>' : '') + localHtml();
       const rows = [];
+      if (statusRow) rows.push(statusRow);
       if (g.admitted) {
         rows.push('<b>' + esc(g.node || '') + '</b> <span class="g-chip local">admitted</span>');
         rows.push('<span class="gdim">stated, not proved — the emitter makes it an axiom</span>');
