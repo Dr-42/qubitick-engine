@@ -472,9 +472,9 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 51 targets, 347 tests, 2 ignored
+cargo test --workspace        # 51 targets, 348 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets     # clean: no warnings
 cargo build -p qubitick-cli
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra
     # built 5, verified 5

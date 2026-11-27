@@ -733,120 +733,6 @@ fn symbol_lean_name(ctx: &Ctx, id: u32) -> String {
 }
 
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use qubitick_db::queries::SymbolRow;
-    use qubitick_model::NodeBase;
-
-    fn ctx() -> Ctx {
-        Ctx::from_rows(
-            "Era0/Strata0",
-            vec![SymbolRow { facets: 0,
-                id: 1,
-                scope: "".into(),
-                tex: "\\tau".into(),
-                display: "τ".into(),
-                lean_name: "Tau".into(),
-                trigger: None,
-                kind: "macro".into(),
-                role: Some("primary".into()),
-                precedence: None,
-                home_node: 1,
-            elab: None,
-            binder_kind: None,
-            }],
-        )
-    }
-
-    #[test]
-    fn emits_definition() {
-        let ctx = ctx();
-        let def = Definition {
-            base: NodeBase {
-                id: 2,
-                kind: qubitick_model::NodeKind::Definition,
-                era: qubitick_model::Era::Era0,
-                strata: qubitick_model::Strata(0),
-                name: "Def1".into(),
-                req: vec![],
-                derived: vec![],
-                note: None,
-            },
-            symbol: qubitick_model::AtomicComposite::new(1),
-            extra_symbols: vec![],
-            d_block: qubitick_model::DBlockIR {
-                kind: qubitick_model::SymbolKind::Macro,
-                form: Some(qubitick_model::FormBody::MacroExpr(
-                    // `Tau x = x`: the body's free var is a definition parameter, so
-                    // it compiles to a real `def Tau (x) := x`.
-                    qubitick_model::Expr::Apply(
-                        qubitick_model::AtomicComposite::new(qubitick_model::EQ_SYM),
-                        vec![
-                            qubitick_model::Expr::Apply(
-                                qubitick_model::AtomicComposite::new(1),
-                                vec![qubitick_model::Expr::Var("x".into())],
-                            ),
-                            qubitick_model::Expr::Var("x".into()),
-                        ],
-                    ),
-                )),
-                ..Default::default()
-            },
-            tag: qubitick_model::PhysOrMath::Math,
-        };
-        let out = emit_definition(&ctx, &def).unwrap();
-        // `noncomputable`: a generated definition may apply an uninterpreted symbol,
-        // and Lean's code generator refuses those outright (`Vert is not supported
-        // by code generator`) where the type checker does not care.
-        assert!(out.starts_with("noncomputable def Tau"), "{out}");
-    }
-
-    #[test]
-    fn emits_sema_definition_with_parameters() {
-        // Sema `a /\ b = <body>` defines the glyph's head applied to its
-        // metavariables: those metavariables become the def's parameters.
-        use qubitick_model::{AtomicComposite, Expr, FormBody};
-        let ctx = ctx();
-        let lhs = Expr::Apply(
-            AtomicComposite::new(1),
-            vec![Expr::Var("a".into()), Expr::Var("b".into())],
-        );
-        // `Tau a b = b`: the body must not mention `Tau` (that would be
-        // self-referential and is declared uninterpreted instead).
-        let rhs = Expr::Var("b".into());
-        let sema = Expr::Apply(
-            AtomicComposite::new(qubitick_model::EQ_SYM),
-            vec![lhs, rhs],
-        );
-        let def = Definition {
-            base: NodeBase {
-                id: 2,
-                kind: qubitick_model::NodeKind::Definition,
-                era: qubitick_model::Era::Era0,
-                strata: qubitick_model::Strata(0),
-                name: "Def2".into(),
-                req: vec![],
-                derived: vec![],
-                note: None,
-            },
-            symbol: AtomicComposite::new(1),
-            extra_symbols: vec![],
-            d_block: qubitick_model::DBlockIR {
-                kind: qubitick_model::SymbolKind::Macro,
-                form: Some(FormBody::MacroExpr(sema)),
-                ..Default::default()
-            },
-            tag: qubitick_model::PhysOrMath::Math,
-        };
-        let out = emit_definition(&ctx, &def).unwrap();
-        assert_eq!(
-            out,
-            "noncomputable def Tau (a : Prop) (b : Prop) : Prop := b\n"
-        );
-    }
-}
-
 /// The constructors a case definition does not cover, as a sentence — or `None` when the
 /// body is not a set of constructor equations over one declared formation.
 ///
@@ -976,4 +862,118 @@ fn undeclared_word(e: &qubitick_model::Expr) -> Option<String> {
     let mut out = None;
     walk(e, &mut out);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qubitick_db::queries::SymbolRow;
+    use qubitick_model::NodeBase;
+
+    fn ctx() -> Ctx {
+        Ctx::from_rows(
+            "Era0/Strata0",
+            vec![SymbolRow { facets: 0,
+                id: 1,
+                scope: "".into(),
+                tex: "\\tau".into(),
+                display: "τ".into(),
+                lean_name: "Tau".into(),
+                trigger: None,
+                kind: "macro".into(),
+                role: Some("primary".into()),
+                precedence: None,
+                home_node: 1,
+            elab: None,
+            binder_kind: None,
+            }],
+        )
+    }
+
+    #[test]
+    fn emits_definition() {
+        let ctx = ctx();
+        let def = Definition {
+            base: NodeBase {
+                id: 2,
+                kind: qubitick_model::NodeKind::Definition,
+                era: qubitick_model::Era::Era0,
+                strata: qubitick_model::Strata(0),
+                name: "Def1".into(),
+                req: vec![],
+                derived: vec![],
+                note: None,
+            },
+            symbol: qubitick_model::AtomicComposite::new(1),
+            extra_symbols: vec![],
+            d_block: qubitick_model::DBlockIR {
+                kind: qubitick_model::SymbolKind::Macro,
+                form: Some(qubitick_model::FormBody::MacroExpr(
+                    // `Tau x = x`: the body's free var is a definition parameter, so
+                    // it compiles to a real `def Tau (x) := x`.
+                    qubitick_model::Expr::Apply(
+                        qubitick_model::AtomicComposite::new(qubitick_model::EQ_SYM),
+                        vec![
+                            qubitick_model::Expr::Apply(
+                                qubitick_model::AtomicComposite::new(1),
+                                vec![qubitick_model::Expr::Var("x".into())],
+                            ),
+                            qubitick_model::Expr::Var("x".into()),
+                        ],
+                    ),
+                )),
+                ..Default::default()
+            },
+            tag: qubitick_model::PhysOrMath::Math,
+        };
+        let out = emit_definition(&ctx, &def).unwrap();
+        // `noncomputable`: a generated definition may apply an uninterpreted symbol,
+        // and Lean's code generator refuses those outright (`Vert is not supported
+        // by code generator`) where the type checker does not care.
+        assert!(out.starts_with("noncomputable def Tau"), "{out}");
+    }
+
+    #[test]
+    fn emits_sema_definition_with_parameters() {
+        // Sema `a /\ b = <body>` defines the glyph's head applied to its
+        // metavariables: those metavariables become the def's parameters.
+        use qubitick_model::{AtomicComposite, Expr, FormBody};
+        let ctx = ctx();
+        let lhs = Expr::Apply(
+            AtomicComposite::new(1),
+            vec![Expr::Var("a".into()), Expr::Var("b".into())],
+        );
+        // `Tau a b = b`: the body must not mention `Tau` (that would be
+        // self-referential and is declared uninterpreted instead).
+        let rhs = Expr::Var("b".into());
+        let sema = Expr::Apply(
+            AtomicComposite::new(qubitick_model::EQ_SYM),
+            vec![lhs, rhs],
+        );
+        let def = Definition {
+            base: NodeBase {
+                id: 2,
+                kind: qubitick_model::NodeKind::Definition,
+                era: qubitick_model::Era::Era0,
+                strata: qubitick_model::Strata(0),
+                name: "Def2".into(),
+                req: vec![],
+                derived: vec![],
+                note: None,
+            },
+            symbol: AtomicComposite::new(1),
+            extra_symbols: vec![],
+            d_block: qubitick_model::DBlockIR {
+                kind: qubitick_model::SymbolKind::Macro,
+                form: Some(FormBody::MacroExpr(sema)),
+                ..Default::default()
+            },
+            tag: qubitick_model::PhysOrMath::Math,
+        };
+        let out = emit_definition(&ctx, &def).unwrap();
+        assert_eq!(
+            out,
+            "noncomputable def Tau (a : Prop) (b : Prop) : Prop := b\n"
+        );
+    }
 }

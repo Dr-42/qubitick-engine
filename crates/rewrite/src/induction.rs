@@ -20,6 +20,10 @@ use crate::termctx::TermCtx;
 /// declaration, so it has to cross the boundary rather than be guessed from the proof text.
 pub type CtorFields = std::collections::HashMap<u32, (Vec<u32>, u32)>;
 
+/// The arguments are the induction's whole context: the case patterns, the scrutinee, the
+/// carrier's constructor algebra, the rule table and the dual-use name map. Each is read while
+/// compiling the branches and none is derivable from another.
+#[allow(clippy::too_many_arguments)]
 pub fn compile_induction(
     ctx: &Ctx,
     tc: &TermCtx,
@@ -85,7 +89,6 @@ pub fn compile_induction(
         // Read before `ctor_ac` is moved into the reconstructed expression below: the
         // declaration lookup keys on the constructor's own symbol id.
         let ctor_id = ctor_ac.primary;
-        let ctor_ac = ctor_ac;
         let ctor_e = if binders.is_empty() {
             Expr::Sym(ctor_ac)
         } else {

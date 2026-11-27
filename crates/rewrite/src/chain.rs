@@ -768,7 +768,7 @@ mod tests {
             rel: StepRel::Eq,
             just: ChainJust::Rfl,
         };
-        let out = compile_chain(&ctx, &tc, &env, &[one.clone()], &crate::rules::RuleTable::new())
+        let out = compile_chain(&ctx, &tc, &env, std::slice::from_ref(&one), &crate::rules::RuleTable::new())
             .unwrap();
         assert!(!out.contains("@Eq.trans"), "one row needs no composition: {out}");
         assert!(out.contains("Delta"));

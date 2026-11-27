@@ -7,4 +7,7 @@ license.workspace = true
 
 [dependencies]
 serde.workspace = true
+
+[dev-dependencies]
+# `diag.rs`'s test asserts the diagnostic JSON round-trips; nothing in the library needs it.
 serde_json.workspace = true

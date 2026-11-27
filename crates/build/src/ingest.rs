@@ -242,14 +242,45 @@ pub fn ingest_file_symbols(
         // `00` and a node numbered by nothing both reach the model as `id: 0`.
         authored: authored_of(&src, node.base().id),
         glyph,
-        words: control_words(&src),
+        words: content_words(&src),
     };
     let Some(home) = home else {
         return Ok(FileSymbols { written: 0, in_ledger: false });
     };
 
+    /* A SAVE DOES NOT RENAME ANOTHER FILE'S GLYPH, AND DOES NOT TAKE ITS NAME EITHER.
+     *
+     * Two glyphs can read as one Lean name (`\times` and `×` both derive `times`); the corpus
+     * ingest settles that by tex order. A save puts ONE file's symbols in, so it cannot rename
+     * what is already there — but it must not write a second row under a name another glyph
+     * holds, or the editor's write makes two operators answer to one name until the next full
+     * ingest. The newcomer takes the engine's letter code; a glyph whose tex sorts FIRST keeps
+     * the plain name, so the save and the next ingest agree about it. */
+    let claims = claims_of(&entry, home, project_root);
+    let era = claims
+        .first()
+        .and_then(|c| c.scope.split('/').next())
+        .unwrap_or_default()
+        .to_string();
+    let held: Vec<(String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT tex, lean_name FROM symbols WHERE substr(scope, 1, length(?1)) = ?1",
+        )?;
+        stmt.query_map(rusqlite::params![era], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?
+    };
     let mut written = 0usize;
-    for (decl, claim) in claims_of(&entry, home, project_root).into_iter().enumerate() {
+    for (decl, mut claim) in claims.into_iter().enumerate() {
+        if let Some((tex, _)) = held
+            .iter()
+            .find(|(tex, lean)| *lean == claim.lean && *tex != claim.tex)
+            && *tex < claim.tex
+        {
+            // The name belongs to a glyph that sorts earlier: this one is letter-coded.
+            claim.lean = format!("{LETTER_CODE}{}", claim.lean);
+        }
         let sh = hash_symbol(&claim.scope, &claim.tex, &claim.kind);
         let declared = decl == 0 && entry.glyph.is_some();
         let sql = if declared {
@@ -345,7 +376,7 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             name: node.base().name.clone(),
             authored: authored_of(&src, node.base().id),
             glyph,
-            words: control_words(&src),
+            words: content_words(&src),
         });
     }
 
@@ -1458,6 +1489,21 @@ fn braced_index_labels(src: &str) -> Vec<String> {
     out
 }
 
+/// Every glyph a node's CONTENT writes — the header line is not content.
+///
+/// The header is `<kind>.<division>.<n>. <Name>`: its `00` is a division number, not a
+/// numeric literal the corpus uses, and registering it made every node's division show up in
+/// the palette as a symbol (`num_00`, `num_01`, ...) that nobody wrote.
+fn content_words(src: &str) -> Vec<String> {
+    let body: String = src
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    control_words(&body)
+}
+
 fn control_words(src: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -1513,6 +1559,7 @@ fn control_words(src: &str) -> Vec<String> {
         } else if src[i..]
             .chars()
             .next()
+            .filter(|c| *c != ':')
             .is_some_and(is_operator_punct)
         {
             // A BARE OPERATOR RUN: a maximal run of operator characters, DECODED AS CHARS.
@@ -2493,6 +2540,60 @@ mod tests {
      * become an operator application (`Unknown constant CoeSort`). The name it takes instead
      * is one no declaration can reach, and it is derived from the glyph alone.
      */
+    /* A SAVE MUST NOT TAKE A NAME ANOTHER GLYPH HOLDS.
+     *
+     * The editor saves ONE file; the corpus ingest is what settles names across the corpus.
+     * A file saved with a glyph that derives a name another glyph already holds would give the
+     * editor two operators under one Lean name until the next full build — so the save applies
+     * the same rule, for the glyph whose tex sorts later.
+     */
+    #[test]
+    fn a_saved_glyph_does_not_take_a_name_another_glyph_holds() {
+        let dir = scratch_dir("save_name");
+        fs::create_dir_all(dir.join("Era0/Strata0/Definitions")).unwrap();
+        fs::write(
+            dir.join("D_S_00_Or.qbit"),
+            "D.S.00. Or\na \\vee b\nRole: connective\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("D_S_01_Tick.qbit"),
+            "D.S.01. Tick\n\\tau\nSema:\n\\tau = \\tau_0 \\vee (^+ \\tau)\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("D_S_02_TimesWord.qbit"),
+            "D.S.02. TimesWord\na \\times b\nSema:\n(\\tau_0 \\times b = b) \\land ((^+ a) \\times b = ^+ (a \\times b))\n",
+        )
+        .unwrap();
+        let glyph_file = dir.join("D_S_03_TimesGlyph.qbit");
+        fs::write(
+            &glyph_file,
+            "D.S.03. TimesGlyph\na \u{00d7} b\nSema:\n(\\tau_0 \u{00d7} b = b) \\land ((^+ a) \u{00d7} b = ^+ (a \u{00d7} b))\n",
+        )
+        .unwrap();
+        let mut conn = qubitick_db::open_in_memory().unwrap();
+        ingest_corpus(&mut conn, &dir).unwrap();
+        // THE EDITOR SAVES THE FILE. Its glyph reads as `times`, which `\times` holds: the
+        // save must not take that name back over.
+        ingest_file_symbols(&conn, &dir, &glyph_file).unwrap();
+
+        let syms = qubitick_db::queries::symbols_in_scope(&conn, "Era0/Strata0").unwrap();
+        let lean = |tex: &str| syms.iter().find(|r| r.tex == tex).map(|r| r.lean_name.clone());
+        assert_eq!(
+            lean("\\times").as_deref(),
+            Some("times"),
+            "the earlier glyph keeps the name"
+        );
+        assert_eq!(
+            lean("\u{00d7}").as_deref(),
+            Some("lx_times"),
+            "and the save does not take it over: {:?}",
+            syms.iter().map(|r| (&r.tex, &r.lean_name)).collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_name_the_ground_owns_is_letter_coded() {
         assert_eq!(lean_name("\\Eq"), "lx_Eq", "`\\Eq` would shadow the kernel equality");

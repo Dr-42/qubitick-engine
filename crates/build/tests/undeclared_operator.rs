@@ -39,8 +39,11 @@ fn copy(from: &Path, to: &Path) {
     }
 }
 
-/// Every diagnostic the build produced, as `(code, message, file, line, col)`.
-fn said(dir: &Path) -> Vec<(String, String, String, Option<u32>, Option<u32>)> {
+/// One diagnostic, as the test reads it: `(code, message, file, line, col)`.
+type Said = (String, String, String, Option<u32>, Option<u32>);
+
+/// Every diagnostic the build produced.
+fn said(dir: &Path) -> Vec<Said> {
     let mut db = qubitick_db::open_in_memory().unwrap();
     qubitick_build::ingest_corpus(&mut db, dir).expect("ingest");
     let ground = qubitick_build::ground::for_check(dir).expect("the ground assembles");

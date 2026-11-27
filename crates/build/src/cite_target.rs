@@ -320,7 +320,10 @@ mod tests {
            axiom. */
         for h in &headers {
             let label = label_of(h);
-            let target = resolve_cite(&ctx, &headers, &label).expect(&format!("{label} resolves"));
+            let target = match resolve_cite(&ctx, &headers, &label) {
+                Some(t) => t,
+                None => panic!("{label} resolves"),
+            };
             assert_eq!(target.node, h.name, "{label} resolves to its own node");
             match h.node_type {
                 NodeKind::Axiom => assert_eq!(target.label, format!("{label}.1"), "{label}"),

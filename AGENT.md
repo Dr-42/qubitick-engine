@@ -72,8 +72,8 @@ report a green run you did not run. If a binary is involved, rebuild it first: a
 ## Gates
 
 ```bash
-cargo test --workspace                    # 48 targets
-cargo clippy --workspace --all-targets    # pre-existing style notes
+cargo test --workspace                    # 51 targets
+cargo clippy --workspace --all-targets    # clean — keep it that way
 cargo test -p qubitick-parse --lib        # one crate while iterating
 cargo test -p qubitick-build --test declared_formation   # one promise
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra  # built 5
@@ -135,6 +135,15 @@ Consequences that have bitten:
   import of a glyph another file declares (`Unknown identifier oplus`) and made another import
   itself (`build.import-cycle`). Ask the DB on both sides — the home of a symbol the module
   declares against the home of the glyph (`symbol_declarations`, `own_homes`).
+- **A glyph registry holds the corpus's glyphs, not the format's or the header's.** The
+  scanner reads a node's CONTENT (`content_words`), not its `<kind>.<division>.<n>.` header —
+  which registered a symbol for every division number (`num_00`) — and `:` (the format's
+  separator: field keys, binders, signature names) is never a glyph. A palette entry nobody
+  wrote is a symbol the client offers and the parser can be asked for.
+- **The editor's save applies the same name rules as an ingest** (`ingest_file_symbols`): a
+  saved glyph whose Lean name another glyph holds takes the letter code, and a save never
+  renames another file's glyph. A save puts one file's symbols in; the corpus ingest is what
+  settles names across the corpus.
 - **The input surface is CHARACTERS, not bytes.** A glyph may be `×`, `⊙`, `⊕`: the
   operator-punctuation question is `qubitick_model::corpus::is_operator_punct` — the ASCII
   table plus "not a letter, not whitespace, not the grammar" — and every scanner that asks it

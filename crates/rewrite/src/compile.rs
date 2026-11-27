@@ -30,6 +30,11 @@ pub fn compile_steps(
     compile_steps_with_env(ctx, &tc, &mut env, goal, steps, rules, fn_names, ctors)
 }
 
+/* The compiled step's whole context: the expression, the term context, the goal, the rows,
+   the rule table, the dual-use name map and the constructor algebra. Every one of them is
+   read while compiling and none is derivable from the others, so the list is the shape of
+   the job rather than a call that grew. */
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_steps_with_env(
     ctx: &Ctx,
     tc: &TermCtx,

@@ -41,6 +41,11 @@ pub struct Project {
     pub corpus: PathBuf,
 }
 
+
+/// The corpus's citable equations, as the citation lookup hands them out: each rule with the
+/// citation that names it.
+pub type CiteRules = Vec<(String, RewriteRule)>;
+
 /// Shared application state held by the axum router.
 pub struct AppState {
     /// Fixed at startup. Holds `web-next/`, `web-settings.json` and the projects.
@@ -65,7 +70,7 @@ pub struct AppState {
     /// theorem through the loader — about a second on this repo's own 329 files, against 40ms
     /// once the rules are in hand. A citation an author waits a second for, on every citation,
     /// is one they stop asking for.
-    pub rules: RwLock<Option<Arc<Vec<(String, RewriteRule)>>>>,
+    pub rules: RwLock<Option<Arc<CiteRules>>>,
 }
 
 impl AppState {
