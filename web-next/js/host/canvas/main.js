@@ -182,8 +182,8 @@ addEventListener('resize', ()=>{ vw=innerWidth; vh=innerHeight; dirty = true; })
    The label table is the corpus's own (329 `Math:`, 172 `Proof:`, 85 `Type:`,
    65 `Sema:`), and anything unlabelled is classified by what it contains, so a new
    label degrades to "look at the text" rather than to "assume formula". */
-/* The role table lives in js/app/qbit-lines.js — pure, so a node-only test reads it
-   without a browser (tests/unit/qbit-lines.test.mjs). Imported statically at the
+/* The role table lives in js/app/qbit-lines.js — pure, so a node-only check reads it
+   without a browser. Imported statically at the
    top of this module, so it is in hand before the first render. What stays here is
    the DOM: the renderer that turns a role into elements. */
 

@@ -65,7 +65,7 @@ export function createRegistry(app, deps) {
        the tile can receive. `highlight` was on both this row and the graph's and nothing read it:
        js/panes/stats.js declares no in-ports, no host forwarder fills one, and the tile before it
        was a module (renderStats) that ignored the value too — a wire a person could draw that
-       arrived nowhere (tests/unit/kind-port-contract.test.mjs holds the rule now). */
+       arrived nowhere — a port on this row has to be a port the tile reads. */
     pane('stats', 'Stats', mounts('stats'));
     pane('symbols', 'Symbols', mounts('symbols'), { inputs: [{ name: 'file', type: 'Path' }], outputs: [{ name: 'symbol', type: 'Text' }] });
     pane('editor', 'Editor', mounts('editor'), { inputs: [{ name: 'syntax', type: 'Bool' }], outputs: [['file', 'Path'], ['cursor', 'Cursor'], ['buffer', 'Text']] });
@@ -141,8 +141,8 @@ export function createRegistry(app, deps) {
          whole result — so `inputs.tick` was the OBJECT `{tick, running}` on the tick a node is
          first run (before the scheduler's own ticked inputs take precedence), and the track program
          computed `beats` from NaN. Measured: `{"tick":{"tick":1,"running":true},"is_even":false,
-         "beats":""}` on the first tick, the number from the second on (tests/ui/m1/wire-delivery
-         .spec.mjs holds it). The field is what the port's type says it is. */
+         "beats":""}` on the first tick, the number from the second on. The field is what the port's
+         type says it is. */
       category: 'behaviour', inputs: [{ name: 'tick', from: 'clock.tick', type: 'num' }], outputs: [{ name: 'meta', type: 'any' }],
       program: 'function(inputs, ctx){\n\tvar t = inputs.tick || 0;\n\treturn { tick: t, is_even: (t%2)===0, beats: "♥".repeat((t%5)+1) };\n}',
     });

@@ -207,7 +207,7 @@ export function attachWiring(app, env) {
      * it) resolves like any other named value. The canvas passed `app.graphValue`, which is defined
      * NOWHERE: `valueOf` threw `app.graphValue is not a function` for any name at all, so a behaviour
      * tile could not be made (`clock`, `track`, `js-node`), and a behaviour program that resolves a
-     * value could not run. Measured by making the tile: tests/ui/m1/wire-delivery.spec.mjs.
+     * value could not run. Measured by making the tile.
      *
      * A name is a port the canvas publishes — the app's own under `<kind>_<port>` (`editor_buffer`,
      * js/host/canvas/services.js::APP_SOURCES) or a pane's under `<tileId>_<port>` (PORT_SRC) — or a

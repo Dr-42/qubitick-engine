@@ -7,7 +7,7 @@ and it knows no mathematical glyph of any corpus. Everything a symbol means arri
 declaration the corpus writes.
 
 ```
-cargo test --workspace          47 targets · 314 tests · 2 ignored
+cargo test --workspace          48 targets · 321 tests · 2 ignored
 qubitick build <corpus>         5 files, verified 5, error_count 0   (the starter ship)
 qubitick axioms <corpus> <file> "axioms": []    (the ship's theorem stands on nothing)
 ```
@@ -401,7 +401,8 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 47 targets, 314 tests, 2 ignored
+cargo test --workspace        # 48 targets, 321 tests, 2 ignored
+node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets
 cargo build -p qubitick-cli
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra
@@ -429,6 +430,12 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/undeclared_operator.rs` | an operator nothing declares is named, in a statement and in a proof row |
 | `crates/build/tests/pdf_export.rs` | two nodes never share a cite id, the preamble carries what the body uses, display maths never opens in a text run, and the ship's document compiles when an engine is installed |
 | `tools/verify-default-view.mjs` | the canvas opens on the writing root with the corpus tile in view, every shipped tile exists, the console is a pan away, and "default view" restores the arrangement and the camera — no console errors |
+| `tests/unit/viewport.test.mjs` | the camera is a screen translation (`screen = world*z + cam`), a zoom about a point keeps that point still, a first view fits when the fit is legible and anchors at 50% when it is not, and the first view depends on the window |
+| `tests/unit/tiling.test.mjs` | a cluster's tiles never overlap, stay inside the box, tile in reading order, and never get a box smaller than the minimum side however extreme the saved ratio |
+| `tests/unit/tree-ops.test.mjs` | every layout edit returns a new tree, a pane is placed once, a split with one child collapses, and `sizes` sum to 1 |
+| `tests/unit/wire.test.mjs` | a value port delivers on subscribe, the same value crosses once, a loop is cut and reported, and an unbound call destination is reported rather than thrown |
+| `tests/unit/routes.test.mjs` | every route the client can name is mounted by the engine, and every route the engine mounts is named by the client or declared server-only |
+| `tools/lint.mjs` | the client's rules hold: one endpoint table, one frame governor, one storage adapter, `ctx` over the document, no frameworks, and every allowance still describes a real offence |
 | `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship stands on nothing |
 | `crates/build/tests/coverage.rs` | an A-block glyph with no D node fails naming it; the shipped ship homes every glyph its A blocks write; and `scaffold` writes the chain |
 | `crates/build/tests/emission_surface.rs` | no module emits an `axiom`; a ground-named glyph declares nothing; a sort word is a literal; a cross-module definition is imported; a `Type:` with no name is refused |
@@ -521,7 +528,12 @@ two workspaces.
 `tools/verify-default-view.mjs` drives the shipped arrangement in a browser: three roots and every
 tile present, the writing root framed and on screen, the corpus tile in view with nodes loaded, the
 console one pan away and "default view" restoring the same arrangement and the same camera, no
-console error. `tools/shot.mjs` screenshots any URL and fails on a console error.
+console error. `tools/shot.mjs` screenshots any URL and fails on a console error. Both drive the
+machine's chromium through `tools/page.mjs` — the DevTools protocol, nothing installed.
+
+`node tools/check.mjs` is the whole client check in one command: the lint rules, the unit tests and
+the two browser gates, with a server at `http://127.0.0.1:3123` by default. It fails when no server
+answers rather than skipping the gates, because a gate that silently does nothing still prints pass.
 
 ---
 

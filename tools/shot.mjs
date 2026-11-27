@@ -4,7 +4,10 @@
 //
 // The console and page errors are the point: a layout change that throws on load still paints
 // something, and "no console or page errors" is a claim only a browser can settle.
-import { chromium } from '/home/dsh/workspace/qubitick-corpus-v2/node_modules/playwright/index.mjs';
+//
+// The browser is `tools/page.mjs`: the machine's chromium, driven over the DevTools protocol. No npm
+// package, no config file, nothing to install before a gate can run.
+import { launch } from './page.mjs';
 
 const [url, out, w = '1400', h = '900'] = process.argv.slice(2);
 if (!url || !out) {
@@ -12,7 +15,7 @@ if (!url || !out) {
   process.exit(2);
 }
 
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: Number(w), height: Number(h) } });
 const errors = [];
 page.on('console', (m) => {
@@ -21,7 +24,8 @@ page.on('console', (m) => {
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 
 await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 }).catch((e) => errors.push('goto: ' + e.message));
-// let the engine's first frames and any fetch settle
+// the canvas keeps its restore promise on `window.__boot`: await it, then let a couple of frames land
+await page.evaluate(() => (window.__boot && window.__boot.catch(() => {})) || null).catch(() => {});
 await page.waitForTimeout(1500);
 await page.screenshot({ path: out, fullPage: false });
 

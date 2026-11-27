@@ -1,8 +1,7 @@
 # `web-next/js/` — the client
 
-The client is this module tree plus two pages. **196 modules**, every one reachable from both
-entries; `yarn modules` prints that in one line, and fails if a module under `js/app/` stops being
-imported by anything.
+The client is this module tree plus two pages. **207 modules** (`find web-next/js -name '*.js' | wc
+-l`), loaded from the two entries and from the manifests and presets they read at runtime.
 
 | Page | Lines | App |
 |---|---|---|
@@ -14,12 +13,16 @@ Both load the same `/js/main.js`, which picks by what the page has — a **world
 the panes: a pane module runs in either app, unchanged, because both hosts hand it the same `ctx`.
 
 ```bash
-yarn modules          # reachability from the two entries (node tools/dead-modules.mjs)
-yarn test:unit        # node --test — the pure pieces, the pane modules, the mock server
-yarn lint:rules       # the six rules below, and the baseline of known violations
-yarn mock             # the mock backend on :3100, serving this directory
-npx playwright test   # the UI matrix: chromium, firefox (@smoke), chromium-touch, phone
+node tools/check.mjs                      # lint + unit tests + the browser gates, in one go
+node tools/lint.mjs                       # the rules below, and the allowances that must stay true
+node --test "tests/unit/*.test.mjs"       # camera, tiling, layout trees, wires, routes
+node tools/verify-default-view.mjs        # the shipped arrangement, in a real browser
+node tools/shot.mjs <url> <out.png>       # any page to a PNG, failing on a console error
 ```
+
+There is no `package.json` and nothing to install: `node --test` is in node, and the browser gates
+drive the machine's chromium through `tools/page.mjs` (the DevTools protocol over node's own
+`WebSocket`).
 
 ## The two apps
 
@@ -90,9 +93,8 @@ removing a wire delivers `undefined`, which every consumer reads as *gone* rathe
 A pane may declare a port or a handler; both hosts read both conventions (`js/app/pane-ports.js`).
 
 The canvas's kinds and their ports are declared in one table (`js/host/canvas/panes.js`, **27
-kinds**). `js/panes/source-of.js::MODULE_OF` answers "which file implements this kind" for **40
-kinds across both hosts** — it is what "edit source" opens, and
-`tests/unit/panes-complete.test.mjs` checks it without a browser. A workspace can declare a pane
+kinds**). `js/panes/source-of.js::MODULE_OF` answers "which file implements this kind" for **27
+kinds across both hosts** — it is what "edit source" opens. A workspace can declare a pane
 kind of its own as data, code body included, in `../panes/manifests.json`
 (`js/panes/user-panes.js`); user code that throws fails into its tile, not into the page.
 
@@ -123,7 +125,7 @@ hands the width back at `flex: 0 0 auto`. The title is the flexible one in that 
 pointer it yields instead of the buttons being clipped. A coarse pointer pays one tap for the
 controls and nothing else: a tap sets `:hover` on the pane.
 
-`tests/ui/m1/pane-head.spec.mjs` is the acceptance test: at rest every shipped title is drawn whole
+The rule, which a rendering check states: at rest every shipped title is drawn whole
 (`scrollWidth <= clientWidth + 1`) and the group is 0 px wide at `opacity: 0`; under the pointer the
 group is back over 100 px and the row still does not overflow.
 
@@ -152,9 +154,9 @@ What the two halves decide, and why:
 | where the tag | the mode of the block's own tag columns; a block with no tag yet gets two spaces past its longest line; a row that runs past the column gets one space |
 | when nothing is written | the engine named no citation for the step (the sentence stays exactly as typed and the error says so), the engine needs several rows for it (the error names the citations, and the author writes the intermediate row — an intermediate state has no source text yet, and the engine renders one in its own curried form), or the line changed while the search ran |
 
-`tests/unit/proof-row.test.mjs` is the arithmetic (signs, tags, refusals) and
-`tests/ui/m1/autocite.spec.mjs` is the round trip in the app, both paths: a row written, and a
-sentence left alone with the error said out loud.
+The arithmetic (`js/live/proof-row.js`: signs, tags, refusals) is pure and a node-only check can
+read it; the round trip — a row written, and a sentence left alone with the error said out loud — is
+what the app does and what a person watching it sees.
 
 ## The induction you declared, with its cases written
 
@@ -174,13 +176,13 @@ pattern, and it is written by substituting in the author's own TEXT (`js/live/in
 by instantiating the parsed expression: the engine has no renderer for the corpus's surface — an
 `Expr` renders to Lean, curried (`\Delta a b`) where the corpus writes `a \Delta b` — so a
 round-tripped row is not a row the corpus reads back. The two lines it writes for `T.BT.11` are the
-two lines that theorem already has, and `tests/unit/induce.test.mjs` compares them against the file.
+two lines that theorem already has.
 The case opens with the statement's own left-hand side (`splitRelation` in `proof-row.js`), which is
 where a proof's rows start: the rows under it walk to the right-hand side.
 
 A case that already has a body is left alone; a chord with nothing to do says which reason applies
 (no `\mu` header on or above the caret's line, nothing above the header that states an expression,
-every case already proved). `tests/ui/m1/induce.spec.mjs` drives both paths in the app.
+every case already proved).
 
 The two chords compose, which is the point of them: press Enter on a row under an induced goal and
 the citation is looked up for **the goal above it** — not for the `\mapsto` pattern that announced
@@ -201,11 +203,10 @@ Two things worth knowing, both measured rather than guessed:
 - **The reference is followed on the PRESS, not on a click.** CodeMirror re-renders the line when
   the mousedown moves the caret (active-line highlight), so the element that was pressed is
   detached before `click` is dispatched and the click lands on the content element instead: a real
-  mouse click did nothing while a synthetic `click` at the tag worked. `tests/ui/m1/check.spec.mjs`
-  clicks with a real mouse.
+  mouse click did nothing while a synthetic `click` at the tag worked.
 - **There is no hover tooltip.** The vendored CodeMirror exports `Decoration` and `ViewPlugin` but
-  not `hoverTooltip` (`tools/build-cm.mjs`), so the hover affordance is the element's `title` —
-  which can only carry what is known synchronously, the citation itself. Resolving it is the click.
+  not `hoverTooltip` (`web-next/vendor/`), so the hover affordance is the element's `title` — which
+  can only carry what is known synchronously, the citation itself. Resolving it is the click.
 
 ## The PDF is the corpus, with its citations as links
 
@@ -257,10 +258,10 @@ can reach from where the caret is (`POST /api/steps`), each with its citation. T
 INFORMATION, not source: they are shown in the engine's notation and are deliberately not
 insertable, for the reason above.
 
-`tests/unit/row-check.test.mjs` is the arithmetic (row numbering, tag alignment, what the strip
-says) and `tests/ui/m1/check.spec.mjs` drives both halves in the app against the mock — whose
-`/api/rows` fixture is the engine's own output for one buffer, and whose `/api/autocite` fixture is
-one pair, with anything else answered "nothing to suggest" rather than invented.
+The arithmetic is row numbering, tag alignment and what the strip says; the two halves are driven
+in the app against a server, whose `/api/rows` answer is the engine's own output for one buffer and
+whose `/api/autocite` answer is one pair — anything else is answered "nothing to suggest" rather than
+invented.
 
 ## Known gaps
 
@@ -283,15 +284,14 @@ one pair, with anything else answered "nothing to suggest" rather than invented.
   `js/live/editor.js` (and `app.autocite` to the pane); the shell's citation-aware editor
   (`js/panes/editor-citations.js`) has decorations, hover and trailing-cite alignment but no
   conversion, and neither has a key for a multi-step chain.
-- **Panes only the shell mounts have no tests of their own.** They are drawn (`shell.spec.mjs`) and
-  their kinds are complete (`tests/unit/panes-complete.test.mjs`), and the ribbon's buttons are
-  covered end to end (`engine.spec.mjs`), but a pane like `handwrite` or `script-editor` has no test
-  that drives its own controls.
+- **Panes only the shell mounts have no checks of their own.** They are drawn when the host boots
+  (`tools/shot.mjs` on `/shell.html` fails on a console error) and their kinds are registered, but a
+  pane like `handwrite` or `script-editor` has nothing that drives its own controls.
 
 ## Rules this directory keeps
 
-`tools/lint-rules.mjs` (`yarn lint:rules`) enforces six rules over every `.js`/`.html` file under
-`web-next/`, each of which exists because allowing it caused a real bug:
+`tools/lint.mjs` checks eight rules in one pass, each of which exists because allowing it caused a
+real bug:
 
 | Rule | Why |
 |---|---|
@@ -301,21 +301,25 @@ one pair, with anything else answered "nothing to suggest" rather than invented.
 | (d) no file over 450 lines | a page that grows past this has the app back inside it |
 | (e) no `localStorage` outside `js/core/storage.js` | one storage adapter, with the server copy and the mirror in one place |
 | (f) no `getElementById` outside `js/main.js` | panes reach their own elements through `ctx`, not the document |
+| (g) a tool in `tools/` may only import from inside this repo | an absolute path into another checkout is a dependency nobody declared (it was one, for the browser) |
+| (h) every file a page names exists | a 404 request paints nothing and errors nowhere the gate can see |
 
-Known violations live in `tools/lint-baseline.json`, keyed `file|rule` with a count (9 entries, 12
-violations); the gate fails when a count grows or a new key appears, and paying debt down lowers that
-file with `--write-baseline`.
+There is no baseline of known violations. What the linter carries instead is an allowance list —
+one entry per `file|rule` with a REASON — and the check fails in both directions: an offence that is
+not listed fails, and a listed entry whose offence is gone fails too. Nine allowances stand today:
+rule (b) in `js/panes/graph.js` (the graph animates its own canvas — folding it into the governor is
+a pane change) and in `js/main.js` (one frame yielded while the host swaps), and rule (d) in the
+seven editor/graph files, each with the reason it is one file.
 
-Four more rules are structural, and the tests hold them:
+Four more rules are structural:
 
 - **A route the client can name is a route the engine mounts, and the other way round**
-  (`tests/unit/route-table.test.mjs` compares `js/defaults/endpoints.js` with
+  (`tests/unit/routes.test.mjs` compares `js/defaults/endpoints.js` with
   `crates/api/src/router.rs` in both directions, and requires a server route the client does not call
   to say why it is exempt).
 - **One pane module is one pane**; a helper it needs is a module too.
 - **A pane's behaviour never goes in a page.** If it does not fit the contract, the contract changes.
-- **A pane's look does not change with its wiring**: the UI specs are the acceptance test, and a
-  screenshot diff of the shipped panes is the evidence.
+- **A pane's look does not change with its wiring**: the tile is the same tile whichever port feeds it.
 
 ## Working on it
 
@@ -323,19 +327,20 @@ Four more rules are structural, and the tests hold them:
 camera, wires, routes, restore state; and `layoutDocument()` for the engine's shape), `window.__ws`
 (the engine host's app), `window.__wire`, `window.__bus`.
 
-Three facts about the canvas that tests keep tripping over:
+Three facts about the canvas that a check written against it keeps tripping over:
 
 - **a tile at the fitted zoom is at the CARD level, where there is no pane body to hit-test.** Bring
   the tile into view at 100 % first.
 - **a camera moved by hand is a frame ahead of the LOD pass.** Call `__spike.updateLOD()` before
   asking the DOM who is at a point; a culled tile is `visibility: hidden`, so `elementFromPoint`
   answers `#viewport` and a pointer aimed at it lands nowhere.
-- **`hover()` is an intermittent no-op in the `hasTouch` projects** (Playwright's touch contexts
-  emit touch for mouse input). A spec that needs hover skips where `(hover: none)` holds and asserts
-  the tap instead.
+- **a touch context emits touch for mouse input**, so a hover written as a mouse move is an
+  intermittent no-op there. A check that needs hover asks `(hover: none)` and asserts the tap.
 
 ## Where to look next
 
 - `../../README.md` — the engine half: crates, the corpus format, the pipeline, the API.
-- `../../docs/THEMES.md` — the theme module format and the live model around it.
-- `../../docs/multi-instance.md` — many tiles, one document: shared document, private view.
+- `theme.js` in `js/live/` and `js/core/storage.js` — the theme module format and the live model
+  around it.
+- `js/panes/app-mounts.js` and `js/live/wire/{host,kinds}.js` — many tiles, one document: shared
+  document, private view.

@@ -96,8 +96,8 @@ export default {
         suggest = ctlCheck('ed-suggest', 'suggest rewrites', prefs().suggest === true);
 
         /* THE SAVE MODE. It lives here rather than in the console because a control tile's column width
-           is measured from its own content: a new row there moved the restored split ratio in
-           tests/ui/m1/split.spec.mjs (measured — the same seam came back at 0.495 instead of 0.4637). A
+           is measured from its own content: a new row there moved the restored split ratio
+           (measured — the same seam came back at 0.495 instead of 0.4637). A
            settings tile is not measured that way, and this is a setting. */
         const saveMode = document.createElement('select');
         saveMode.id = 's-save-mode';

@@ -27,10 +27,9 @@ import { esc } from './util.js';
 
 let katexPromise = null;
 
-/* Every read of the typesetter goes through here, never a bare `window`. Node tests import this
-   module to assert the text-to-markup rules (tests/unit/app-math.test.mjs), where `window` is
-   only there if the test put it there; a bare `window.katex` would be a ReferenceError and the
-   rule under test would be untestable. */
+/* Every read of the typesetter goes through here, never a bare `window`. A node-only check imports
+   this module to assert the text-to-markup rules, where `window` exists only if something put it
+   there; a bare `window.katex` would be a ReferenceError and the rule would be uncheckable. */
 const katexLib = () => (typeof window === 'undefined' ? null : window.katex || null);
 
 /** Resolve to `window.katex`, loading the stylesheet + script once. null on failure. */

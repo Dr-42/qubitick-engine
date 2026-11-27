@@ -25,9 +25,7 @@
  * parser reads (crates/parse/src/node.rs, crates/build/src/axioms.rs). Two different things.
  *
  * A pane still shows the server's own words and keeps working when a route refuses
- * (tests/unit/endpoint-mounts.test.mjs holds the table against the engine's router).
- *
- * Test-only endpoints (/__mock/*) are used by tests/mock/server.mjs.
+ * (tests/unit/routes.test.mjs holds the table against the engine's router, both directions).
  */
 export const ENDPOINTS = [
   // Files
@@ -104,10 +102,6 @@ export const ENDPOINTS = [
   // Backend gap: handwriting
   // mounted; the OCR behind it is not: the handler answers "not implemented yet" (handlers_gap.rs)
   { name: 'handwrite.upload', method: 'POST', path: '/api/handwrite' },
-  // Test-only mock endpoints
-  { name: 'mock.reset', method: 'POST', path: '/__mock/reset' },
-  { name: 'mock.log', method: 'GET', path: '/__mock/log' },
-  { name: 'mock.fail', method: 'POST', path: '/__mock/fail' },
 ];
 
 /**

@@ -167,7 +167,7 @@ export function createAppMounts(host) {
            bare KIND name instead (`results['constant'] = v`), and the wire resolver looks for the port
            under that name (`js/live/wire/host.js::defaultValue`: `results[kind][port]`), so a wire
            drawn from a Constant carried NOTHING — measured: the slate tile's `ink` stayed undefined
-           behind a wire that resolved and was painted (tests/ui/m1/slate.spec.mjs). The kind name was
+           behind a wire that resolved and was painted. The kind name was
            also the only name, so two Constant tiles in one workspace overwrote each other.
            The results mirror stays, for the readers that ask the graph by KIND (`ctx.resolveFrom
            ('constant')`); the wire path is the registered port. */

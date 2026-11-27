@@ -70,17 +70,25 @@ report a green run you did not run. If a binary is involved, rebuild it first: a
 ## Gates
 
 ```bash
-cargo test --workspace                    # 47 targets
+cargo test --workspace                    # 48 targets
 cargo clippy --workspace --all-targets    # pre-existing style notes
 cargo test -p qubitick-parse --lib        # one crate while iterating
 cargo test -p qubitick-build --test declared_formation   # one promise
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra  # built 5
+node tools/check.mjs                      # lint + unit + browser gates, no dependencies
 ```
 
-The client has its own gates in `tools/`: `verify-default-view.mjs` (the arrangement the canvas
-ships with, the camera it opens at, and "default view" restoring both) and `shot.mjs` (any URL to
-a PNG). They need a server with a project in it; they fail on a console error, which is the only
-way to notice a pane that threw while the page still painted.
+The client's checks are `tools/` and `tests/unit/`, and none of them needs a package install:
+
+- `node tools/check.mjs [baseUrl]` runs all three below in one go; it fails when a server does not
+  answer rather than skipping the gates;
+- `node tools/lint.mjs` — the client's rules, with an allowance list that must stay true;
+- `node --test "tests/unit/*.test.mjs"` — camera arithmetic, tiling, layout trees, wires, and the
+  client's route table against the engine's router;
+- `tools/verify-default-view.mjs` and `tools/shot.mjs` drive the machine's chromium through
+  `tools/page.mjs` (the DevTools protocol, no Playwright). They need a server with a project in it,
+  and they fail on a console error — the only way to notice a pane that threw while the page still
+  painted.
 
 Two requirements: cargo 1.85+ (edition 2024) and Lean 4.35.0, the version
 `lean-toolchain` names. `./toolchain` resolves both, refuses a `cargo` that cannot build

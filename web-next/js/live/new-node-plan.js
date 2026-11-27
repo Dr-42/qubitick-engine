@@ -4,8 +4,7 @@
  * THE PLAN FOR A NEW NODE, kept apart from the pane's form: the pane builds the fields and renders
  * the preview, this decides what the preview says and what the new file contains. It lived in the
  * pane until the pane crossed the file-size rule, and the split is the right one anyway — this half
- * is pure, so each stub below can be built and checked against a corpus without a browser
- * (tests/unit/live-new-node-plan.test.mjs).
+ * is pure, so each stub below can be built and checked against a corpus without a browser.
  *
  * EVERYTHING IT INVENTS COMES FROM THE CORPUS IT IS CREATING IN. It used to decide all of it
  * itself, out of the harness's own corpus: the era list was `Era0`, the strata list `Strata0|1|2`,

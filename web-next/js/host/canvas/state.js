@@ -98,7 +98,7 @@ export const WIRES = [
      landed on was not there: the stats row offered `highlight` and no stats tile has ever read it,
      so the value was dropped on delivery. With the row's port gone the wire would have no target to
      resolve at all, and `expandWires` skips a wire it cannot land (js/app/wires.js:101) — which is
-     the silent kind of nothing this list must not carry.
-     tests/unit/kind-port-contract.test.mjs holds both halves of that rule. */
+     the silent kind of nothing this list must not carry. Both halves of the rule hold: a port on a
+     row is a port the tile reads, and a wire that cannot land is not on this list. */
   { from: 'clock.tick', to: 'track', type: 'value', note: 'clock → track (ticked pair)' },
 ];

@@ -199,9 +199,16 @@ export function removePane(tree, id) {
 
 export function insertBeside(tree, targetPaneId, newPane, side, ratio = 0.5) {
   const targetPath = findPane(tree, targetPaneId);
-  if (!targetPath || targetPath.length === 0) return tree;
+  if (!targetPath) return tree;
   const orientation = splitOrientation(side);
   if (orientation === null) return tree;
+  /* A LAYOUT PLACES A PANE ONCE (`js/layout/schema.js`). `cmdTreeInsert` already refuses a placed
+     pane and `cmdTreeMove` removes one before placing it again, so this is the second lock on the
+     same door — and it keeps the document valid for a caller that edits a tree directly.
+     THE ROOT IS A TARGET LIKE ANY OTHER: refusing `targetPath.length === 0` made `insert beside` on
+     a root holding a single pane return the tree unchanged, so the command reported success while
+     placing nothing. Wrapping the root in the new split is what beside means. */
+  if (paneIds(tree).includes(newPane)) return tree;
   const newPaneNode = { pane: newPane };
   const parentPath = targetPath.slice(0, -1);
   const targetStep = targetPath[targetPath.length - 1];
@@ -246,6 +253,7 @@ export function insertBeside(tree, targetPaneId, newPane, side, ratio = 0.5) {
 export function insertTab(tree, targetPaneId, newPane) {
   const targetPath = findPane(tree, targetPaneId);
   if (!targetPath) return tree;
+  if (paneIds(tree).includes(newPane)) return tree; // one placement per pane; see insertBeside
   const copy = deep(tree);
   const parentPath = targetPath.slice(0, -1);
   const targetStep = targetPath[targetPath.length - 1];

@@ -20,8 +20,9 @@
 //      still painted.
 //
 // Safe mode (`?safe=1`) is the boot it drives: nothing is restored, so what is measured is the
-// shipped arrangement rather than whatever this machine last arranged.
-import { chromium } from '/home/dsh/workspace/qubitick-corpus-v2/node_modules/playwright/index.mjs';
+// shipped arrangement rather than whatever this machine last arranged. The browser is
+// `tools/page.mjs` — the machine's chromium over the DevTools protocol, no package to install.
+import { launch } from './page.mjs';
 
 const base = (process.argv[2] || 'http://127.0.0.1:3123').replace(/\/$/, '');
 const outDir = process.argv[3] || '/tmp';
@@ -39,13 +40,28 @@ const parseFrames = (labels) => {
   return m;
 };
 
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 
 await page.goto(base + '/?safe=1', { waitUntil: 'networkidle', timeout: 30000 }).catch((e) => errors.push('goto: ' + e.message));
-await page.waitForTimeout(2500);
+
+/* A FIXED SLEEP IS NOT A GATE. The interface is wired in stages (`web-next/js/host/canvas/boot.js`),
+   the restore is a promise on `window.__boot`, and the render pane only loses its placeholder once
+   `/api/lean` has answered — so a snapshot taken "2.5 s after the load event" measures the machine's
+   mood as much as the arrangement. Wait for the promise, then wait for the four tiles of the writing
+   root to be BUILT, and let the check below report a timeout as the failure it is. */
+await page.evaluate(() => (window.__boot && window.__boot.catch(() => {})) || null).catch(() => {});
+const rootBuilt = await page.waitForFunction(() => {
+  const built = (id) => {
+    const el = document.querySelector(`[data-pane="${id}"]`);
+    return !!el && !el.querySelector('.empty');
+  };
+  return ['c0:tree', 'c0:editor', 'c0:render', 'c0:goal'].every(built);
+}, { timeout: 15000 }).catch(() => false);
+if (!rootBuilt) errors.push('the writing root never finished building');
+await page.waitForTimeout(400);
 
 /** Tiles as the user sees them: one entry per pane, measured against the viewport. */
 const snap = () => page.evaluate(() => {

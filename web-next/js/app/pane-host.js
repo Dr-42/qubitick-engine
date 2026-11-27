@@ -164,8 +164,8 @@ export function createPaneHost(services) {
     /* A CONNECTED WIRE WINS. Every app port below is delivered by name whether or not anything is
        wired, which made the wires decoration: `editor.buffer → render` and the four others in
        js/host/canvas/state.js targeted inputs the app already filled, so REMOVING one changed
-       nothing at all (measured — tests/unit/wiring-deliverable.test.mjs names the eight that were
-       in that state, and the seeded wires lead to exactly them).
+       nothing at all (measured: eight of them delivered nothing when removed, and the seeded wires
+       lead to exactly those eight).
        The wire layer hands a tile every wired input as `ins` and keeps the last set on `p._ins`,
        with a wire that is GONE written back as `undefined` (js/live/wire/host.js::applyInputs puts
        a removed wire's port back to "unset"). So "is this port wired" is answerable here, and the
@@ -197,8 +197,8 @@ export function createPaneHost(services) {
        (js/world/chrome.js, every HUD_MS) and on structural changes (a wire added, removed, or
        selected) — so an app edge delivered the value from BEFORE the move and the pane caught up a
        HUD tick later. Measured: the goal tile still showed the old line 80 ms after the caret moved,
-       which is a race that passes on one project and fails on another (tests/ui/m1/module-panes
-       .spec.mjs). Recomputing here is what makes an app-driven source as immediate as it was before
+       which is a race that passes on one project and fails on another. Recomputing here is what
+       makes an app-driven source as immediate as it was before
        a wire could outrank it, and it is paid only by the ports that are actually wired. */
     const through = (name, appPort) => ({
       get: () => effective(name),

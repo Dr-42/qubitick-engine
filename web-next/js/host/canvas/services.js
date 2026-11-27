@@ -64,7 +64,7 @@ export function canvasServices(scope) {
    * (js/panes/new-node.js gives its form a fixed backdrop and a modal shape when `ctx.ws` is there),
    * so a canvas that offered one would have every such pane believe it had a modal surface and a
    * socket it does not have — measured: the new-node tile rendered as a hidden fixed overlay the
-   * moment `ws` was added (tests/ui/m1/new-node.spec.mjs). A capability is named for what it does
+   * moment `ws` was added. A capability is named for what it does
    * here; host identity is not something this host can fake. */
   endpoint: (name) => endpoint(name),
   /* THE WIRE LAYER'S OWN RECOMPUTE, for the pane host: a port a wire feeds reads the wire's value,
