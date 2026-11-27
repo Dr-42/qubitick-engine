@@ -98,8 +98,8 @@ enum Commands {
         #[arg(long)]
         no_build: bool,
         /// Shared ground + imports: one Lean environment, nothing declared twice.
-        /// IN PROGRESS — it needs the pipeline's curated per-file context, so today
-        /// it reports the first emit failure instead of producing a package.
+        /// The era's ground declares the classes and the definitions; one module per
+        /// scope imports it. Both shapes build the starter ship.
         #[arg(long)]
         mesh: bool,
     },

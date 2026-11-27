@@ -2456,6 +2456,24 @@ let mut binder_prefix = String::new();
      * definitions (a class field is written in the corpus's vocabulary, so a field
      * that mentions a defined glyph needs that glyph declared first). */
 
+    /* A GROUND'S DEFINITIONS SPLIT IN TWO, and the split is the whole ordering problem.
+     *
+     * A class FIELD is written in the corpus's vocabulary, so a field that mentions a
+     * definition needs that definition declared FIRST — that is why the chain comes after
+     * the definitions. But a definition's BODY may reach a ground symbol through the
+     * instance (`R.plus`, from `Type: R.plus`), and then the class that declares the field
+     * must exist first and an instance must be in scope. One order cannot serve both, so
+     * the definitions are sorted by which side of the class they belong on:
+     *
+     *   `ground_plain`    — needs no instance: before the classes, so the fields may use it;
+     *   `ground_instance` — reaches a field through `R`: after the classes, inside
+     *                       `section variable [R : <deepest class>]`.
+     *
+     * The ship is the second case: `D.A.02 Mul` is `a × b = a + a` and `+` is `Type: R.plus`,
+     * so its body is `R.plus a a`. Written bare (`plus a a`) it is `Unknown identifier`,
+     * which is what the meshed package reported before this split existed. */
+    let mut ground_plain: Vec<String> = Vec::new();
+    let mut ground_instance: Vec<String> = Vec::new();
     for node in emit_nodes.iter() {
         match node {
             Node::Theorem(t) => {
@@ -2511,6 +2529,10 @@ let mut binder_prefix = String::new();
                    the instance hypothesized — the same `section variable [R : class]` a
                    theorem gets. An unused hypothesis binds nothing, so wrapping a
                    definition that does not need it is free. */
+                /* THE QUALIFIER STAYS IN. A definition is not the class body: it is
+                   written OUTSIDE it, where a field of the instance is reachable only as
+                   `R.plus`. Stripping it here is what produced `plus a a` in a file whose
+                   only `plus` is a field of `class ISA`. */
                 let def_text = crate::definition::emit_definition_in(
                     ctx,
                     d,
@@ -2520,20 +2542,26 @@ let mut binder_prefix = String::new();
                     &frame_sorts,
                     &formations,
                     &known_types,
-                    opts.ground_only,
+                    false,
                 )?;
-                /* A GROUND does not hypothesize its own chain: it DECLARES it, below,
-                   after its definitions (a field is written in the corpus's vocabulary,
-                   so a field that mentions a defined glyph needs that glyph first). */
-                if chain_declared && !opts.ground_only {
+                if opts.ground_only {
+                    /* Which side of the class this definition belongs on: it names the
+                       instance (`R.`) or it does not. See the split above. */
+                    if def_text.contains("R.") {
+                        ground_instance.push(def_text);
+                    } else {
+                        ground_plain.push(def_text);
+                    }
+                } else if chain_declared {
                     let class = section_class(&chain, &[]);
                     body.push_str(&format!(
                         "section\nvariable [R : {class}]\n\n{def_text}end\n"
                     ));
+                    body.push('\n');
                 } else {
                     body.push_str(&def_text);
+                    body.push('\n');
                 }
-                body.push('\n');
             }
             // Classes are the ground's; an A block contributes nothing here.
             Node::Axiom(_) => {}
@@ -2547,9 +2575,28 @@ let mut binder_prefix = String::new();
     }
 
     if opts.ground_only {
-        // A ground's definitions came first; the chain that MENTIONS them follows them,
-        // and so do their characterising axioms, which name them.
+        /* THE GROUND'S ORDER: what the fields need, the classes, what needs the classes.
+         *
+         * `ground_plain` first, because a class field is written in the corpus's
+         * vocabulary and a field that mentions a defined glyph needs the definition
+         * declared before it. Then the classes. Then `ground_instance`, because a
+         * definition whose body reaches a field through `R` needs both the class and an
+         * instance, which is what the section hypothesizes. The characterising axioms
+         * name the definitions, so they close the file. */
+        for text in &ground_plain {
+            body.push_str(text);
+            body.push('\n');
+        }
         body.push_str(&chain_body);
+        if !ground_instance.is_empty() {
+            let class = section_class(&chain, &[]);
+            body.push_str(&format!("section\nvariable [R : {class}]\n\n"));
+            for text in &ground_instance {
+                body.push_str(text);
+                body.push('\n');
+            }
+            body.push_str("end\n");
+        }
         body.push_str(&char_axioms);
     }
 

@@ -77,6 +77,7 @@ cargo clippy --workspace --all-targets    # pre-existing style notes
 cargo test -p qubitick-parse --lib        # one crate while iterating
 cargo test -p qubitick-build --test declared_formation   # one promise
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra  # built 5
+LEAN_PATH=$PWD/prelude ./target/debug/qubitick lake --mesh /tmp/ship        # both package shapes build
 node tools/check.mjs                      # lint + unit + browser gates, no dependencies
 ```
 

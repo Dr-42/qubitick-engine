@@ -308,7 +308,8 @@ qubitick build   <root> --frozen H # ...and refuse unless the ground hashes to H
 qubitick scaffold <corpus>          # the class chain the A blocks imply, for the ground
 qubitick hash-ground <root>         # the ground file's hash, for --frozen
 qubitick seed    <corpus> --preset  # init | mathlib | bare | custom
-qubitick lake    <root>            # emit the corpus as one Lake package
+qubitick lake    <root>            # emit the corpus as one Lake package, one module per node
+qubitick lake    <root> --mesh     # ...or one era ground plus one module per scope
 qubitick rows    <root> <file>     # the file's proof rows and their verdicts
 qubitick steps   <root> <expr>     # the rewrites the corpus can cite from an expression
 qubitick autocite <root> <lhs> <rhs>  # the citations that bridge two expressions
@@ -420,6 +421,8 @@ cargo clippy --workspace --all-targets
 cargo build -p qubitick-cli
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra
     # built 5, verified 5
+LEAN_PATH=$PWD/prelude ./target/debug/qubitick lake --mesh /tmp/ship-copy
+    # "built": true — both package shapes
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick axioms corpus-templates/algebra \
     corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit  # "axioms": []
 ```
@@ -453,6 +456,7 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/coverage.rs` | an A-block glyph with no D node fails naming it; the shipped ship homes every glyph its A blocks write; and `scaffold` writes the chain |
 | `crates/build/tests/emission_surface.rs` | no module emits an `axiom`; a ground-named glyph declares nothing; a sort word is a literal; a cross-module definition is imported; a `Type:` with no name is refused |
 | `crates/build/tests/freeze.rs` | the ground hash is stable and follows the file; `--frozen` accepts its own hash and refuses another; every preset is a ground |
+| `crates/build/tests/lake_mesh.rs` | both package shapes build the ship, the scope module imports the era ground, and the ground declares the class before the definition that reaches its field through `R` |
 | `crates/parse/tests/proof_surface.rs` | `⊢ <term>` closes a proof, `∎` ends it, and prose is refused by name |
 
 ### The toolchain `./toolchain` looks for
@@ -582,13 +586,13 @@ answers rather than skipping the gates, because a gate that silently does nothin
 - **A refusal that comes back as HTTP 422 is thrown away by the client.** `app.rows` and
   its siblings `throw` on `!r.ok`, so a `parse.content` refusal — which carries real
   diagnostics — leaves the check strip with no verdicts and the console with an error.
-- **`lake --mesh` writes the package and does not compile it.** Emission now completes
-  (`home_modules` is built for the meshed shape from the corpus's node list: a definition's
-  home is its era's ground module, a theorem's is its scope module), and `lake build` stops
-  in the era ground: `Ground.lean:26: Unknown identifier plus`. The ground writes its
-  definitions BEFORE the class that carries their symbols, and writes a class field with the
-  `R.` qualifier stripped and no `section variable [R : ...]` to bind it
-  (`crates/emit/src/module.rs::emit_ground`).
+- **A ground orders its text around the classes, and one order cannot serve both sides.**
+  A class field is written in the corpus's vocabulary, so a field that mentions a definition
+  needs the definition first; a definition whose body reaches a field through `R` (`a × b =
+  a + a` over `Type: R.plus`) needs the class first and an instance in scope. `emit_ground`
+  therefore sorts its definitions by which side of the class they belong on — plain bodies,
+  the classes, then a `section variable [R : <deepest class>]` holding the rest
+  (`crates/build/tests/lake_mesh.rs`).
 - **A stale `.lake` fails the `lake` shape.** `qubitick lake` reuses
   `<project>/.lake/src` as it finds it, and a ground compiled by a different Lean version
   makes it stop with `incompatible header`; `--no-build` never prunes. Delete the
