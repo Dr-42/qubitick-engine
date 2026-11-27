@@ -732,43 +732,70 @@ fn types_from_semas(
             if head.primary != d.symbol.primary || args.is_empty() {
                 continue;
             }
-            /* The carrier this section is written over: the first argument that is a
-               term of a declared sort, or the head of one. */
-            let mut section_carrier: Option<u32> = None;
-            let mut positions: Vec<(usize, u32)> = Vec::new();
-            for (i, a) in args.iter().enumerate() {
-                let c = match a {
-                    Expr::Sym(ac) => leaves.get(&ac.primary).copied(),
-                    other => head_id(other)
-                        .and_then(|id| leaves.get(&id).copied().or_else(|| env.carrier_of_head(id))),
-                };
-                if let Some(c) = c {
-                    section_carrier.get_or_insert(c);
-                    positions.push((i, c));
+            /* WHAT EACH ARGUMENT POSITION IS USED AT, read off the term in it: a constant's
+               `Type:`, an application's result sort, a constructor's carrier. This is the ONLY
+               evidence a Sema gives about a position. Writing the section's carrier into every
+               open slot instead typed `a \star b` — a `\tau` and an `\iota` operator — as
+               `tau → tau → tau`, after which its `\iota` argument could not be applied. */
+            let mut constrained: Vec<Option<u32>> = args
+                .iter()
+                .map(|a| sort_of_term(&leaves, env, a))
+                .collect();
+            // The section is written over the carrier its patterns name.
+            let section_carrier = constrained.iter().flatten().next().copied();
+            let rhs_sort = sort_of_term(&leaves, env, &sides[1]);
+            let result = rhs_sort.or(section_carrier);
+            /* THE EQUATION TIES THE REMAINING SORT: `\tau_0 \oplus b = b` says the operator's
+               result IS `b`, so `b` sits at the result's sort. That is what makes a homogeneous
+               operator `tau → tau → tau` without the corpus restating its second argument. A
+               position that appears nowhere else stays unknown: the observation from the
+               corpus's uses answers for it, or the frame's default does. Nothing is invented. */
+            if let (Expr::Var(v), Some(r)) = (&sides[1], result) {
+                for (i, a) in args.iter().enumerate() {
+                    if matches!(a, Expr::Var(w) if w == v) {
+                        constrained[i] = Some(r);
+                    }
                 }
             }
-            let Some(carrier) = section_carrier else { continue };
             let sig = sigs.entry(head.primary).or_default();
             if args.len() > sig.len {
                 sig.len = args.len();
             }
             sig.binder.resize(sig.len, false);
             sig.arg_carrier.resize(sig.len, None);
-            for (i, c) in positions {
-                sig.arg_carrier[i] = Some(c);
-            }
-            /* A section that defines the operator over one carrier returns that carrier
-               — every position it left open included. `= b` with `b` a metavariable says
-               nothing on its own; the section it belongs to does. */
-            for slot in sig.arg_carrier.iter_mut() {
-                if slot.is_none() {
-                    *slot = Some(carrier);
+            for (i, c) in constrained.into_iter().enumerate() {
+                if let Some(c) = c {
+                    sig.arg_carrier[i] = Some(c);
                 }
             }
-            if sig.res_carrier.is_none() {
-                sig.res_carrier = Some(carrier);
+            if let Some(r) = result {
+                sig.res_carrier = Some(r);
             }
         }
+    }
+}
+
+/// The sort a TERM is written at, as far as the corpus's own declarations say.
+///
+/// A constant carries its `Type:`; an application carries the result sort of its head (a
+/// constructor's carrier, a primitive's declared result); a metavariable carries nothing —
+/// its sort comes from where else it appears in the same equation, never from here.
+fn sort_of_term(
+    leaves: &HashMap<u32, u32>,
+    env: &SortEnv,
+    e: &qubitick_model::Expr,
+) -> Option<u32> {
+    use qubitick_model::Expr;
+    match e {
+        Expr::Sym(ac) => leaves
+            .get(&ac.primary)
+            .copied()
+            .or_else(|| env.carrier_of_head(ac.primary)),
+        Expr::Apply(h, _) => leaves
+            .get(&h.primary)
+            .copied()
+            .or_else(|| env.carrier_of_head(h.primary)),
+        _ => None,
     }
 }
 
@@ -1679,6 +1706,20 @@ fn symbol_declarations(
                 .clone()
                 .unwrap_or_else(|| arrow_ty(&auth.args, auth.res, &name_of)),
         );
+    }
+    /* THE OPERATOR A `Sema:` DEFINES IS TYPED BY THAT SEMA, and its own module needs the
+       answer: the frame does not declare it, and the observation does not carry it, so the
+       composed signature (`types_from_semas`) is published here under the operator's name.
+       Without this, a definition whose cases are emitted as a recursor fell back to a
+       homogeneous arrow type — `a \star b` over a `\tau` AND an `\iota` argument was written
+       `tau → tau → tau`, and its `\iota` argument then could not be applied. */
+    for (id, sig) in &sigs {
+        if sig.len == 0 || sig.arg_carrier.iter().all(|c| c.is_none()) {
+            continue;
+        }
+        inferred_types
+            .entry(name_of(*id))
+            .or_insert_with(|| glyph_type(*id, &sigs, &authored, &name_of));
     }
     known_types.extend(inferred_types.clone());
     known_types.extend(declared_types.clone());

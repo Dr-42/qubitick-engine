@@ -167,6 +167,13 @@ Consequences that have bitten:
   module at a time, `Qubitick.HL.tau has already been declared` the moment two of them met
   in one environment (`crates/emit/src/module.rs`, the formation loop in
   `symbol_declarations`, gated on `emit_nodes`; `declared_formation.rs` holds it).
+- **A Sema composes a type from EVIDENCE only** (`module.rs::types_from_semas`,
+  `sort_of_term`): constants by their `Type:`, applications by their head's result sort, the
+  right side of an equation by the result. Never from the carrier the section is written
+  over — that turned a `\tau`/`\iota` operator into `tau → tau → tau`.
+- **The recursor matches the position the EVIDENCE names**, not the first argument
+  (`definition.rs::formation_match_def_text`): the position whose terms are constructors of
+  one formation; the others must be variables, since a recursor holds them fixed.
 - **A formation's separator is the SEMA's** (`crates/parse/src/node.rs::formation_of_expr`):
   any head the corpus declares as a connective separates its alternatives. Splitting on
   "the corpus's lowest-id connective" made a formation depend on how many other connectives

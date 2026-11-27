@@ -227,6 +227,14 @@ pub(crate) fn formation_match_def_text(
     let mut arity: Option<usize> = None;
     let mut params: Option<Vec<String>> = None;
     let mut arms: Vec<Arm> = Vec::new();
+    /* WHICH ARGUMENT THE CASES MATCH ON IS READ, NOT ASSUMED.
+     *
+     * A recursor matches one argument; the sections vary that one and hold the others fixed.
+     * Requiring it to be the FIRST typed `a \star b` (an `\iota` by a `\tau`) as a `\tau → \tau`
+     * operator, because the second argument's pattern was a `\tau_0` where a variable was
+     * expected. The position is the one whose patterns are constructors of one formation; every
+     * other position must be a variable, since the recursor holds it fixed. */
+    let mut match_at: Option<usize> = None;
     for section in &sections {
         let Expr::Apply(h, sides) = section else { return None };
         if h.primary != qubitick_model::EQ_SYM || sides.len() != 2 {
@@ -236,11 +244,23 @@ pub(crate) fn formation_match_def_text(
         if resolver(head.primary) != name {
             return None;
         }
-        let (first, rest) = args.split_first()?;
-        // The parameters after the matched argument are plain variables, and every arm
-        // threads the SAME names through — they are one def's arguments.
+        // The position whose term is a CONSTRUCTOR of one declared formation is the one the
+        // cases match on. Every other position must be a variable: a recursor holds it fixed.
+        let position = args.iter().position(|a| match a {
+            Expr::Sym(ac) => formations.values().any(|(_, cs)| cs.contains(&ac.primary)),
+            Expr::Apply(h2, _) => formations.values().any(|(_, cs)| cs.contains(&h2.primary)),
+            _ => false,
+        })?;
+        match match_at {
+            Some(p) if p != position => return None,
+            _ => match_at = Some(position),
+        }
+        // Every arm threads the SAME parameter names through — they are one def's arguments.
         let mut names: Vec<String> = Vec::new();
-        for a in rest {
+        for (i, a) in args.iter().enumerate() {
+            if i == position {
+                continue;
+            }
             let Expr::Var(v) = a else { return None };
             names.push(v.clone());
         }
@@ -248,6 +268,7 @@ pub(crate) fn formation_match_def_text(
             Some(p) if *p != names => return None,
             _ => params = Some(names),
         }
+        let first = &args[position];
         let (owner, (_, ctors)) = formations.iter().find(|(_, (_, cs))| match first {
             Expr::Sym(ac) => cs.contains(&ac.primary),
             Expr::Apply(h2, _) => cs.contains(&h2.primary),
@@ -291,6 +312,9 @@ pub(crate) fn formation_match_def_text(
         ordered.push(arms.iter().find(|a| a.ctor == *c)?);
     }
 
+    if std::env::var("QDBG").is_ok() {
+        eprintln!("[def] name={name} known={:?} arity={n}", known.get(name));
+    }
     // The type is the frame's — the Sema composed it (`module::types_from_semas`).
     let ty = known.get(name).cloned().unwrap_or_else(|| {
         let mut t = String::new();
@@ -301,32 +325,62 @@ pub(crate) fn formation_match_def_text(
         t.push_str(&carrier_name);
         t
     });
-    let rest_names: Vec<String> = params.clone().unwrap_or_default();
-    let mut out = format!("noncomputable def {name} : {ty} :=\n  fun __x => {carrier_name}.rec\n");
-    // The motive: the remaining arguments, then the carrier.
+    let pos = match_at?;
+    let all: Vec<String> = params.clone().unwrap_or_default();
+    // The arguments BEFORE the matched one stay as outer lambdas; those AFTER it ride in the
+    // motive and in every case, because the recursor holds them fixed.
+    let pre: Vec<String> = all.iter().take(pos).cloned().collect();
+    let post: Vec<String> = all.iter().skip(pos).cloned().collect();
+    let arrow_to = |args: &[String]| -> String {
+        let mut t = String::new();
+        for _ in args {
+            t.push_str(&carrier_name);
+            t.push_str(" → ");
+        }
+        t.push_str(&carrier_name);
+        t
+    };
+    let _ = arrow_to(&all);
+    let mut head = String::new();
+    for v in &pre {
+        head.push_str(v);
+        head.push(' ');
+    }
+    let mut out = format!("noncomputable def {name} : {ty} :=\n  fun {head}__x => {carrier_name}.rec\n");
+    // The motive: the arguments after the matched one, then the carrier.
     let mut motive = String::from("fun _ => ");
-    for _ in 1..n {
+    for _ in &post {
         motive.push_str(&carrier_name);
         motive.push_str(" → ");
     }
     motive.push_str(&carrier_name);
     out.push_str(&format!("    (motive := {motive})\n"));
     for arm in &ordered {
-        /* THE RECURSOR'S CASE: its constructor's arguments, then the induction
-           hypothesis; the corpus's own parameter names follow, because the value is
-           written in them. */
+        /* THE RECURSOR'S CASE: its constructor's arguments, then the induction hypothesis;
+           the arguments the recursor holds fixed follow, because the value is written in
+           them. */
         let mut case = String::new();
         if !arm.vars.is_empty() {
             case.push_str(&format!("fun {} ih => ", arm.vars.join(" ")));
         }
-        if !rest_names.is_empty() {
-            case.push_str(&format!("fun {} => ", rest_names.join(" ")));
+        if !post.is_empty() {
+            case.push_str(&format!("fun {} => ", post.join(" ")));
         }
-        // A RECURSIVE CALL IN THE VALUE IS THE HYPOTHESIS: `oplus a b` under the
-        // `caret a` arm is `ih b`, because the recursor already holds the result for `a`.
+        /* A RECURSIVE CALL IN THE VALUE IS THE HYPOTHESIS. The call the corpus writes names
+           every argument (`a \star b`); the recursor already holds the result for the
+           matched one, so `star a b` becomes `ih` applied to the fixed arguments. */
         let mut value = arm.rhs.clone();
         if let Some(rec) = arm.vars.first() {
-            value = value.replace(&format!("{name} {rec}"), "ih");
+            let mut call_args: Vec<String> = pre.clone();
+            call_args.push(rec.clone());
+            call_args.extend(post.iter().cloned());
+            let call = format!("{name} {}", call_args.join(" "));
+            let replacement = if post.is_empty() {
+                "ih".to_string()
+            } else {
+                format!("ih {}", post.join(" "))
+            };
+            value = value.replace(&call, &replacement);
         }
         case.push_str(&value);
         out.push_str(&format!("    ({case})\n"));

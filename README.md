@@ -587,6 +587,10 @@ answers rather than skipping the gates, because a gate that silently does nothin
   `oplus tau_0 tau_0` is only *definitionally* `tau_0`. A definitional step wants
   `Eq.refl lhs` elaborated against the goal, not a chain
   (`crates/rewrite/src/chain.rs::justify_step`).
+- **A `Sema:` that fails to parse is opaque, and the complaint arrives elsewhere.** A body
+  naming an undeclared glyph falls back to a raw-text node (the tolerant parse), the node is
+  then not a formation or a definition, and the build reports a coverage hole in the
+  CONSTRUCTOR files instead. Declaring the glyph is the fix; the diagnostic does not say so.
 - **An induction branch takes one hypothesis per RECURSIVE field, from the declaration.** The
   emitter passes each constructor's fields and carrier to `compile_induction`
   (`qubitick_rewrite::CtorFields`); a field whose sort is the carrier brings an `ih`.
