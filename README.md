@@ -142,8 +142,8 @@ declaration is *written with*, which no corpus declares:
 
 | token | meaning |
 |---|---|
-| `=` | a `Sema:` and a statement relate two sides with it (the reserved `EQ_SYM`) |
-| `\leftrightarrow`, `\iff` | the iff that links a relational definition to its body |
+| `=`, `:=` | a `Sema:` and a statement relate two sides with it (the reserved `EQ_SYM`) — `:=` is the same relation, spelled the way human mathematics writes a definition |
+| `\leftrightarrow`, `\iff`, `:\iff` | the iff that links a relational definition to its body |
 | `\to`, `\rightarrow`, `\longrightarrow`, `\Longrightarrow` | the arrow of a `Type:` signature, and implication |
 | `\forall`, `\exists` | the quantifiers, with the `:` that introduces their sort |
 | `\ulcorner … \urcorner` | the corners a citation's explicit arguments are written in |

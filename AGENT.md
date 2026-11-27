@@ -197,6 +197,12 @@ Consequences that have bitten:
   and must not fall through to the term path — that path sees one parameter against two and
   writes `axiom oplus : tau → tau → tau`, an assumption in place of the definition, with every
   file reported verified. The sentence names the missing constructor.
+- **`:=` and `:\iff` are the format's own relations, spelled as authors spell them**
+  (`crates/parse/src/lexer.rs`, the `:` arm): a definition reads `a \star b := ...` and a
+  relational definition `a \subseteq b :\iff ...`, both lexing as the `=` and the iff the
+  declaration format already has. Left as a bare colon, the body failed to parse and the
+  tolerant pass kept the whole definition as raw text — a node that looked like a definition
+  and said nothing.
 - **A node carries ONE statement, and a definition ONE body.** `parse_theorem` used to
   overwrite the statement with every bare line before `Proof:`, so the last one won and the
   earlier ones vanished without a word — a theorem file whose first line was a scrap of the

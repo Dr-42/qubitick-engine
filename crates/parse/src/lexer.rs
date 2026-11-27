@@ -274,6 +274,36 @@ pub fn lex(src: &str, ctx: &Ctx) -> Result<Vec<Token>, LexError> {
                 i += 1;
             }
             b':' => {
+                /* `:=` IS THE DEFINING RELATION, AND `:\iff` THE DEFINING IFF.
+                 *
+                 * Human symbolic mathematics writes a definition `a \star b := ...` and a
+                 * relational definition `a \subseteq b :\iff ...`. Both spell a relation the
+                 * declaration format already has, so they lex as that relation — one token
+                 * each, here, so every reader of a `Sema:` body sees one shape. Left as a bare
+                 * colon, the body failed to parse and the tolerant pass kept the whole
+                 * definition as raw text: the node still looked like a definition and said
+                 * nothing (measured on a corpus written with `:=`). */
+                if i + 1 < n && bytes[i + 1] == b'=' {
+                    tokens.push(Token::Eq(Span::new(i, i + 2)));
+                    i += 2;
+                    continue;
+                }
+                // `:\iff` — the colon is punctuation in front of the linking connective, so it
+                // is dropped and the command lexes on its own, by the same arm as everywhere.
+                for word in ["\\iff", "\\leftrightarrow"] {
+                    if src[i + 1..].starts_with(word)
+                        && !src[i + 1 + word.len()..]
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_alphabetic())
+                    {
+                        i += 1;
+                        break;
+                    }
+                }
+                if bytes[i] != b':' {
+                    continue;
+                }
                 tokens.push(Token::Colon(Span::new(i, i + 1)));
                 i += 1;
             }
