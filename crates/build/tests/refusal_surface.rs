@@ -175,6 +175,41 @@ fn punctuation_the_name_map_does_not_know_still_gets_a_name() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn two_glyphs_that_read_as_one_lean_name_get_two_names() {
+    // `\times` and `×` both derive `times`, and Lean has one namespace: without a rule the
+    // corpus has one operator where it declared two, and the modules that each declare
+    // `def times` collide the moment anything imports both. The earlier claim keeps the name;
+    // the other takes the engine's letter code (which no LaTeX glyph can derive).
+    let files = formation_with(&[
+        (
+            "Era0/Strata0/Definitions/D_S_05_TimesWord.qbit",
+            "D.S.05. TimesWord\na \\times b\nSema:\n(\\tau_0 \\times b = b) \\land ((^+ a) \\times b = ^+ (a \\times b))\n",
+        ),
+        (
+            "Era0/Strata0/Definitions/D_S_06_TimesGlyph.qbit",
+            "D.S.06. TimesGlyph\na × b\nSema:\n(\\tau_0 × b = b) \\land ((^+ a) × b = ^+ (a × b))\n",
+        ),
+    ]);
+    let dir = corpus("onename", &files);
+    let o = run(
+        &dir,
+        &[
+            "Era0/Strata0/Definitions/D_S_05_TimesWord.qbit",
+            "Era0/Strata0/Definitions/D_S_06_TimesGlyph.qbit",
+        ],
+    );
+    assert!(o.all_verified, "two glyphs, two names, one build: {}", detail(&o));
+    let named = |needle: &str| o.emitted.iter().any(|(_, t)| t.contains(needle));
+    assert!(
+        named("def times ") && named("def lx_times "),
+        "one glyph keeps the name and the other is letter-coded:\n{}\n{}",
+        o.emitted[0].1,
+        o.emitted[1].1
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /* ────────────────────────── refused, by name ────────────────────────── */
 
 #[test]

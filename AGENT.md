@@ -222,7 +222,9 @@ Consequences that have bitten:
   SHADOWS it — including the kernel equality the emitter writes in the same module — and the
   corpus still reports every file verified while an unrelated theorem's type has become an
   operator application (`Unknown constant CoeSort`). Keywords take `_` (`\in` → `in_`);
-  punctuation-only glyphs take `sym_<hex>`.
+  punctuation-only glyphs take `sym_<hex>`, and two corpus glyphs that read as one name
+  (`\times` / `×` → `times`) are separated by the same code, earlier tex first
+  (`ingest.rs`, the pass over `syms` right after the claims merge).
 - **The recursor matches the position the EVIDENCE names**, not the first argument
   (`definition.rs::formation_match_def_text`): the position whose terms are constructors of
   one formation; the others must be variables, since a recursor holds them fixed. Its MOTIVE

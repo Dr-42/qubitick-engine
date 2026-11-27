@@ -228,7 +228,10 @@ those names. A corpus glyph derives its Lean name from its LaTeX (`\oplus` → `
 owns is emitted as a **letter code** instead: `lx_` and then the name (`\Eq` → `lx_Eq`,
 `\And` → `lx_And`). The prefix is the engine's — a LaTeX control word cannot contain `_`, so
 no corpus declaration reaches it — and the code is derived from the glyph alone, so the same
-glyph gets the same name in every module. Without the code the glyph does not clash with
+glyph gets the same name in every module. Two corpus glyphs can read as ONE name (`\times`
+and `×` both derive `times`), and Lean has one namespace there too: the earlier claim keeps
+the name and the later takes the code (`×` → `lx_times`), so a corpus that declares both
+operators gets two, in every module that names them. Without the code the glyph does not clash with
 the ground's name, it shadows it: a corpus `\Eq` emitted as `def Eq : \tau → \tau → \tau`
 makes every `Eq` written in that module after it — the kernel equality the emitter itself
 writes — mean the corpus's operator, and the failure surfaces in an unrelated file as an
@@ -469,7 +472,7 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 51 targets, 346 tests, 2 ignored
+cargo test --workspace        # 51 targets, 347 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets
 cargo build -p qubitick-cli

@@ -362,6 +362,39 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
         }
     }
 
+    /* TWO GLYPHS CAN DERIVE ONE LEAN NAME, AND LEAN HAS ONE NAMESPACE.
+     *
+     * `\times` and `×` both read as `times`; `\widehat{J}_{+}` and `\widehat{J}_{-}` both
+     * read as `widehat_J`. Two corpus operators under one Lean name is one operator to Lean:
+     * whichever module was imported first answers for both, and the two modules that each
+     * declare `def times` collide when anything imports both. The earlier claim (by tex, so
+     * the answer does not depend on file order) keeps the name; every later one takes the
+     * engine's letter code, which no LaTeX glyph can derive — `×` becomes `lx_times`. */
+    {
+        let mut taken: std::collections::HashMap<(String, String), String> =
+            std::collections::HashMap::new();
+        for claim in syms.values_mut() {
+            let base = claim.lean.clone();
+            let mut name = base.clone();
+            let mut n = 0usize;
+            loop {
+                match taken.get(&(claim.era.clone(), name.clone())) {
+                    Some(tex) if *tex != claim.tex => {
+                        n += 1;
+                        name = if n == 1 {
+                            format!("{LETTER_CODE}{base}")
+                        } else {
+                            format!("{LETTER_CODE}{base}_{n}")
+                        };
+                    }
+                    _ => break,
+                }
+            }
+            claim.lean = name.clone();
+            taken.insert((claim.era.clone(), name), claim.tex.clone());
+        }
+    }
+
     // A citation names the number the AUTHOR wrote and a lookup names the node's
     // NAME, so neither may be claimed twice by one kind in one scope: the second
     // node would be unreachable and the first would answer for it. Collect both
