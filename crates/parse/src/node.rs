@@ -331,12 +331,17 @@ fn formation_of_expr(ctx: &Ctx, e: &Expr, glyph: Option<&str>) -> Option<Vec<Cto
         return None;
     }
     // RHS must be a disjunction-of-atoms (or a single atom).
-    // A formation's alternatives are separated by the corpus's own connective: the
-    // declaration says which glyph that is (`Role: connective`), and nothing here
-    // names one.
-    let vee = ctx.declared_with_facet(Facet::Connective).map(|r| r.id as u32);
+    /* THE SEPARATOR IS THE SEMA'S OWN, and `declared_with_facet(Connective)` is not
+       it. That call answers "the first connective this corpus declares, by id" — so a
+       corpus that declares `\land` before `\vee` had its formations split on the wrong
+       glyph and, in the worst case, classified as an ordinary equation: adding one
+       unrelated connective node flipped `\tau = \tau_0 \vee (^+ \tau)` from a formation
+       to a `MacroExpr`, which emptied the emitter's formation map and turned every
+       constructor into a coverage hole. A formation's alternatives are separated by
+       whatever the Sema writes there, so the tree decides and the corpus's declaration
+       only VALIDATES it: any head with the `Connective` facet separates. */
     let mut ctors: Vec<CtorDecl> = Vec::new();
-    fn collect(tree: &Expr, vee: Option<u32>, out: &mut Vec<CtorDecl>) -> bool {
+    fn collect(ctx: &Ctx, tree: &Expr, out: &mut Vec<CtorDecl>) -> bool {
         match tree {
             Expr::Sym(ac) => {
                 out.push(CtorDecl {
@@ -345,8 +350,13 @@ fn formation_of_expr(ctx: &Ctx, e: &Expr, glyph: Option<&str>) -> Option<Vec<Cto
                 });
                 true
             }
-            Expr::Apply(h2, args2) if Some(h2.primary) == vee && args2.len() == 2 => {
-                collect(&args2[0], vee, out) && collect(&args2[1], vee, out)
+            Expr::Apply(h2, args2)
+                if args2.len() == 2
+                    && ctx
+                        .by_id(i64::from(h2.primary))
+                        .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Connective)) =>
+            {
+                collect(ctx, &args2[0], out) && collect(ctx, &args2[1], out)
             }
             // A CONSTRUCTOR WITH ARGUMENTS (`^+ \tau`, `\mathbb{Z}^{+} \tau`): the
             // head is the constructor and the arguments are the sorts it is declared
@@ -366,7 +376,7 @@ fn formation_of_expr(ctx: &Ctx, e: &Expr, glyph: Option<&str>) -> Option<Vec<Cto
             _ => false,
         }
     }
-    if !collect(&args[1], vee, &mut ctors) || ctors.len() < 2 {
+    if !collect(ctx, &args[1], &mut ctors) || ctors.len() < 2 {
         // A formation is a genuine choice of ≥2 nullary constructors; a single-atom
         // RHS (e.g. `\mathbb{R} = \mathbb{R}_{\hat B}`) is a definitional equality,
         // not a formation.

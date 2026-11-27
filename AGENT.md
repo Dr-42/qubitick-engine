@@ -167,6 +167,13 @@ Consequences that have bitten:
   module at a time, `Qubitick.HL.tau has already been declared` the moment two of them met
   in one environment (`crates/emit/src/module.rs`, the formation loop in
   `symbol_declarations`, gated on `emit_nodes`; `declared_formation.rs` holds it).
+- **A formation's separator is the SEMA's** (`crates/parse/src/node.rs::formation_of_expr`):
+  any head the corpus declares as a connective separates its alternatives. Splitting on
+  "the corpus's lowest-id connective" made a formation depend on how many other connectives
+  were declared, so one unrelated `\land` node turned `\tau = \tau_0 \vee (^+ \tau)` into an
+  ordinary equation and every constructor into a coverage hole.
+- **A case-defined operator's rows cannot be justified yet**: the rule table keeps one
+  statement per definition division, and a `Sema:` of cases needs one rule per section.
 - **Autoinduce is client-side text substitution** (`js/live/induce.js`): it writes each case
   goal under a case pattern the author wrote, and nothing derives the patterns.
   `tests/unit/induce.test.mjs` holds the laws; `/api/induce` is a stub.

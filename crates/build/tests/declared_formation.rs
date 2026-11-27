@@ -237,3 +237,77 @@ fn the_sema_composes_the_operators_type() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/* THE SEPARATOR IS THE SEMA'S OWN, NOT "THE CORPUS'S CONNECTIVE".
+ *
+ * `formation_of_expr` used to split a formation's alternatives on
+ * `declared_with_facet(Connective)` — the LOWEST-ID connective the corpus declares. A corpus
+ * that declares `\land` as well as `\vee` then had `\tau = \tau_0 \vee (^+ \tau)` split on the
+ * wrong glyph, so the node was classified as an ordinary equation: no inductive, an empty
+ * formation map in the emitter, and every constructor became a coverage hole
+ * ("`\tau_0` has a `Type:` signature and no home"). Adding ONE unrelated connective node was
+ * enough to do it.
+ */
+#[test]
+fn a_second_declared_connective_does_not_unmake_a_formation() {
+    let dir = root("two-connectives");
+    corpus(&dir);
+    // A connective the formation does not use, declared first so its id is lower.
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let file = dir.join("Era0/Strata0/Definitions/D_S_02_Tick.qbit");
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the formation emits");
+    assert!(
+        emitted.contains("inductive tau : Type"),
+        "the carrier is still an inductive with a second connective declared:\n{emitted}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/* THE SEMA'S CASES ARE THE DEFINITION, COMPILED TO THE CARRIER'S RECURSOR.
+ *
+ * `match` arms were tried first and Lean refused them: a multi-argument pattern match is
+ * encoded through `PProd`, and a module emitted under `prelude` has none
+ * (`Unknown constant PProd.mk`). The recursor is spelled out instead.
+ */
+#[test]
+fn a_semas_cases_become_a_definition_over_the_recursor() {
+    let dir = root("recursor-def");
+    corpus(&dir);
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
+    // Two cases over the carrier: `\tau_0 \oplus b = b` and the recursive one.
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
+        "D.S.05. Plus\na \\oplus b\nSema:\n(\\tau_0 \\oplus b = b) \\land ((^+ a) \\oplus b = ^+ (a \\oplus b))\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let file = dir.join("Era0/Strata0/Definitions/D_S_05_Plus.qbit");
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the cases emit");
+    assert!(
+        emitted.contains("noncomputable def oplus : tau → tau → tau"),
+        "the Sema composed the type:\n{emitted}"
+    );
+    assert!(
+        emitted.contains("tau.rec"),
+        "the cases compile to the carrier's recursor:\n{emitted}"
+    );
+    assert!(
+        emitted.contains("(fun b => b)") && emitted.contains("fun a ih => fun b => caret (ih b)"),
+        "one case per constructor, the recursive call through the hypothesis:\n{emitted}"
+    );
+    assert!(!emitted.contains("axiom"), "a definition is not an assumption:\n{emitted}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

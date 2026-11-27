@@ -264,7 +264,13 @@ term is the intended drill-down; the DAG itself is a computation, and the artifa
 
 Four constructs, and nothing else: `def`, `inductive`, `theorem`, and a reference.
 
-- **a definition** (`Sema:`) — `noncomputable def`, in the corpus's own scope;
+- **a definition** (`Sema:`) — `noncomputable def`, in the corpus's own scope. A `Sema:`
+  whose sections are constructor equations over the corpus's own carrier is a definition by
+  cases, compiled to that carrier's recursor:
+  `(\tau_0 \oplus b = b) \land ((^+ a) \oplus b = ^+ (a \oplus b))` becomes
+  `fun __x => tau.rec (motive := fun _ => tau → tau) (fun b => b) (fun a ih => fun b => caret (ih b)) __x`.
+  The recursor is spelled out because Lean encodes a multi-argument `match` through `PProd`,
+  which a module emitted under `prelude` does not import;
 - **a formation** — `set_option genInjectivity false in inductive C : Type | ...` with each
   constructor's declared argument sorts, plus one `def ctor : ... := C.ctor` alias per
   constructor, and a `C.rec` definition for an operator whose `Sema:` recurses on one of
@@ -573,6 +579,12 @@ answers rather than skipping the gates, because a gate that silently does nothin
 - **The Slate pane does not evaluate Lean.** Its Run button posts to `/api/slate`, which
   parses `.qbit` (`handlers_gap::post_slate`), so Lean text is refused with `unknown node
   header` while the tile is labelled "Lean scratch".
+- **A row that cites a case-defined operator cannot be justified yet.** The rule table
+  holds ONE statement per definition (`crates/rewrite/src/rules.rs::insert_definition`,
+  keyed `(0, division)`), so `[D.5]` on a two-case operator registers the conjunction rather
+  than its cases and the row fails with `cannot justify rewrite … citing [D.5 (not in this
+  module)]`. The definition compiles and the corpus verifies; the proof row that names it
+  does not.
 - **Nothing in the suite builds a corpus that proves an induction.** The compiler emits a
   `tau.rec`-shaped term for a `\mu` block with its cases and motive, and the block parses;
   the crate's only induction test is `induction::tests::fresh_name`, a name generator.

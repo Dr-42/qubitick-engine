@@ -82,7 +82,8 @@ pub fn emit_definition_in(
             // operator defined by recursion over a declared formation is emitted as a
             // recursor `def` first; only if that is not applicable do we fall back to
             // a term.
-            match recursor_def_text_formation(ctx, &name, e, &resolver, formations)
+            match formation_match_def_text(ctx, &name, e, &resolver, formations, known)
+                .or_else(|| recursor_def_text_formation(ctx, &name, e, &resolver, formations))
                 .or_else(|| macro_def_text(ctx, &name, e, &resolver, known))
             {
                 Some(text) => Ok(text),
@@ -155,6 +156,183 @@ fn eq_sides(x: &qubitick_model::Expr) -> Option<(&qubitick_model::Expr, &qubitic
     } else {
         None
     }
+}
+
+/// A `Sema:` WHOSE SECTIONS ARE THE CASES OF A DEFINITION OVER A DECLARED CARRIER.
+///
+/// ```text
+/// a \oplus b
+/// Sema:
+/// (\tau_0 \oplus b = b) \land ((^+ a) \oplus b = ^+ (a \oplus b))
+/// ```
+///
+/// Each section's definiendum applies the operator to a CONSTRUCTOR and to the operator's
+/// other parameters; the section's right side is that case's value. That is the whole
+/// definition, and it is compiled to the carrier's own recursor:
+///
+/// ```text
+/// noncomputable def oplus : tau → tau → tau :=
+///   fun __x => tau.rec (motive := fun _ => tau → tau)
+///     (fun b => b)
+///     (fun a ih => fun b => caret (ih b))
+///     __x
+/// ```
+///
+/// WHY THE RECURSOR AND NOT `match`: Lean's equation compiler encodes a multi-argument
+/// pattern match through `PProd`, and a module emitted under `prelude` has no `PProd` —
+/// `Unknown constant PProd.mk`, measured on exactly this definition. The recursor is
+/// spelled out instead, which also makes the case order and the motive explicit.
+///
+/// Two shapes are refused rather than guessed: a section whose pattern is not a constructor
+/// of one declared formation, and sections that do not cover every constructor. A partial
+/// match is a hole in the corpus, and the alternative (an `axiom` for the operator) is an
+/// assumption nobody wrote.
+pub(crate) fn formation_match_def_text(
+    ctx: &Ctx,
+    name: &str,
+    e: &qubitick_model::Expr,
+    resolver: &impl Fn(u32) -> String,
+    formations: &HashMap<u32, (String, Vec<u32>)>,
+    known: &HashMap<String, String>,
+) -> Option<String> {
+    use qubitick_model::Expr;
+    if formations.is_empty() {
+        return None;
+    }
+
+    // The sections: the body itself when it is one equation, or the conjuncts of a chain.
+    let mut sections: Vec<&Expr> = Vec::new();
+    fn split<'a>(ctx: &Ctx, x: &'a Expr, out: &mut Vec<&'a Expr>) {
+        match x {
+            Expr::Apply(h, args)
+                if args.len() == 2 && crate::module::is_conjunct_head(ctx, h.primary) =>
+            {
+                split(ctx, &args[0], out);
+                split(ctx, &args[1], out);
+            }
+            other => out.push(other),
+        }
+    }
+    split(ctx, e, &mut sections);
+
+    /* One arm per section: the constructor it matches, the variables that pattern binds,
+       and the value. The variables are what the recursive case adds to the recursor's
+       argument list, and what a recursive call inside the value mentions. */
+    struct Arm {
+        ctor: u32,
+        vars: Vec<String>,
+        rhs: String,
+    }
+    let mut carrier: Option<u32> = None;
+    let mut arity: Option<usize> = None;
+    let mut params: Option<Vec<String>> = None;
+    let mut arms: Vec<Arm> = Vec::new();
+    for section in &sections {
+        let Expr::Apply(h, sides) = section else { return None };
+        if h.primary != qubitick_model::EQ_SYM || sides.len() != 2 {
+            return None;
+        }
+        let Expr::Apply(head, args) = &sides[0] else { return None };
+        if resolver(head.primary) != name {
+            return None;
+        }
+        let (first, rest) = args.split_first()?;
+        // The parameters after the matched argument are plain variables, and every arm
+        // threads the SAME names through — they are one def's arguments.
+        let mut names: Vec<String> = Vec::new();
+        for a in rest {
+            let Expr::Var(v) = a else { return None };
+            names.push(v.clone());
+        }
+        match &params {
+            Some(p) if *p != names => return None,
+            _ => params = Some(names),
+        }
+        let (owner, (_, ctors)) = formations.iter().find(|(_, (_, cs))| match first {
+            Expr::Sym(ac) => cs.contains(&ac.primary),
+            Expr::Apply(h2, _) => cs.contains(&h2.primary),
+            _ => false,
+        })?;
+        match carrier {
+            Some(c) if c != *owner => return None,
+            _ => carrier = Some(*owner),
+        }
+        match arity {
+            Some(a) if a != args.len() => return None,
+            _ => arity = Some(args.len()),
+        }
+        let (ctor, vars) = match first {
+            Expr::Sym(ac) => (ac.primary, Vec::new()),
+            Expr::Apply(h2, sub) => {
+                let mut vars = Vec::new();
+                for a in sub {
+                    let Expr::Var(v) = a else { return None };
+                    vars.push(v.clone());
+                }
+                (h2.primary, vars)
+            }
+            _ => return None,
+        };
+        let rhs = qubitick_lean::render(&sides[1], resolver);
+        if rhs.is_empty() || rhs.contains('\\') {
+            return None;
+        }
+        arms.push(Arm { ctor, vars, rhs });
+    }
+    let carrier_id = carrier?;
+    let (carrier_name, order) = formations.get(&carrier_id)?.clone();
+    let n = arity?;
+    // Every constructor of the formation exactly once, in the formation's own order.
+    if arms.len() != order.len() || !order.iter().all(|c| arms.iter().any(|a| a.ctor == *c)) {
+        return None;
+    }
+    let mut ordered: Vec<&Arm> = Vec::new();
+    for c in &order {
+        ordered.push(arms.iter().find(|a| a.ctor == *c)?);
+    }
+
+    // The type is the frame's — the Sema composed it (`module::types_from_semas`).
+    let ty = known.get(name).cloned().unwrap_or_else(|| {
+        let mut t = String::new();
+        for _ in 0..n {
+            t.push_str(&carrier_name);
+            t.push_str(" → ");
+        }
+        t.push_str(&carrier_name);
+        t
+    });
+    let rest_names: Vec<String> = params.clone().unwrap_or_default();
+    let mut out = format!("noncomputable def {name} : {ty} :=\n  fun __x => {carrier_name}.rec\n");
+    // The motive: the remaining arguments, then the carrier.
+    let mut motive = String::from("fun _ => ");
+    for _ in 1..n {
+        motive.push_str(&carrier_name);
+        motive.push_str(" → ");
+    }
+    motive.push_str(&carrier_name);
+    out.push_str(&format!("    (motive := {motive})\n"));
+    for arm in &ordered {
+        /* THE RECURSOR'S CASE: its constructor's arguments, then the induction
+           hypothesis; the corpus's own parameter names follow, because the value is
+           written in them. */
+        let mut case = String::new();
+        if !arm.vars.is_empty() {
+            case.push_str(&format!("fun {} ih => ", arm.vars.join(" ")));
+        }
+        if !rest_names.is_empty() {
+            case.push_str(&format!("fun {} => ", rest_names.join(" ")));
+        }
+        // A RECURSIVE CALL IN THE VALUE IS THE HYPOTHESIS: `oplus a b` under the
+        // `caret a` arm is `ih b`, because the recursor already holds the result for `a`.
+        let mut value = arm.rhs.clone();
+        if let Some(rec) = arm.vars.first() {
+            value = value.replace(&format!("{name} {rec}"), "ih");
+        }
+        case.push_str(&value);
+        out.push_str(&format!("    ({case})\n"));
+    }
+    out.push_str("    __x\n");
+    Some(out)
 }
 
 /// Emit an operator DEFINED BY RECURSION over a DECLARATIVE FORMATION carrier, from a
