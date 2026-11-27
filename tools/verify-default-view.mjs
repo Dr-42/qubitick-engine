@@ -95,12 +95,26 @@ const corpusTile = onBoot.tiles.find((t) => t.id === 'p:corpus');
 ok('the corpus tile is on screen, so the interface has a corpus', corpusTile && corpusTile.onScreen && onBoot.nodes > 0, { onScreen: !!(corpusTile && corpusTile.onScreen), nodes: onBoot.nodes });
 
 /* Pan the world up until the console comes into view: "default view" lives in the core tile, and a
-   check that teleports the camera would not prove the button is reachable at all. */
-await page.mouse.move(1470, 900);
-await page.mouse.down();
-for (let i = 1; i <= 10; i += 1) { await page.mouse.move(1470, 900 - i * 55); await page.waitForTimeout(30); }
-await page.mouse.up();
-await page.waitForTimeout(1000);
+   check that teleports the camera would not prove the button is reachable at all. The drag starts
+   on empty canvas — found by asking the DOM, because the gap between the two roots moves with the
+   window — since a drag that starts on a tile moves the TILE. */
+const gapPoint = await page.evaluate(() => {
+  const background = (x, y) => {
+    const e = document.elementFromPoint(x, y);
+    return !!e && (e.id === 'viewport' || e.id === 'world' || e.id === 'grid');
+  };
+  const y = Math.round(innerHeight / 2);
+  for (let x = innerWidth - 40; x > innerWidth / 2; x -= 15) if (background(x, y)) return { x, y };
+  return null;
+});
+ok('there is empty canvas to drag from', gapPoint, gapPoint);
+if (gapPoint) {
+  await page.mouse.move(gapPoint.x, gapPoint.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i += 1) { await page.mouse.move(gapPoint.x, gapPoint.y - i * 55); await page.waitForTimeout(30); }
+  await page.mouse.up();
+  await page.waitForTimeout(1000);
+}
 const panned = await snap();
 ok('the console is one pan away, and reachable', await page.evaluate(() => !!document.querySelector('#b-default-view')), panned.cam);
 

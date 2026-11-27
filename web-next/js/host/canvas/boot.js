@@ -64,8 +64,8 @@ export function bootCanvasApp(APP, env) {
   ROUTES_READY.then((r) => { window.__diag.routes = Object.keys(r).length; }).catch(() => {});
   buildDefaultWorkspace();
   /* THE FIRST VIEW IS THE WRITING ROOT, FRAMED — not the whole canvas (js/world/home.js::defaultCam
-     owns the rule and says why: a fit of every tile lands at 38%, which is a map, and the legible
-     fallback then anchors a corner of a 2420x2160 world). A saved camera is applied later, in the
+     owns the rule and says why: a fit of every tile lands at 42%, which is a map, and the legible
+     fallback then anchors a corner of a 2436x1992 world). A saved camera is applied later, in the
      restore; this is only what a first visit, or a workspace without one, gets. */
   Object.assign(cam, defaultCam());
   applyCam(); updateLOD(); mountVisible();

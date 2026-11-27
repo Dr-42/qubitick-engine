@@ -106,7 +106,7 @@ export function createHome(host) {
    *
    * Framing the whole canvas is the wrong question here — the roots around the focus are more world
    * than any viewport, so a fit of everything lands under the readable threshold and the
-   * legible-zoom fallback then anchors the top-left corner of a 2420x2160 world, which puts the
+   * legible-zoom fallback then anchors the top-left corner of a 2436x1992 world, which puts the
    * arrangement in a quarter of the screen and the console past the bottom edge. The root you work
    * in is the root that opens; the reference root and the console are one pan away each, which is
    * what a canvas is for ("fit all" frames everything when that is what you want).

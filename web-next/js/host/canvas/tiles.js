@@ -114,11 +114,12 @@ export function createTiles(app, deps) {
     /* THE SHIPPED CAMERA, asked for by name from js/app/viewport.js. `app.firstView` never
        existed on the object this factory is handed, so "default view" composed the arrangement
        and then threw before it could frame it — the tiles came back and the camera stayed where
-       it was, which reads as a half-applied layout. The dep object in
-       js/host/canvas/wiring.js is the app's API for this factory, and it has no camera entry
-       for a first view; this is the same call the boot makes (js/host/canvas/boot.js). */
+       it was, which reads as a half-applied layout. `app.viewport()` IS on that object (this
+       factory takes one argument, so a second `deps` name would be undefined and every framing
+       would fall back to 1400x900 whatever the window is); this is the same call the boot makes
+       (js/host/canvas/boot.js). */
     firstView: (wr, pad) => {
-      const vp = (deps && typeof deps.viewport === 'function' && deps.viewport()) || { w: 1400, h: 900 };
+      const vp = app.viewport() || { w: 1400, h: 900 };
       return firstViewCam(wr, vp.w, vp.h, { pad: pad || 60 });
     },
     applyCam: () => app.applyCam(),

@@ -504,10 +504,11 @@ built** (`web-next/js/world/tile-mount.js`), and the corpus *tile* is where the 
 corpus, so a first view that framed the writing root alone would open an app with no nodes in it.
 
 The camera that opens is `home.js::defaultCam`, and it frames the writing root together with the
-corpus pair: 78% in a 1500x950 window (viewport 1500x900). A fit of the WHOLE world is the wrong
-camera for this canvas — the roots together are 2420x2160, they fit at 38%, that is under the
-readable threshold (`js/app/viewport.js::Z_READABLE`, 50%), and the legible-zoom fallback then
-anchors the corner of the world and leaves the arrangement in a quarter of the screen.
+corpus pair, so the zoom depends on the window: 83% at 1500x950, 78% at 1440x900, 68% at 1280x800,
+96% at 1920x1080. A fit of the WHOLE world is the wrong camera for this canvas — the roots together
+are 2436x1992, they fit at 42% in a 1500x950 window, that is under the readable threshold
+(`js/app/viewport.js::Z_READABLE`, 50%), and the legible-zoom fallback then anchors the corner of
+the world and leaves the arrangement in a quarter of the screen.
 **"default view"** in the Core · workspace tile restores this arrangement and this camera — not
 the theme, the wires or the preferences, which are yours.
 
