@@ -184,6 +184,24 @@ function makePage({ conn, sessionId, targetId, viewport, timeout }) {
     /** A page is closed by the browser at the end of every check; this makes that explicit. */
     async close() { await conn.send('Target.closeTarget', { targetId }).catch(() => {}); },
 
+    /** Dispatch one key press. `mod` is any of 'ctrl', 'shift', 'alt', 'meta' — a chord such as
+     *  CodeMirror's Mod-Enter is `press('Enter', { mod: ['ctrl'] })`. */
+    async press(key, { mod = [] } = {}) {
+      const bits = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
+      const modifiers = mod.reduce((n, m) => n | (bits[m] || 0), 0);
+      const codes = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39 };
+      const vk = codes[key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+      const base = {
+        modifiers, key, code: codes[key] ? key : 'Key' + key.toUpperCase(),
+        windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
+      };
+      await send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, base, key.length === 1 ? { text: key } : {}));
+      await send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
+    },
+
+    /** Insert text into the focused element the way a paste would (CodeMirror reads it). */
+    async typeText(text) { await send('Input.insertText', { text }); },
+
     on(event, fn) {
       if (event === 'console') consoleHandlers.add(fn);
       else if (event === 'pageerror') pageErrorHandlers.add(fn);

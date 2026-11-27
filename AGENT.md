@@ -161,6 +161,15 @@ Consequences that have bitten:
   Lean the module text plus `#print axioms <name>` and reads its own lines back
   (`crates/build/tests/print_axioms.rs` holds it against an Init ground, a bare prelude and
   the ship). A build never gates on it.
+- **A formation's inductive is inlined into every module that names the carrier**, so two
+  such modules where one imports the other collide (`build.lean-error`: `has already been
+  declared`). Fixing it means the import graph decides where the inductive lives; until
+  then a corpus with a formation and a cross-module citation does not build.
+- **Autoinduce is client-side text substitution** (`js/live/induce.js`): it writes each case
+  goal under a case pattern the author wrote, and nothing derives the patterns.
+  `tests/unit/induce.test.mjs` holds the laws; `/api/induce` is a stub.
+- **Autocite compares leaves, not heads** (`crates/autocite/src/distance.rs`), so two
+  expressions differing only in their operator report distance 0 and an empty gap.
 - **Five HTTP routes answer "not implemented yet"**: `POST /api/rewrite` (a placeholder
   `by sorry`), `POST /api/ir` (echoes the buffer), `POST /api/latex`, `POST /api/expand`,
   `POST /api/handwrite`, and `POST /api/induce` (theorem induction). The routes are mounted

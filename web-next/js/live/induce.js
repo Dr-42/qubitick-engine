@@ -16,8 +16,8 @@
  * instantiating the parsed expression and rendering it back, because the engine has no renderer for
  * the corpus's surface: an `Expr` renders to Lean, curried (`\Delta a b`), where the corpus writes
  * `a \Delta b`. Substituting the text keeps the row readable, and the two lines it produces for a
- * real theorem are the two lines that theorem already has (see the unit test, which compares them
- * against T.BT.11).
+ * real theorem are the two lines that theorem already has (`tests/unit/induce.test.mjs` holds the
+ * block whose case goals this writes).
  *
  * WHAT IS NOT HERE: the case patterns themselves. A carrier declares its constructors only
  * sometimes (`Sema: \mathcal{W} = \mathbf{p} \vee \mathbf{q}` is a `Formation`; `\tau` has no such

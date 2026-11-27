@@ -563,6 +563,25 @@ answers rather than skipping the gates, because a gate that silently does nothin
 - **The Slate pane does not evaluate Lean.** Its Run button posts to `/api/slate`, which
   parses `.qbit` (`handlers_gap::post_slate`), so Lean text is refused with `unknown node
   header` while the tile is labelled "Lean scratch".
+- **A formation's inductive is written into every module that names its carrier.** Two such
+  modules, where one imports the other, give Lean two `tau`s and the build stops with
+  `has already been declared`; each module alone verifies. A corpus with a declared
+  formation and a citation across modules therefore does not build today
+  (`crates/build/tests/declared_formation.rs` emits single files, which is why the suite
+  does not see it).
+- **Nothing in the suite builds a corpus that proves an induction.** The compiler emits a
+  `tau.rec`-shaped term for a `\mu` block with its cases and motive, and the block parses;
+  the crate's only induction test is `induction::tests::fresh_name`, a name generator.
+- **Autoinduce writes goals, not cases.** `js/live/induce.js` substitutes the induction
+  variable into the author's own text for each case group the author already wrote; the
+  case patterns and the engine-side derivation do not exist, and `/api/induce` is a stub.
+- **Autocite's distance and gap compare leaves, not heads.** `a \times b` and `b + a` sit
+  at distance 0 with an empty `gap`, because an operator is the head of an `Apply` and not
+  a leaf (`crates/autocite/src/distance.rs`); the bridge search still terminates correctly,
+  but "closest" and "gap" are not informative when only the operator differs.
+- **A refusal that comes back as HTTP 422 is thrown away by the client.** `app.rows` and
+  its siblings `throw` on `!r.ok`, so a `parse.content` refusal — which carries real
+  diagnostics — leaves the check strip with no verdicts and the console with an error.
 - **A stale `.lake` fails the `lake` shape.** `qubitick lake` reuses
   `<project>/.lake/src` as it finds it, and a ground compiled by a different Lean version
   makes it stop with `incompatible header`; `--no-build` never prunes. Delete the
