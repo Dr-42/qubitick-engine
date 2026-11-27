@@ -214,12 +214,19 @@ fn a_theorem_that_names_the_carrier_imports_the_formation_instead_of_repeating_i
 fn the_sema_composes_the_operators_type() {
     let dir = root("sema-type");
     corpus(&dir);
-    // `\oplus` is this corpus's own operator over its own carrier, defined by one
-    // constructor equation: the shape that has no use site to be observed at.
+    // `\oplus` is this corpus's own operator over its own carrier, defined by constructor
+    // equations and by nothing else: no statement uses it, so the only evidence of its type
+    // is its own `Sema:`. (Both constructors have a case — a partial definition is a hole,
+    // and `crates/build/tests/refusal_surface.rs` holds that the build says so.)
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
     wit(
         &dir,
         "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
-        "D.S.05. Plus\na \\oplus b\nSema:\n\\tau_0 \\oplus b = b\n",
+        "D.S.05. Plus\na \\oplus b\nSema:\n(\\tau_0 \\oplus b = b) \\land ((^+ a) \\oplus b = ^+ (a \\oplus b))\n",
     );
     let mut db = qubitick_db::open_in_memory().unwrap();
     qubitick_build::ingest_corpus(&mut db, &dir).unwrap();

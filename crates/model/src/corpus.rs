@@ -62,10 +62,35 @@ impl Facet {
 /// a declarable operator, which breaks expression structure.
 pub const OPERATOR_PUNCT: &[char] = &['+', '-', '*', '/', '=', '<', '>', '!', '%', '&', '|', '~', '^', ':', '×'];
 
-/// Check if a character is a valid operator punctuation.
+/// The punctuation a corpus may write as a glyph: an OPERATOR.
+///
+/// The ASCII table above is the fast path and the spelling of the common cases; every other
+/// script's operator is the same question asked of a different codepoint — `⊙`, `⊕`, `∘`, `⊢`
+/// are notation exactly as `+` is — so a character that is neither a letter-ish nor
+/// whitespace is operator-shaped, with the grammar left out (brackets, quotes, separators).
+///
+/// This is not a glyph table: it says which characters can BE a glyph, never which glyph means
+/// what. The engine still knows no mathematical symbol (invariant 1).
 #[inline]
 pub fn is_operator_punct(c: char) -> bool {
-    OPERATOR_PUNCT.contains(&c)
+    if OPERATOR_PUNCT.contains(&c) {
+        return true;
+    }
+    if c.is_ascii() {
+        // ASCII punctuation the table does not name is grammar or prose punctuation.
+        return false;
+    }
+    if c.is_alphanumeric() || c.is_whitespace() || c.is_control() {
+        return false;
+    }
+    !matches!(
+        c,
+        '\u{2018}' | '\u{2019}' | '\u{201C}' | '\u{201D}' | '\u{00AB}' | '\u{00BB}'
+            | '\u{2308}' | '\u{2309}' | '\u{230A}' | '\u{230B}'   // ceilings
+            | '\u{27E8}' | '\u{27E9}' | '\u{27EA}' | '\u{27EB}'   // angle brackets
+            | '\u{27E6}' | '\u{27E7}' | '\u{301A}' | '\u{301B}'   // brackets
+            | '\u{FF08}' | '\u{FF09}' | '\u{FF0C}' | '\u{FF1B}'   // fullwidth punctuation
+    )
 }
 
 /// Count how many balanced `{ … }` groups immediately follow `i` (positioned just

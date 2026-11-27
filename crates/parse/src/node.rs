@@ -520,10 +520,46 @@ fn is_lean_name(w: &str) -> bool {
             .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '\''))
 }
 
+/// The sentence a glyph line earns when it names no glyph, or `None` when it does.
+///
+/// A glyph line is `\tau`, or `a op b`, or `^+ a`, or `\Vert x \Vert`. When it holds more
+/// than one token and NO backslash, the glyph is the operator among them; if none of the
+/// tokens is operator-shaped the line states no glyph, and the node cannot be read.
+fn glyph_line_refusal(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() || line.contains('\\') {
+        return None;
+    }
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    /* ONE TOKEN IS A GLYPH; TWO ARE A PREFIX DECLARATION — `times a` declares the word glyph
+       `times` with its one operand — and from three, the glyph is what sits between the
+       operands (`a op b`), so a middle token that is not operator-shaped means the line is
+       not a glyph line at all. */
+    if tokens.len() < 3 {
+        return None;
+    }
+    if tokens[1].chars().all(is_operator_punct) {
+        return None;
+    }
+    if tokens.iter().all(|t| t.chars().any(|c| c.is_alphanumeric())) {
+        return Some(format!(
+            "the glyph line `{line}` states no glyph: a corpus writes a glyph alone (`\\tau`), \
+             as an infix form `a op b`, or as a prefix form (`^+ a`), and none of these tokens \
+             is an operator.\n  operators this corpus can read: {}",
+            qubitick_model::corpus::OPERATOR_PUNCT
+                .iter()
+                .map(|c| format!("`{c}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    None
+}
+
 /// Parse a Definition from the declarative surface (SurfaceFormat):
 /// header, a surface glyph line, an optional `Sema:` (Eq-level relation), and
 /// optional `Math:` prose.
-pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Result<Node> {
+fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Result<Node> {
     let mut sema: Option<Expr> = None;
     let mut sig: Option<Expr> = None;
     let mut role: Option<qubitick_model::DeclaredRole> = None;
@@ -631,6 +667,21 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
         }
     }
 
+    /* A GLYPH LINE STATES ONE GLYPH.
+     *
+     * The line's shapes are the format's: a glyph alone (`\tau`, `\mathbb{Z}`), an infix form
+     * `a op b`, a prefix form (`^+ a`, `\neg a`), a collector (`\Vert x \Vert`). When a
+     * line has several tokens, one of them is the glyph and the others are operands — so a
+     * line whose tokens include no operator at all names nothing, and reading its first
+     * operand as the glyph is how `a ⊙ b` (an operator the reader had never seen) declared a
+     * symbol called `a`, which then shadowed the VARIABLE `a` in every file of the corpus: the
+     * whole corpus stopped parsing, and the complaint was `\vee` used but never declared, in
+     * files nobody had edited. */
+    if let Some(line) = &glyph
+        && let Some(said) = glyph_line_refusal(line)
+    {
+        bail!("{said}");
+    }
     let is_formation = sema
         .as_ref()
         .and_then(|e| formation_of_expr(ctx, e, glyph.as_deref()))

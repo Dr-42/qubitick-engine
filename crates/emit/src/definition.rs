@@ -82,6 +82,33 @@ pub fn emit_definition_in(
             // operator defined by recursion over a declared formation is emitted as a
             // recursor `def` first; only if that is not applicable do we fall back to
             // a term.
+            /* A PARTIAL DEFINITION IS A HOLE, AND THE HOLE IS NAMED.
+             *
+             * `\tau_0 \oplus b = b` defines one case of an operator over a carrier with two
+             * constructors. The case machinery refuses it (it would be a partial match), and
+             * the fallback read the equation as a TERM instead — one parameter against the
+             * frame's two — and emitted `axiom oplus : tau → tau → tau`: an assumption nobody
+             * wrote, in place of the definition the corpus wrote, while the build reported the
+             * file verified. The constructors the cases miss are computable, so they are said. */
+            /* A CONTROL WORD WHERE AN OPERAND GOES IS NOT A METAVARIABLE.
+             *
+             * `\tau_0 \in \frobnicate = b` reads: the operator, the constructor, and then
+             * `\frobnicate` — a glyph the corpus never declares, written where a variable
+             * name goes. Nothing can be rendered for it, and the sentence the build used to
+             * give (`cannot be rendered as a Lean term ... simplify the body`) named neither
+             * the glyph nor the file's mistake. It was also masked: the case machinery spoke
+             * first, about a missing constructor, because one case really was missing. */
+            if let Some(word) = undeclared_word(e) {
+                return Err(anyhow::anyhow!(
+                    "the `Sema:` body of `{name}` names `{word}`, which no node declares.\n  \
+                     A glyph is declared by a node whose glyph line writes it (`a {word} b` \
+                     makes it infix); a metavariable is a plain name (`x`, `b`), never a \
+                     control word."
+                ));
+            }
+            if let Some(said) = missing_cases(ctx, e, formations) {
+                return Err(anyhow::anyhow!("{said}"));
+            }
             match formation_match_def_text(ctx, &name, e, &resolver, formations, known)
                 .or_else(|| recursor_def_text_formation(ctx, &name, e, &resolver, formations))
                 .or_else(|| macro_def_text(ctx, &name, e, &resolver, known))
@@ -269,7 +296,7 @@ pub(crate) fn formation_match_def_text(
             _ => params = Some(names),
         }
         let first = &args[position];
-        let (owner, (_, ctors)) = formations.iter().find(|(_, (_, cs))| match first {
+        let (owner, _) = formations.iter().find(|(_, (_, cs))| match first {
             Expr::Sym(ac) => cs.contains(&ac.primary),
             Expr::Apply(h2, _) => cs.contains(&h2.primary),
             _ => false,
@@ -818,4 +845,135 @@ mod tests {
             "noncomputable def Tau (a : Prop) (b : Prop) : Prop := b\n"
         );
     }
+}
+
+/// The constructors a case definition does not cover, as a sentence — or `None` when the
+/// body is not a set of constructor equations over one declared formation.
+///
+/// A partial case definition must not fall through to the term path: the term path sees one
+/// parameter where the operator has two and writes an `axiom`, which is an assumption in place
+/// of the definition the corpus wrote.
+pub(crate) fn missing_cases(
+    ctx: &Ctx,
+    e: &qubitick_model::Expr,
+    formations: &HashMap<u32, (String, Vec<u32>)>,
+) -> Option<String> {
+    use qubitick_model::Expr;
+    if formations.is_empty() {
+        return None;
+    }
+    let mut sections: Vec<&Expr> = Vec::new();
+    fn split<'a>(ctx: &Ctx, x: &'a Expr, out: &mut Vec<&'a Expr>) {
+        match x {
+            Expr::Apply(h, args)
+                if args.len() == 2 && crate::module::is_conjunct_head(ctx, h.primary) =>
+            {
+                split(ctx, &args[0], out);
+                split(ctx, &args[1], out);
+            }
+            other => out.push(other),
+        }
+    }
+    split(ctx, e, &mut sections);
+    // The formation whose constructors the cases match, and the ones the cases cover.
+    let mut seen: Option<(String, Vec<u32>)> = None;
+    let mut covered: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for section in &sections {
+        let Expr::Apply(h, sides) = section else { return None };
+        if h.primary != qubitick_model::EQ_SYM || sides.len() != 2 {
+            return None;
+        }
+        let Expr::Apply(_, args) = &sides[0] else { return None };
+        let mut matched = false;
+        for a in args {
+            let head = match a {
+                Expr::Sym(ac) => Some(ac.primary),
+                Expr::Apply(h2, _) => Some(h2.primary),
+                _ => None,
+            };
+            let Some(head) = head else { continue };
+            if let Some((carrier, order)) = formations
+                .values()
+                .find(|(_, cs)| cs.contains(&head))
+                .map(|(n, cs)| (n.clone(), cs.clone()))
+            {
+                seen.get_or_insert((carrier, order));
+                covered.insert(head);
+                matched = true;
+            }
+        }
+        if !matched {
+            return None;
+        }
+    }
+    let (carrier, order) = seen?;
+    let missing: Vec<String> = order
+        .iter()
+        .filter(|c| !covered.contains(c))
+        .map(|c| format!("`{}`", symbol_lean_name(ctx, *c)))
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "the `Sema:` cases of `{carrier}` are incomplete: no case for {}.\n  \
+         An operator defined by cases needs one case per constructor of its carrier — a \
+         partial definition is a hole in the corpus, and reading it as a term would make it an \
+         assumption nobody wrote.",
+        missing.join(", ")
+    ))
+}
+
+
+/// The first control word written where a metavariable goes, if the body has one.
+///
+/// A control word is a glyph: it is declared by a node, or it is nothing. A metavariable is a
+/// plain name. A body that writes `\frobnicate` in an operand position asks the engine to
+/// render a symbol nobody declared, and it can render nothing.
+fn undeclared_word(e: &qubitick_model::Expr) -> Option<String> {
+    use qubitick_model::Expr;
+    fn walk(e: &Expr, out: &mut Option<String>) {
+        if out.is_some() {
+            return;
+        }
+        match e {
+            Expr::Var(v) if v.trim_start().starts_with('\\') => {
+                // The FIRST control word of the text, without its trailing argument text.
+                let t = v.trim();
+                let word: String = t
+                    .chars()
+                    .take_while(|c| *c != ' ' && *c != '{')
+                    .collect();
+                *out = Some(word);
+            }
+            Expr::Apply(_, args) | Expr::Bracket(_, args) | Expr::Vector(args) | Expr::Set(args) => {
+                for a in args {
+                    walk(a, out);
+                }
+            }
+            Expr::Binder(_, binders, body) => {
+                for b in binders {
+                    walk(&b.ty, out);
+                }
+                walk(body, out);
+            }
+            Expr::Recursor(s, cases) => {
+                walk(s, out);
+                for (_, b) in cases {
+                    walk(b, out);
+                }
+            }
+            Expr::Matrix(rows) => {
+                for r in rows {
+                    for c in r {
+                        walk(c, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = None;
+    walk(e, &mut out);
+    out
 }

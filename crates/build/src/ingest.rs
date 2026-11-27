@@ -1470,27 +1470,38 @@ fn control_words(src: &str) -> Vec<String> {
             hand_mods(src, &mut i, &mut tex);
             out.push(tex);
         } else if src.as_bytes()[i] == b'^'
-            && src
-                .as_bytes()
-                .get(i + 1)
-                .is_some_and(|b| is_operator_punct(*b as char))
+            && let Some(next) = src[i + 1..].chars().next()
+            && is_operator_punct(next)
         {
             // `^` + an operator character is ONE symbol the corpus may declare (`^+`,
-            // `^*`, ...). The rule is the format's; the glyph is the corpus's.
-            out.push(format!("^{}", src.as_bytes()[i + 1] as char));
-            i += 2;
-        } else if is_operator_punct(src.as_bytes()[i] as char) {
-            // BARE OPERATOR PUNCTUATION RUN: a maximal sequence of OPERATOR_PUNCT characters.
-            // This catches `=`, `**`, `==`, `!=`, `+=`, `->`, etc. as declarable symbols.
-            // Structural punctuation (brackets, comma, period, semicolon, quotes, backslash)
-            // is EXCLUDED — it is grammar, not notation.
+            // `^*`, `^⊙`, ...). The rule is the format's; the glyph is the corpus's.
+            out.push(format!("^{next}"));
+            i += 1 + next.len_utf8();
+        } else if src[i..]
+            .chars()
+            .next()
+            .is_some_and(is_operator_punct)
+        {
+            // A BARE OPERATOR RUN: a maximal run of operator characters, DECODED AS CHARS.
+            //
+            // Reading the bytes instead (`bytes[i] as char`) is an ASCII-only reading that
+            // answers `None` for every operator that is not ASCII: `⊙` is three bytes, and
+            // neither byte is a character the predicate has ever heard of, so a glyph line
+            // `a ⊙ b` was read as having NO operator — and the ingest then registered the
+            // leading operand as the declared glyph, which shadowed a variable name across
+            // the whole corpus. The run is scanned by characters; `i` stays on a boundary.
             let start = i;
-            while i < src.len() && is_operator_punct(src.as_bytes()[i] as char) {
-                i += 1;
+            while i < src.len() {
+                match src[i..].chars().next() {
+                    Some(ch) if is_operator_punct(ch) => i += ch.len_utf8(),
+                    _ => break,
+                }
             }
             out.push(src[start..i].to_string());
+        } else if let Some(c) = src[i..].chars().next() {
+            i += c.len_utf8();
         } else {
-            i += 1;
+            break;
         }
     }
     out.extend(braced_index_labels(src));

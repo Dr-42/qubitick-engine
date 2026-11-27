@@ -249,10 +249,16 @@ pub fn lex(src: &str, ctx: &Ctx) -> Result<Vec<Token>, LexError> {
                 // `^` followed by an operator character is ONE symbol the corpus may
                 // declare (`^+`, `^*`, ...); otherwise `^` starts a superscript. The
                 // rule is the format's, and it names no glyph.
-                if i + 1 < n && qubitick_model::corpus::is_operator_punct(bytes[i + 1] as char) {
+                // `^` followed by an operator character is ONE symbol the corpus may
+                // declare (`^+`, `^*`, `^⊙`). The character is DECODED, not read as a byte:
+                // a byte read answers `None` for every non-ASCII operator, and the caller
+                // then takes the superscript path for a glyph that is one symbol.
+                if let Some(next) = src[i + 1..].chars().next()
+                    && qubitick_model::corpus::is_operator_punct(next)
+                {
                     let start = i;
-                    let tex = format!("^{}", bytes[i + 1] as char);
-                    i += 2;
+                    let tex = format!("^{next}");
+                    i += 1 + next.len_utf8();
                     resolve_symbol(&mut tokens, &tex, start, i, ctx)?;
                 } else {
                     tokens.push(Token::Superscript(Span::new(i, i + 1)));

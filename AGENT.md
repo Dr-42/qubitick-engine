@@ -135,6 +135,23 @@ Consequences that have bitten:
   import of a glyph another file declares (`Unknown identifier oplus`) and made another import
   itself (`build.import-cycle`). Ask the DB on both sides — the home of a symbol the module
   declares against the home of the glyph (`symbol_declarations`, `own_homes`).
+- **The input surface is CHARACTERS, not bytes.** A glyph may be `×`, `⊙`, `⊕`: the
+  operator-punctuation question is `qubitick_model::corpus::is_operator_punct` — the ASCII
+  table plus "not a letter, not whitespace, not the grammar" — and every scanner that asks it
+  decodes a char (`src[i..].chars().next()`), never `bytes[i] as char`. Reading the byte
+  answered `None` for every non-ASCII operator, so a glyph line `a ⊙ b` was read as having no
+  operator, and the ingest registered the leading OPERAND as the declared glyph: one
+  unreadable character in one file declared a symbol called `a`, and the whole corpus stopped
+  parsing (`\vee` "used but never declared", in files nobody had edited).
+- **A glyph line states one glyph, or it is refused** (`crates/parse/src/node.rs`,
+  `glyph_line_refusal`): three or more tokens whose middle token is no operator name nothing
+  (`a foo b`), and the refusal quotes the line and lists the operators the corpus can read.
+  One token is a glyph, two are a prefix declaration (`times a`).
+- **A partial case definition is a HOLE, named** (`crates/emit/src/definition.rs`,
+  `missing_cases`): an operator over a two-constructor carrier with one case emits no `def`,
+  and must not fall through to the term path — that path sees one parameter against two and
+  writes `axiom oplus : tau → tau → tau`, an assumption in place of the definition, with every
+  file reported verified. The sentence names the missing constructor.
 - **A definition node carries ONE body.** `split_fields` gives every bare line its own entry,
   and `resolve_multiline_values` folds exactly one continuation line into `Sema:`/`Type:`, so a
   second equation on a line of its own is not part of the body — it is a corpus mistake and the

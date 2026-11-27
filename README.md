@@ -131,6 +131,10 @@ node whose glyph line is `a \Delta b`, and a `Sema:`, a `Type:` or a `Role:`
 `crates/build/tests/no_glyph_names.rs` is a source guard: it fails if a corpus glyph
 appears as a string literal anywhere in the engine's production code.
 
+An operator may be ASCII punctuation (`+`, `**`) or any other script's symbol (`×`, `⊙`,
+`⊕`, `⊢`): what makes a character an operator is its SHAPE — not a letter, not whitespace,
+not one of the grammar's brackets and separators — never a name the engine knows.
+
 ### What the engine does know: the declaration format
 
 `crates/model/src/format.rs` holds the only alphabet the engine owns — the tokens a
@@ -151,7 +155,13 @@ declaration is *written with*, which no corpus declares:
 A declaration states three things, and nothing else decides them.
 
 **Fixity** comes from the glyph line: `a + b` is infix, `^+ a` is prefix, `\Vert x \Vert`
-is a collector.
+is a collector. A glyph line states ONE glyph, and the shapes it may take are the format's:
+the glyph alone (`\tau`, `\mathbb{Z}`, `T_{jk}`), an infix form `a op b`, a prefix form
+(`^+ a`, `\neg a`, or a word glyph as `times a`), a collector. A line with three or more
+tokens whose middle token is no operator states no glyph, and it is refused by name — reading
+its first operand as the glyph is how a line like `a ⊙ b`, with a character the reader had not
+met, once declared a symbol called `a` and shadowed the variable `a` in every file of the
+corpus.
 
 **Classification** comes from `Role:` when no shape can give it:
 
@@ -247,6 +257,17 @@ node, in the same era/stratum, that declares it. Checked before any Lean is prod
   but no D node in Era0/Strata0 declares it.
 Add a D node whose glyph line is `a \Delta b` with `Type:` or `Sema:`.
 ```
+
+A `Sema:` that defines an operator by cases must carry one case per constructor of the
+carrier, and the build says which one is missing:
+
+```
+the `Sema:` cases of `tau` are incomplete: no case for `caret`.
+```
+
+Reading a partial definition as a term instead would emit `axiom oplus : tau → tau → tau` —
+an assumption nobody wrote, in place of the definition the corpus wrote, with every file
+reported as verified.
 
 An A block is grammar, and a terminal with no meaning cannot be resolved. The engine used
 to invent one — the `axiom` fallback — and this is the pass that refuses instead. The
@@ -448,7 +469,7 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 50 targets, 336 tests, 2 ignored
+cargo test --workspace        # 51 targets, 346 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets
 cargo build -p qubitick-cli
@@ -471,6 +492,7 @@ The tests that state a promise rather than a detail:
 |---|---|
 | `crates/build/tests/no_glyph_names.rs` | no corpus glyph appears as a string literal in the engine |
 | `crates/build/tests/declaration_authority.rs` | an undeclared operator fails naming the glyph; declaring it makes the same corpus verify |
+| `crates/build/tests/refusal_surface.rs` | hostile-but-plausible input: a keyword glyph, a ground-owned name, an unknown punctuation glyph and a unicode operator BUILD; a second bare line, an unparenthesised case chain, an undeclared operator, an empty `Type:`, an unknown `Role:`, a dangling citation and a partial case definition are each REFUSED, by name |
 | `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors; its operators are typed over the carrier; an operator defined through another one is typed BY it, and imports that module; a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive again; a `Sema:` of cases becomes a definition over the recursor; and an induction over that operator VERIFIES, its recursive branch taking the hypothesis |
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
