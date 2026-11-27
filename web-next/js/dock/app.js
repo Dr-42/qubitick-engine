@@ -114,8 +114,32 @@ export async function bootDock({ root, preset }) {
     if (symbols) corpusData.symbols = symbols;
   }
 
+  /* THE TEXT THE PANELS ASK FOR, fetched once per path. `symbols` answers "which maths is in
+     this file", and it needs the file's text to do it — a panel that draws an empty box over a
+     file the app has open is the failure this cache exists to prevent. */
+  const fileTexts = new Map();
+  function fileText(path) {
+    const key = String(path || '');
+    if (!key) return '';
+    if (fileTexts.has(key)) return fileTexts.get(key);
+    fileTexts.set(key, '');   // first ask is empty; the fetch fills it for the next paint
+    fetch('/api/file?path=' + encodeURIComponent(key))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j && typeof j.content === 'string') {
+          fileTexts.set(key, j.content);
+          // tell the panes that asked: they subscribe to a buffer, so re-publishing reaches them
+          const symbols = ws.pane('symbols');
+          if (symbols && symbols.in && symbols.in.treeFile && symbols.in.treeFile.set) symbols.in.treeFile.set(key);
+        }
+      })
+      .catch(() => {});
+    return '';
+  }
+
   const services = {
     projects: () => projects.get(),
+    fileText,
     url: (name) => endpoints.url(name),
     data: () => corpusData,
     counts: () => ({ docks: DOCKS.length, panels: Object.keys(PANELS).length }),
@@ -190,6 +214,24 @@ export async function bootDock({ root, preset }) {
       flowsCheckBuild(ws);
       flowsChrome(ws);
       flowsData(ws);
+      /* THE PANELS THE SHARED FLOWS DO NOT REACH. `symbols` reads the editor's file (and its
+         buffer as a fallback) and no flow wires it, so in the docking shell it was an empty
+         panel; `steps` (`ir`) is wired by `flowsSelection` already. Wired here rather than in
+         the shared flow because the canvas host already fills these by name
+         (js/app/pane-host.js::bindPorts), and a second delivery there would be a wire nothing
+         can remove. */
+      const editor = ws.pane('editor');
+      const symbols = ws.pane('symbols');
+      if (editor && symbols) {
+        if (editor.out && editor.out.cursor && symbols.in && symbols.in.file) {
+          ws.wire(editor.out.cursor, symbols.in.file, {
+            map: (c) => (c && c.path ? c.path : ''),
+          });
+        }
+        if (editor.out && editor.out.buffer && symbols.in && symbols.in.buffer) {
+          ws.wire(editor.out.buffer, symbols.in.buffer);
+        }
+      }
     } catch (err) {
       console.error('[dock] wiring failed:', err);
     }
@@ -207,9 +249,6 @@ export async function bootDock({ root, preset }) {
   } catch (err) {
     console.warn('[dock] corpus data:', err.message);
   }
-
-  /* the diag pane's own "check corpus" button reaches the same service the strip does */
-  bus.on && bus.on('ui:build', () => { buildService.run(); });
 
   /* ---------------- status, palette, keys ---------------- */
   const idx = await themeIndex().catch(() => null);

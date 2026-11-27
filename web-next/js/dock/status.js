@@ -55,8 +55,14 @@ export function createBuildService({ fetch: doFetch, path = '/api/build', bus } 
       state = { busy: false, report: null, error: err.message || String(err), at: Date.now(), took: Math.round(performance.now() - t0) };
     }
     publish();
+    /* NOT `build:settled`. That event is the shared wiring's "somebody else finished a build,
+       refresh what you show" (js/defaults/wiring/_flows.js), and its handler asks the
+       Diagnostics panel to RERUN — which is this function. Emitting it here made one press of
+       "check" start a check, finish it, start another, finish it… each one a full corpus build,
+       and the strip sat on "checking…" forever while the report it already had went stale.
+       `dock:build` is the notification; whoever wants to re-run asks for it explicitly. */
     if (bus) {
-      try { bus.emit('build:settled', state.report); } catch { /* no bus, no event */ }
+      try { bus.emit('dock:build', state.report); } catch { /* no bus, no event */ }
     }
     return state.report;
   }

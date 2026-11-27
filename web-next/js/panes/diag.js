@@ -152,14 +152,24 @@ export default {
       }
     }
 
+    /* THE HOST'S CHECK IS A SUBSCRIPTION, not a value read once at mount. `ctx.check()` answers
+       what the last run said; a panel that only calls it while mounting keeps saying "never
+       checked" for every check that finishes afterwards — which is what the docking shell's
+       Diagnostics tab did while the status strip beside it counted 5/5 verified. */
+    let offBuild = null;
+
     return {
       mount(host, p) {
         el = document.createElement('div');
         el.className = 'diag';
         host.appendChild(el);
+        if (ctx.onBuild && typeof ctx.onBuild === 'function') {
+          offBuild = ctx.onBuild(() => paint(p));
+        }
         paint(p);
       },
       unmount() {
+        if (offBuild) { try { offBuild(); } catch { /* gone */ } offBuild = null; }
         if (el && el.parentNode) el.parentNode.removeChild(el);
         el = null;
       },

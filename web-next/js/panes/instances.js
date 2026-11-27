@@ -119,6 +119,9 @@ export function createInstanceManager({ ws, registry, governor, scope, services 
          `fn(state)` whenever a report lands, and returns an unsubscribe. */
       onBuild: (fn) => (services.onBuild ? services.onBuild(fn) : () => {}),
       openFile: (path) => { if (services.openFile) services.openFile(path); },
+      /* the text of a corpus file the app may already have fetched: `js/panes/symbols.js`
+         asks for it, and a host that cannot answer shows an empty panel over a corpus it has. */
+      fileText: (path) => (services.fileText ? services.fileText(path) : ''),
       endpoint: (name) => (services.endpoint ? services.endpoint(name) : null),
     };
 
