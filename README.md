@@ -428,8 +428,7 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, the build reports the row, and a refused row is not also an admitted theorem |
 | `crates/build/tests/undeclared_operator.rs` | an operator nothing declares is named, in a statement and in a proof row |
 | `crates/build/tests/pdf_export.rs` | two nodes never share a cite id, the preamble carries what the body uses, display maths never opens in a text run, and the ship's document compiles when an engine is installed |
-| `tools/verify-dock.mjs` | the shell: four docks, three presets, the Custom slot, splitter drag and reset, collapse, reload, the keyboard chords, no console errors |
-| `tools/verify-project-switch.mjs` | a layout belongs to its corpus: switching projects does not inherit one, and coming back restores it |
+| `tools/verify-default-view.mjs` | the canvas opens on the writing root with the corpus tile in view, every shipped tile exists, the console is a pan away, and "default view" restores the arrangement and the camera — no console errors |
 | `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship stands on nothing |
 | `crates/build/tests/coverage.rs` | an A-block glyph with no D node fails naming it; the shipped ship homes every glyph its A blocks write; and `scaffold` writes the chain |
 | `crates/build/tests/emission_surface.rs` | no module emits an `axiom`; a ground-named glyph declares nothing; a sort word is a literal; a cross-module definition is imported; a `Type:` with no name is refused |
@@ -483,40 +482,45 @@ relocate them). It is opt-in: nothing in the repository depends on those paths.
 `web-next/` is the client the server serves. `corpus-templates/algebra/` is the starter
 corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
 
-### The workspace: a docking shell, and a canvas
+### The workspace: one canvas, and the arrangement it ships with
 
-`/` serves the **docking shell** (`web-next/dock.html`): a corpus tree on the left, the
-editor in the centre, what the caret implies on the right, the build below, and a status
-strip under all of it. `/index.html` is the **canvas** — a pannable world of tiles, for
-laying a corpus out spatially — and the strip links to it. Both pages boot the same
-`web-next/js/main.js`, mount the same pane modules, and honour the same theme files.
+`/` serves the **canvas** (`web-next/index.html`): a pannable world of tiles joined by wires,
+for laying a corpus out spatially. `/shell.html` serves the **engine host**, the same panes as a
+tree of layout roots. Both pages boot `web-next/js/main.js`, mount the same pane modules, and
+honour the same theme files.
 
-| preset | what it is for |
-|---|---|
-| **Minimal** (`Ctrl+Alt+1`) | editor full width, the side docks railed to a spine, the bottom dock railed. For writing. |
-| **Standard** (`Ctrl+Alt+2`) | tree 18%, editor 52%, right dock 30% (Goal over Lean/Render/Graph/Symbols), bottom 22% (Diagnostics, Build, Graph). Stats is not shown until the palette opens it. |
-| **Power** (`Ctrl+Alt+3`) | tree over outline/graph on the left, two editors in the centre, four groups on the right (Goal, Steps/Symbols, Lean/Render, Stats), Diagnostics and Build side by side below. |
-| **Custom** (`Ctrl+Alt+0`) | whatever you last arranged: any drag, collapse, tab or opened panel fills this slot, and it is restored on reload. |
+The canvas ships with an arrangement (`web-next/js/world/home.js::buildDefault`), and it has two
+subjects: the root you write in, and everything that is still there while you write.
 
-| chord | does |
-|---|---|
-| `Ctrl+1..9` | focus the Nth visible panel |
-| `Ctrl+Alt+1/2/3`, `Ctrl+Alt+0` | Minimal / Standard / Power / Custom |
-| `Ctrl+Alt+R` | reset the layout to its preset |
-| `Ctrl+B`, `Ctrl+J`, `Ctrl+\` | toggle the left, bottom and right dock |
-| `Ctrl+K` | the command palette (every command and every panel, with its chord) |
-| `Ctrl+Enter` | run the corpus check |
+| root | tiles | where it is |
+|---|---|---|
+| **the writing root** (`c0`) | corpus tree, editor, Lean/render, goal at the caret | the middle of the screen — the first view frames it |
+| **the reference root** (`c1`) | graph, symbols, stats | right, one pan |
+| **the console** (`c2`) | core/workspace, view/settings, prefs | below, one pan |
+| **the corpus pair** | project, corpus — wired to each other | above the writing root, at the top of the first view |
 
-Splitters drag between docks and between the groups inside one; each dock has a minimum and a
-viewport-relative maximum, and double-clicking a splitter puts that split back to the size the
-layout came up with. The layout is stored **per project** in `localStorage`
-(`qubitick.dock.v1.<project>`), so two corpora get two arrangements, and a stored layout is
-normalised on the way in — a panel this build does not ship cannot paint an empty dock.
+The pair is in the first view on purpose, and it is not decoration: **nothing off screen is
+built** (`web-next/js/world/tile-mount.js`), and the corpus *tile* is where the interface gets its
+corpus, so a first view that framed the writing root alone would open an app with no nodes in it.
 
-`docs/layouts/` holds a screenshot of each preset in two themes; `tools/shots-layouts.mjs`
-takes them and `tools/verify-dock.mjs` + `tools/verify-project-switch.mjs` drive the shell
-the way a person does (presets, drags, the Custom slot, a reload, a project switch) and fail
-on a console error.
+The camera that opens is `home.js::defaultCam`, and it frames the writing root together with the
+corpus pair: 78% in a 1500x950 window (viewport 1500x900). A fit of the WHOLE world is the wrong
+camera for this canvas — the roots together are 2420x2160, they fit at 38%, that is under the
+readable threshold (`js/app/viewport.js::Z_READABLE`, 50%), and the legible-zoom fallback then
+anchors the corner of the world and leaves the arrangement in a quarter of the screen.
+**"default view"** in the Core · workspace tile restores this arrangement and this camera — not
+the theme, the wires or the preferences, which are yours.
+
+Every tile is a module with ports (`web-next/panes/manifests.json`, `js/host/canvas/panes.js`), so
+the arrangement is a starting point, not a container: any tile drags into or out of any root, any
+tile wires to any other, clusters tile their members into a cut tree (`js/world/clusters.js`) that
+you resize by the sashes between them. The arrangement is stored per project, so two corpora get
+two workspaces.
+
+`tools/verify-default-view.mjs` drives the shipped arrangement in a browser: three roots and every
+tile present, the writing root framed and on screen, the corpus tile in view with nodes loaded, the
+console one pan away and "default view" restoring the same arrangement and the same camera, no
+console error. `tools/shot.mjs` screenshots any URL and fails on a console error.
 
 ---
 

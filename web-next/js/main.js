@@ -308,22 +308,11 @@ if (typeof document !== 'undefined') {
     console.error('[main] Unhandled rejection:', event.reason);
   });
 
-  /* ONE ENTRY, THREE PAGES — and the page decides which app boots by what it carries:
-       #dock      the DOCKING SHELL (dock.html, the default page)
-       #viewport + #world   the canvas workspace (index.html)
-       #root      the engine's layout-tree shell (shell.html)
-     The entry is the only place that looks elements up and the only place that starts an app,
-     so a pane module runs in all three without knowing which one it is in. */
+  /* ONE ENTRY, TWO APPS. The page decides which: a canvas page has the world element the tiles
+     live in, and a shell page has a #root for the engine's layout tree. The entry is the only
+     place that looks elements up and the only place that starts either app, so a pane module
+     runs in both without knowing which one it is in. */
   const start = () => {
-    const dock = document.getElementById('dock');
-    if (dock) {
-      const preset = new URLSearchParams(window.location.search).get('preset') || undefined;
-      import('./dock/app.js')
-        .then((m) => m.bootDock({ root: dock, preset }))
-        .then((app) => { window.__dock = app; })
-        .catch((e) => { console.error('[dock] could not boot:', e); dock.textContent = 'dock failed to boot: ' + e.message; });
-      return;
-    }
     const canvas = document.getElementById('viewport') && document.getElementById('world');
     if (canvas) {
       import('./host/canvas/main.js')

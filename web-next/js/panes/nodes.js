@@ -17,9 +17,7 @@ export default {
   title: 'Nodes',
   ports: {
     in: { corpus: 'value', highlight: 'value' },
-    /* an EVENT, for the same reason as the tree's: `ctx.event('selection').emit(id)` announces a
-       click, and a value port has no `emit`. */
-    out: { selection: 'event' },
+    out: { selection: 'value' },
     call: { focus: 'call' },
   },
   create(ctx) {

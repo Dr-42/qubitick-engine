@@ -87,7 +87,7 @@ export default {
         });
         step.addEventListener('click', () => callStep.invoke());
 
-        const def = ctlBtn('b-default-view', 'default view', 'put the views back the way they ship: a corpus cluster, a console cluster, camera framed on both');
+        const def = ctlBtn('b-default-view', 'default view', 'put the views back the way they ship: the writing root framed, the corpus pair, the reference root and the console one pan away');
         const fitAll = ctlBtn('b-fit-all', 'fit', 'frame every tile  (0)');
         def.addEventListener('click', () => { if (ctx.defaultView) ctx.defaultView(); });
         fitAll.addEventListener('click', () => { if (ctx.frameAll) ctx.frameAll(); });

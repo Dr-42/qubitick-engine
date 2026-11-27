@@ -20,14 +20,6 @@ const VALID_KINDS = new Set([
      mounts in either app (js/panes/projects.js). It was missing here, so a layout document that
      named it in the engine shell was "Unknown pane kind" and drew a placeholder. */
   'projects',
-  /* the corpus BUILD — verified/admitted/errors from one report (js/panes/build.js). `diag` answers
-     "what is wrong and where"; this answers "did it build, and what is still taken on faith", and
-     the docking shell's Build panel is the one that asks. */
-  'build',
-  /* the corpus's own SYMBOL TABLE (js/panes/symbols.js): which maths a file uses, one chip per
-     glyph. It was a canvas-only kind — the module existed and the page could not name it — so the
-     docking shell's Symbols panel mounted a placeholder that said "unknown pane kind". */
-  'symbols',
 ]);
 
 const VALID_PORT_TYPES = new Set(['value', 'event', 'call']);

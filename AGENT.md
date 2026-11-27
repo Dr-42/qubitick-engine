@@ -77,10 +77,10 @@ cargo test -p qubitick-build --test declared_formation   # one promise
 LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra  # built 5
 ```
 
-The client has its own gates in `tools/`: `verify-dock.mjs` (the docking shell's presets,
-splitters, persistence and chords) and `verify-project-switch.mjs` (a layout belongs to its
-corpus). Both need a server with a project in it; both fail on a console error, which is the
-only way to notice a panel that threw while the page still painted.
+The client has its own gates in `tools/`: `verify-default-view.mjs` (the arrangement the canvas
+ships with, the camera it opens at, and "default view" restoring both) and `shot.mjs` (any URL to
+a PNG). They need a server with a project in it; they fail on a console error, which is the only
+way to notice a pane that threw while the page still painted.
 
 Two requirements: cargo 1.85+ (edition 2024) and Lean 4.35.0, the version
 `lean-toolchain` names. `./toolchain` resolves both, refuses a `cargo` that cannot build

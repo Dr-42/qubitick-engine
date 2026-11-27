@@ -353,6 +353,8 @@ export function attachWiring(app, env) {
     mkPane: (id, kind, wr, home, state) => TILE_WORLD.mkPane(id, kind, wr, home, state),
     HOME: TILE_WORLD.HOME, FOCUS: TILE_WORLD.FOCUS, TILE_MOUNT: TILE_WORLD.TILE_MOUNT,
     buildDefaultWorkspace: () => TILE_WORLD.buildDefaultWorkspace(),
+    /* the camera the shipped arrangement opens at (js/world/home.js::defaultCam) */
+    defaultCam: () => TILE_WORLD.defaultCam(),
     defaultView: () => TILE_WORLD.defaultView(),
     ensureConsole: () => TILE_WORLD.ensureConsole(),
     /* the corpus pair, for the restore: a workspace saved before the pair existed gets one built

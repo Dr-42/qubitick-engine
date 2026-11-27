@@ -26,6 +26,7 @@
 import { createTileFactory } from '../../world/tile-create.js';
 import { buildShell, actionsFor } from '../../world/tile-shell.js';
 import { createHome } from '../../world/home.js';
+import { firstViewCam } from '../../app/viewport.js';
 import { createFocus } from '../../world/focus.js';
 import { createTileMount } from '../../world/tile-mount.js';
 
@@ -110,10 +111,24 @@ export function createTiles(app, deps) {
     detachEl: (p) => p.el.remove(),
     bbox: () => app.bbox(),
     camFor: (wr, pad) => app.camFor(wr, pad),
-    firstView: (wr, pad) => app.firstView(wr, pad),
+    /* THE SHIPPED CAMERA, asked for by name from js/app/viewport.js. `app.firstView` never
+       existed on the object this factory is handed, so "default view" composed the arrangement
+       and then threw before it could frame it — the tiles came back and the camera stayed where
+       it was, which reads as a half-applied layout. The dep object in
+       js/host/canvas/wiring.js is the app's API for this factory, and it has no camera entry
+       for a first view; this is the same call the boot makes (js/host/canvas/boot.js). */
+    firstView: (wr, pad) => {
+      const vp = (deps && typeof deps.viewport === 'function' && deps.viewport()) || { w: 1400, h: 900 };
+      return firstViewCam(wr, vp.w, vp.h, { pad: pad || 60 });
+    },
     applyCam: () => app.applyCam(),
     updateLOD: () => app.updateLOD(),
-    exitFullscreen: () => app.exitFullscreen(),
+    /* `app` has no `exitFullscreen`; the one that exists is `FOCUS.exit()` (this file builds it
+       below). Calling through the missing name threw, so "default view" and closing a tile that
+       was in solo focus both died with `app.exitFullscreen is not a function` — the arrangement
+       the workspace ships was unreachable from the button that restores it. The arrow is only
+       CALLED after `FOCUS` exists (a user action, not the boot), so closing over it is safe. */
+    exitFullscreen: () => { if (FOCUS && typeof FOCUS.exit === 'function') FOCUS.exit(); },
     consoleKinds: () => consoleKinds,
     ensureProjectWire: () => app.ensureProjectWire(),
     ensureCorpus: () => HOME.ensureCorpus(),
@@ -165,7 +180,7 @@ export function createTiles(app, deps) {
   /** Close a tile — or refuse, out loud, for a kind that is the workspace's own. */
   function paneClose(p) {
     if (NOCLOSE.has(p.kind)) { app.toast('the ' + p.kind + ' tile stays in the workspace'); return; }
-    if (FOCUS.solo() === p) app.exitFullscreen();
+    if (FOCUS.solo() === p) FOCUS.exit();
     app.removePane(p);
     app.toast('closed ' + p.kind);
   }
@@ -183,6 +198,7 @@ export function createTiles(app, deps) {
     ensureCorpus: () => HOME.ensureCorpus(),
     setConsoleKinds: (k) => { consoleKinds = k; },
     buildDefaultWorkspace: () => HOME.buildDefault(),
+    defaultCam: () => HOME.defaultCam(),
     defaultView: () => HOME.resetToDefault(),
     ensureConsole: () => HOME.ensureConsole().length > 0,
     paneFocus: (p) => FOCUS.focus(p),
