@@ -39,6 +39,27 @@ export const PANELS = {
   stats: { kind: 'stats', title: 'Stats' },
 };
 
+/**
+ * Where each panel lives when nothing says otherwise — the A1 table, as data.
+ *
+ * A panel is not tied to a dock: it can be dragged, tabbed or closed, and a custom layout is
+ * whatever the user made. This is where `openPanel` puts one that is not on screen yet, and
+ * the order is the inventory's: the corpus left, the editor centre, what the cursor implies
+ * right, what the build says below.
+ */
+export const PANEL_HOME = {
+  tree: 'left', outline: 'left',
+  editor1: 'center', editor2: 'center',
+  goal: 'right', steps: 'right', lean: 'right', render: 'right',
+  graph: 'right', symbols: 'right', stats: 'right',
+  diag: 'bottom', build: 'bottom',
+};
+
+/** The dock a panel belongs in when it is opened and was not already placed. */
+export function homeOf(id) {
+  return PANEL_HOME[id] || 'right';
+}
+
 /** The docks, in the order the shell paints them. `rail` is what a collapsed dock becomes. */
 export const DOCKS = ['left', 'center', 'right', 'bottom'];
 
@@ -88,10 +109,14 @@ export const PRESETS = {
     name: 'Standard',
     left: { size: 240, collapsed: false, groups: [group(['tree'])] },
     center: { size: 0, groups: [group(['editor1'])] },
+    /* A2: "right dock about 30%, Goal on top (about 60%) and Lean render below. Graph, Symbols
+       and Stats are right-dock tabs, with Stats hidden." Graph and Symbols TABBED with Lean and
+       Render in the lower group; Stats is in no group at all, which is what "hidden by default"
+       means for a panel that has a home (the palette opens it). */
     right: {
       size: 380,
       collapsed: false,
-      groups: [group(['goal']), group(['lean', 'render'])],
+      groups: [group(['goal']), group(['lean', 'render', 'graph', 'symbols'])],
       sizes: [0.6, 0.4],
     },
     bottom: { size: 180, collapsed: false, groups: [group(['diag', 'build', 'graph'])] },

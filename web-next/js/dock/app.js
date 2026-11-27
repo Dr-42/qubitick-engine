@@ -31,7 +31,7 @@ import {
 } from '../defaults/wiring/_flows.js';
 
 import {
-  DOCKS, PANELS, PRESETS, fromPreset, normalize, paneMap, visiblePanels, clampSize,
+  DOCKS, PANELS, PRESETS, fromPreset, normalize, paneMap, visiblePanels, clampSize, homeOf,
 } from './model.js';
 import { createDockView } from './render.js';
 import { loadDock, saveDock, forgetDock } from './persist.js';
@@ -156,6 +156,14 @@ export async function bootDock({ root, preset }) {
 
   /* ---------------- the view ---------------- */
   let dirtyFromUser = false;
+  /** Any change that is not "switch to preset" makes the layout Custom, and saves it. */
+  const customise = () => {
+    dirtyFromUser = true;
+    doc.key = 'custom';
+    doc.name = 'Custom';
+    if (status) status.presetSelect.value = 'custom';
+    saveCustom(projectKeyOf(), doc);
+  };
   const persistNow = () => {
     saveDock(projectKeyOf(), doc);
     doc.key = doc.key || 'standard';
@@ -168,14 +176,10 @@ export async function bootDock({ root, preset }) {
       doc = next;
       // THE CUSTOM SLOT IS WHAT THE USER IS LOOKING AT. Any rearrangement fills it; switching
       // presets does not (that is `setPreset`, below).
-      if (meta && meta.source !== 'preset') {
-        dirtyFromUser = true;
-        doc.key = 'custom';
-        doc.name = 'Custom';
-      }
+      if (meta && meta.source !== 'preset') customise();
       instances.sync({ panes: paneMap(doc) });
       persistNow();
-      if (status) status.el.isConnected && (status.presetSelect.value = doc.key);
+      if (status) status.presetSelect.value = doc.key;
     },
   });
 
@@ -240,6 +244,7 @@ export async function bootDock({ root, preset }) {
     else { d.collapsed = true; }
     view.render();
     instances.sync({ panes: paneMap(doc) });
+    customise();
     persistNow();
   };
 
@@ -286,11 +291,13 @@ export async function bootDock({ root, preset }) {
     for (const dockName of ['left', 'bottom', 'right']) {
       cmds.push({ id: 'dock.' + dockName, label: 'Toggle ' + dockName + ' dock', hint: '', run: () => toggleDock(dockName) });
     }
+    /* every panel, and the chord that focuses it when it is already on screen */
     for (const [id, def] of Object.entries(PANELS)) {
+      const at = visiblePanels(doc).indexOf(id);
       cmds.push({
         id: 'panel.' + id,
         label: 'Open ' + def.title,
-        hint: 'panel',
+        hint: at >= 0 && at < 9 ? 'Ctrl+' + (at + 1) : 'panel',
         run: () => openPanel(id),
       });
     }
@@ -311,6 +318,7 @@ export async function bootDock({ root, preset }) {
     d.sizes = d.groups.map(() => 1 / d.groups.length);
     view.render();
     instances.sync({ panes: paneMap(doc) });
+    customise();
     persistNow();
     return true;
   }
@@ -361,6 +369,13 @@ export async function bootDock({ root, preset }) {
   const app = {
     root, doc: () => doc, view, instances, ws, bus, buildService, status, palette,
     setPreset, resetLayout, toggleDock, openPanel, panels: visiblePanels,
+    /** Wear another theme (the strip's selector uses this, and a screenshot run needs it). */
+    setTheme: async (id) => {
+      currentTheme = id;
+      rememberTheme(id);
+      await applyTheme(id);
+      return id;
+    },
     destroy() {
       uninstallKeys();
       window.removeEventListener('resize', onResize);

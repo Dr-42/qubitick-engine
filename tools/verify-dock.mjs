@@ -63,6 +63,21 @@ ok('standard puts the tree left and the goal right',
   first.docks.left.tabs.includes('tree') && first.docks.right.tabs.includes('goal'),
   JSON.stringify({ left: first.docks.left.tabs, right: first.docks.right.tabs }));
 
+/* ---- 1b. the inventory A1/A2 name: what Standard shows and what it keeps hidden ---- */
+const stdAll = await page.evaluate(() => {
+  const all = [...document.querySelectorAll('.dock-tab[data-panel]')].map((t) => t.dataset.panel);
+  return all;
+});
+ok('standard tabs Graph and Symbols in the right dock',
+  stdAll.includes('graph') && stdAll.includes('symbols'), JSON.stringify(stdAll));
+ok('standard keeps Stats hidden until asked for', !stdAll.includes('stats'), JSON.stringify(stdAll));
+
+/* the palette can open the hidden one, and Ctrl+1..9 focuses what is on screen */
+await page.evaluate(() => window.__dock.openPanel('stats'));
+await page.waitForTimeout(250);
+const withStats = await page.evaluate(() => [...document.querySelectorAll('.dock-tab[data-panel]')].map((t) => t.dataset.panel));
+ok('the palette opens a panel that was not in the layout', withStats.includes('stats'), JSON.stringify(withStats));
+
 /* ---- 2. presets ---- */
 await page.evaluate(() => window.__dock.setPreset('minimal'));
 await page.waitForTimeout(250);
@@ -104,6 +119,19 @@ await page.mouse.dblclick(box2.x + box2.width / 2, box2.y + box2.height / 2);
 await page.waitForTimeout(250);
 const afterDbl = (await dockState()).docks.left.w;
 ok('double-click resets the split to where it started', Math.abs(afterDbl - before) <= 2, `${dragged} → ${afterDbl} (started ${before})`);
+
+/* ---- 2b. the Custom slot: rearranging a preset fills it, and it comes back ---- */
+const customAfterDrag = await page.evaluate(() => window.__dock.doc().key);
+ok('rearranging a preset marks the layout Custom', customAfterDrag === 'custom', customAfterDrag);
+const customRestored = await page.evaluate(async () => {
+  const app = window.__dock;
+  app.setPreset('minimal');
+  const leftAfterMinimal = app.doc().docks.left.railed;
+  app.setPreset('custom');
+  return { leftAfterMinimal, backToCustom: app.doc().key, leftRailed: app.doc().docks.left.railed };
+});
+ok('Ctrl+Alt+0 restores what Custom saved',
+  customRestored.backToCustom === 'custom', JSON.stringify(customRestored));
 
 /* ---- 4. collapse / expand ---- */
 await page.evaluate(() => window.__dock.toggleDock('bottom'));
