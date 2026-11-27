@@ -325,6 +325,17 @@ pub(crate) fn formation_match_def_text(
         t.push_str(&carrier_name);
         t
     });
+    /* THE MOTIVE IS THE TYPE'S, NOT THE CARRIER'S.
+     *
+     * A recursor holds every argument but the matched one fixed, so the motive is written over
+     * the arguments AFTER it and then the result — and for an operator over one carrier those
+     * are all that carrier, which is why writing it out by name worked. A MIXED operator
+     * (`a \star b` applied to a `\tau` and an `\iota`, returning `\iota`) has the composed
+     * type `tau → iota → iota` and the motive `fun _ => iota → iota`; written over the
+     * matched argument's carrier it asked Lean for `tau → tau` and every case body the corpus
+     * wrote was a type mismatch. The composed type is the answer already; it is split. */
+    let (arg_tys, res_ty) = split_arrow_type(&ty);
+    let typed = arg_tys.len() == n;
     let pos = match_at?;
     let all: Vec<String> = params.clone().unwrap_or_default();
     // The arguments BEFORE the matched one stay as outer lambdas; those AFTER it ride in the
@@ -347,13 +358,20 @@ pub(crate) fn formation_match_def_text(
         head.push(' ');
     }
     let mut out = format!("noncomputable def {name} : {ty} :=\n  fun {head}__x => {carrier_name}.rec\n");
-    // The motive: the arguments after the matched one, then the carrier.
+    // The motive: the arguments after the matched one, then the result.
     let mut motive = String::from("fun _ => ");
-    for _ in &post {
-        motive.push_str(&carrier_name);
+    for i in 0..post.len() {
+        // `params` holds every argument but the matched one, so the matched position sits
+        // between `pre` and `post` in the type's own list.
+        let t = if typed {
+            arg_tys[pos + 1 + i].as_str()
+        } else {
+            carrier_name.as_str()
+        };
+        motive.push_str(t);
         motive.push_str(" → ");
     }
-    motive.push_str(&carrier_name);
+    motive.push_str(if typed { res_ty.as_str() } else { carrier_name.as_str() });
     out.push_str(&format!("    (motive := {motive})\n"));
     for arm in &ordered {
         /* THE RECURSOR'S CASE: its constructor's arguments, then the induction hypothesis;

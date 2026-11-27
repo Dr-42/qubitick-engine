@@ -901,68 +901,36 @@ fn types_from_semas(
      * ANOTHER `Sema:` — in another node, or another module of the same scope. Read once in
      * node order, `\otimes` was typed `Prop → Prop → Prop` whenever the operator it is
      * written in terms of was read after it, which is every corpus that defines an operator
-     * on top of one defined above it. So the reading is a fixpoint: a pass learns what the
-     * signatures now state, and it ends when a whole pass learns nothing. A position keeps
-     * the first sort a section states for it, so the answer does not depend on how many
-     * passes it took to find. */
-    let mut composed: Composed = Composed::new();
+     * on top of one defined above it. So the reading is a fixpoint, and a pass ends when it
+     * learns nothing.
+     *
+     * TWO MAPS, AND ONLY ONE OF THEM IS KNOWLEDGE. `evidence` holds what a section states
+     * about a sort and nothing else: a term's own sort, a variable at a known operator's
+     * parameter position, the right side of the equation. `answer` is what the corpus lets
+     * the emitter WRITE: the evidence, plus the carrier a section is written over where the
+     * evidence leaves a position open. Keeping the guess out of `evidence` is what makes the
+     * two orders agree — `\tau_0 \star b = b` guesses `\tau` for `b` before the recursive
+     * case (`^+ a \star b = \bullet (a \star b)`) says the result is `\iota`, and a guess
+     * that counted as knowledge kept the operator `tau → tau → tau` with an `\iota` result. */
+    let mut evidence: Composed = Composed::new();
     let mut changed = true;
     while changed {
         changed = false;
         for (own, args, rhs) in &sections {
             /* WHAT EACH ARGUMENT POSITION IS USED AT, read off the term in it: a constant's
                `Type:`, an application's result sort, a constructor's carrier, a variable's
-               parameter position. This is the ONLY evidence a Sema gives about a position.
-               Writing the section's carrier into every open slot instead typed `a \star b` —
-               a `\tau` and an `\iota` operator — as `tau → tau → tau`, after which its
-               `\iota` argument could not be applied. */
+               parameter position. This is the ONLY evidence a Sema gives about a position. */
             let mut var_sorts: HashMap<String, u32> = HashMap::new();
-            note_var_sorts(authored, &composed, sigs, ctx, env, rhs, &mut var_sorts);
-            let mut constrained: Vec<Option<u32>> = args
+            note_var_sorts(authored, &evidence, sigs, ctx, env, rhs, &mut var_sorts);
+            let constrained: Vec<Option<u32>> = args
                 .iter()
                 .map(|a| match a {
                     Expr::Var(v) => var_sorts.get(v).copied(),
-                    other => sort_of_term(authored, &composed, sigs, &leaves, ctx, env, other),
+                    other => sort_of_term(authored, &evidence, sigs, &leaves, ctx, env, other),
                 })
                 .collect();
-            // The section is written over the carrier its patterns name.
-            let section_carrier = constrained.iter().flatten().next().copied();
-            let rhs_sort = sort_of_term(authored, &composed, sigs, &leaves, ctx, env, rhs);
-            let result = rhs_sort.or(section_carrier);
-            /* THE EQUATION TIES THE REMAINING SORT: `\tau_0 \oplus b = b` says the operator's
-               result IS `b`, so `b` sits at the result's sort. That is what makes a homogeneous
-               operator `tau → tau → tau` without the corpus restating its second argument. A
-               position that appears nowhere else stays unknown: the observation from the
-               corpus's uses answers for it, or the frame's default does. Nothing is invented. */
-            if let (Expr::Var(v), Some(r)) = (rhs, result) {
-                for (i, a) in args.iter().enumerate() {
-                    if matches!(a, Expr::Var(w) if w == v) {
-                        constrained[i] = Some(r);
-                    }
-                }
-            }
-            /* A POSITION THE SECTION LEAVES OPEN TAKES THE CARRIER IT IS WRITTEN OVER.
-             *
-             * `a \times b = a + a` names `\mathfrak{R}` for `a` and says nothing about `b`
-             * — and an operator is not half-typed, so a module that wrote `times : R → Prop
-             * → R` would refuse the corpus's own applications of `times`. The carrier the
-             * section's patterns name is the answer, UNLESS the corpus's uses of the
-             * operator already say what sits there: an observation is evidence, and this is
-             * a reading of what the section's own carrier implies. Overwriting an observed
-             * `\iota` argument with the section's `\tau` typed a mixed-sort operator
-             * `tau → tau → tau` and broke every application of it. */
-            for (i, c) in constrained.iter_mut().enumerate() {
-                if c.is_none()
-                    && let Some(carrier) = section_carrier
-                    && sigs
-                        .get(own)
-                        .and_then(|s| s.arg_carrier.get(i).copied().flatten())
-                        .is_none()
-                {
-                    *c = Some(carrier);
-                }
-            }
-            let entry = composed.entry(*own).or_insert_with(|| (Vec::new(), None));
+            let result = sort_of_term(authored, &evidence, sigs, &leaves, ctx, env, rhs);
+            let entry = evidence.entry(*own).or_insert_with(|| (Vec::new(), None));
             if entry.0.len() < constrained.len() {
                 entry.0.resize(constrained.len(), None);
                 changed = true;
@@ -980,6 +948,48 @@ fn types_from_semas(
             {
                 entry.1 = Some(r);
                 changed = true;
+            }
+        }
+    }
+    /* WHAT THE EMITTER WRITES, section by section, from the evidence that settled. */
+    let mut composed: Composed = evidence.clone();
+    for (own, args, rhs) in &sections {
+        let entry = composed.entry(*own).or_insert_with(|| (Vec::new(), None));
+        if entry.0.len() < args.len() {
+            entry.0.resize(args.len(), None);
+        }
+        /* THE EQUATION TIES THE REMAINING SORT: `\tau_0 \oplus b = b` says the operator's
+           result IS `b`, so `b` sits at the result's sort. That is what types a homogeneous
+           operator `tau → tau → tau` without the corpus restating its second argument, and it
+           is evidence: the equation states it. */
+        if let (Expr::Var(v), Some(r)) = (rhs, entry.1) {
+            for (i, a) in args.iter().enumerate() {
+                if matches!(a, Expr::Var(w) if w == v) && entry.0[i].is_none() {
+                    entry.0[i] = Some(r);
+                }
+            }
+        }
+        /* A POSITION THE SECTION LEAVES OPEN TAKES THE CARRIER IT IS WRITTEN OVER.
+         *
+         * `a \times b = a + a` names `\mathfrak{R}` for `a` and says nothing about `b` — and
+         * an operator is not half-typed, so a module that wrote `times : R → Prop → R` would
+         * refuse the corpus's own applications of `times`. This is a reading of the section's
+         * own carrier, not evidence, which is why it cannot overwrite one — and why it is not
+         * given to the sections that are still being read. */
+        let section_carrier = entry.0.iter().flatten().next().copied().or(entry.1);
+        if let Some(carrier) = section_carrier {
+            for (i, c) in entry.0.iter_mut().enumerate() {
+                if c.is_none()
+                    && sigs
+                        .get(own)
+                        .and_then(|s| s.arg_carrier.get(i).copied().flatten())
+                        .is_none()
+                {
+                    *c = Some(carrier);
+                }
+            }
+            if entry.1.is_none() {
+                entry.1 = Some(carrier);
             }
         }
     }
@@ -1305,6 +1315,19 @@ fn symbol_declarations(
         }
         own.extend(own2);
     }
+    /* WHAT THIS MODULE'S OWN TEXT IS ABOUT: the glyphs its expressions name, plus the glyph
+     * each of its definitions declares. Everything read over `nodes` — signatures, observed
+     * sorts, formations, sorts used as binder types — is CONTEXT: the corpus's declaration is
+     * evidence about a glyph, and only these are the glyphs this module has to declare or
+     * import. Without the distinction a module declared the whole corpus's sorts
+     * (`def iota : Type := Prop` beside the inductive another module declares) and imported
+     * every other module. */
+    let mut mine: HashSet<u32> = own.clone();
+    for n in emitted {
+        if let Node::Definition(d) = n {
+            mine.insert(d.symbol.primary);
+        }
+    }
     // --- Infer operator RESULT sorts (a declared carrier, or `Prop`) ---
     // An operator whose result a CONSTRUCTOR of a declared sort consumes, or that
     // stands on the other side of `=` from a term of one, returns that sort; the
@@ -1354,13 +1377,21 @@ fn symbol_declarations(
     // Every declared sort an emitted type NAMES. A carrier a type mentions has to
     // exist in the text even when no statement uses the carrier itself, and a
     // formation's carrier additionally has to carry its inductive.
+    /* Only what THIS MODULE names: `authored` and `sigs` are read over the whole context (a
+       definition the corpus declares in another file is evidence for this one), but a carrier
+       another file's type mentions is not this module's to declare or import — deriving the
+       import from the context made two formations import each other
+       (`D_S_02_Tick → D_S_05_Leaf → D_S_02_Tick`), and the compile order had no first module. */
     let mut named_carriers: HashSet<u32> = HashSet::new();
-    for auth in authored.values() {
+    for (id, auth) in &authored {
+        if !mine.contains(id) {
+            continue;
+        }
         named_carriers.extend(auth.args.iter().copied().flatten());
         named_carriers.extend(auth.res);
     }
     for (id, sig) in &sigs {
-        if seen.contains(id) {
+        if mine.contains(id) {
             named_carriers.extend(sig.arg_carrier.iter().copied().flatten());
             named_carriers.extend(sig.res_carrier);
         }
@@ -1548,9 +1579,9 @@ fn symbol_declarations(
             && formation_done.insert(d.symbol.primary)
         {
             let ctor_ids: Vec<u32> = ctors.iter().map(|c| c.constructor.primary).collect();
-            let used = seen.contains(&d.symbol.primary)
+            let used = mine.contains(&d.symbol.primary)
                 || named_carriers.contains(&d.symbol.primary)
-                || ctor_ids.iter().any(|id| seen.contains(id));
+                || ctor_ids.iter().any(|id| mine.contains(id));
             if !used {
                 continue;
             }
@@ -1568,7 +1599,13 @@ fn symbol_declarations(
              * what it OWNS (`emit_nodes`) and imports the rest. A formation the module only
              * names is in another module's file, so this one imports that module — the same
              * treatment a `Sema:` definition gets. */
-            let owns = emitted.iter().any(|n| matches!(n, Node::Definition(x) if x.base.id == d.base.id));
+            /* BY SYMBOL, NOT BY NODE ID: a context node's `base.id` counts within its own
+               file, so `x.base.id == d.base.id` claimed the formation for every module whose
+               own node happened to share that id — every one of them declared the inductive and
+               the import said `Qubitick.HL.iota has already been declared`. */
+            let owns = emitted
+                .iter()
+                .any(|n| matches!(n, Node::Definition(x) if x.symbol.primary == d.symbol.primary));
             if !owns {
                 let home = ctx
                     .by_id(i64::from(d.symbol.primary))
@@ -1660,6 +1697,12 @@ fn symbol_declarations(
     // and `\widehat{J}_{-}` → `widehat_J`), so each name is emitted once.
     let mut emitted_names: HashSet<String> = HashSet::new();
     for id in ids {
+        // A glyph this module neither names nor owns is not its business: the frame is built
+        // over the whole scope, and declaring a sort it never writes is how one module ended
+        // up with another's inductive (`Qubitick.HL.iota has already been declared`).
+        if !mine.contains(&id) && !named_carriers.contains(&id) {
+            continue;
+        }
         // Skip anything a Definition in this module declares, matched by LEAN
         // NAME (ids can differ between the definition's symbol and a referenced
         // glyph of the same tex — matching by id caused duplicate declarations).
@@ -1716,7 +1759,7 @@ fn symbol_declarations(
                a citation of it closes by kernel conversion and `#print axioms` sees
                nothing. Writing `axiom {lean} : {ty}` instead made every cross-module
                reference a global assumption nobody chose — the bug this removes. */
-            if !own.contains(&id) && !own.contains(&(id.wrapping_sub(FN_OFFSET))) {
+            if !mine.contains(&id) && !mine.contains(&(id.wrapping_sub(FN_OFFSET))) {
                 // The context declares it for a neighbour; this module never writes it.
                 continue;
             }

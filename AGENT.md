@@ -208,7 +208,16 @@ Consequences that have bitten:
   punctuation-only glyphs take `sym_<hex>`.
 - **The recursor matches the position the EVIDENCE names**, not the first argument
   (`definition.rs::formation_match_def_text`): the position whose terms are constructors of
-  one formation; the others must be variables, since a recursor holds them fixed.
+  one formation; the others must be variables, since a recursor holds them fixed. Its MOTIVE
+  is the composed type's tail — the arguments after the matched one and then the result — not
+  the matched argument's carrier written out: a mixed operator (`tau → iota → iota`) written
+  that way asks Lean for `tau → tau` and every case body is a mismatch.
+- **Declarations are for the glyphs the module NAMES or OWNS** (`module.rs`,
+  `own`/`mine`/`named_carriers`): the frame is built over the whole scope — a corpus's
+  declaration is evidence about a glyph — but only the module's own text decides what it
+  declares and imports. Carriers, sorts and formations taken from the context made each
+  module declare every inductive and import every other one (`Qubitick.HL.iota has already
+  been declared`; `D_S_02_Tick → D_S_05_Leaf → D_S_02_Tick`).
 - **A formation's separator is the SEMA's** (`crates/parse/src/node.rs::formation_of_expr`):
   any head the corpus declares as a connective separates its alternatives. Splitting on
   "the corpus's lowest-id connective" made a formation depend on how many other connectives

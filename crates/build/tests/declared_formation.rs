@@ -497,3 +497,108 @@ fn an_operator_defined_through_another_is_typed_by_it() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/* TWO CARRIERS IN ONE STRATUM, AND AN OPERATOR THAT MIXES THEM.
+ *
+ * `\tau` and `\iota` are two formations declared in one stratum, and `a \star b` takes one
+ * of each and returns an `\iota`. Three things had to hold at once, and each had failed:
+ *
+ *   · the modules of the two formations must not import each other — a formation's module
+ *     owns its inductive, and a declaration or import derived from the whole CONTEXT made
+ *     each one pull in the other (`D_S_02_Tick → D_S_05_Leaf → D_S_02_Tick`, so the corpus
+ *     had no first module);
+ *   · the operator's type is `tau → iota → iota`, composed from the constructors its cases
+ *     name — the first case's `b` is typed by the result the RECURSIVE case states, which is
+ *     why the composition records evidence before it writes anything;
+ *   · the recursor's motive is the composed type's tail (`fun _ => iota → iota`), not the
+ *     matched argument's carrier written out, which asked Lean for `tau → tau`.
+ */
+#[test]
+fn a_mixed_operator_over_two_carriers_verifies() {
+    if !lean_is_here() {
+        eprintln!("skipping: lean not found");
+        return;
+    }
+    let dir = root("mixed");
+    corpus(&dir);
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
+    // A SECOND formation, in the same stratum, with its own nullary and recursive ctor.
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_06_Leaf.qbit",
+        "D.S.06. Leaf\n\\iota\nSema:\n\\iota = \\iota_0 \\vee (\\bullet \\iota)\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_07_LeafZero.qbit",
+        "D.S.07. LeafZero\n\\iota_0\nType: \\iota\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_08_LeafSucc.qbit",
+        "D.S.08. LeafSucc\n\\bullet a\nType: \\iota \\to \\iota\n",
+    );
+    // One of each: `\tau` against `\iota`, returning `\iota`.
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_09_Star.qbit",
+        "D.S.09. Star\na \\star b\nSema:\n(\\tau_0 \\star b = b) \\land ((^+ a) \\star b = \\bullet (a \\star b))\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+
+    // Neither formation's module imports the other: each owns its inductive.
+    for (file, own, other) in [
+        ("D_S_02_Tick.qbit", "inductive tau", "D_S_06_Leaf"),
+        ("D_S_06_Leaf.qbit", "inductive iota", "D_S_02_Tick"),
+    ] {
+        let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &dir.join("Era0/Strata0/Definitions").join(file))
+            .expect("the formation emits");
+        assert!(emitted.contains(own), "{file} declares its inductive:\n{emitted}");
+        assert!(
+            !emitted.contains(other),
+            "{file} must not import the other formation's module:\n{emitted}"
+        );
+    }
+
+    let emitted = qubitick_build::pipeline::emit_file(
+        &ctx,
+        &db,
+        &dir.join("Era0/Strata0/Definitions/D_S_09_Star.qbit"),
+    )
+    .expect("the mixed operator emits");
+    assert!(
+        emitted.contains("star : tau → iota → iota"),
+        "the cases type the operator over both carriers:\n{emitted}"
+    );
+    assert!(
+        emitted.contains("motive := fun _ => iota → iota"),
+        "the recursor's motive is the composed type's tail:\n{emitted}"
+    );
+
+    let ground = qubitick_build::ground::for_check(&dir).expect("the ground assembles");
+    let results =
+        qubitick_build::run_pipeline(&db, &qubitick_build::walk_qbit(&dir), Some(&ground)).unwrap();
+    let errors: Vec<String> = results
+        .iter()
+        .flat_map(|r| r.diagnostics.iter())
+        .filter(|d| d.is_error())
+        .map(|d| format!("{}: {}", d.code, d.message))
+        .collect();
+    assert!(errors.is_empty(), "two carriers and a mixed operator must build: {errors:?}");
+    assert!(
+        results.iter().all(|r| r.verified),
+        "all of it verifies: {:?}",
+        results
+            .iter()
+            .filter(|r| !r.verified)
+            .map(|r| (r.path.clone(), r.diagnostics.first().cloned()))
+            .collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

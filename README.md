@@ -448,7 +448,7 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 50 targets, 335 tests, 2 ignored
+cargo test --workspace        # 50 targets, 336 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets
 cargo build -p qubitick-cli
