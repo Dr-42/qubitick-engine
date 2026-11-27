@@ -1,9 +1,10 @@
 /**
  * panes/slate.js — Slate pane (M4.23).
  *
- * Lean scratch evaluator. Editable CM6 editor; POSTs to the `slate`
- * endpoint to evaluate Lean, falls back to the `check` WS endpoint.
- * Displays term output below the editor.
+ * Scratch editor for corpus text. POSTs to the `slate` endpoint, which parses
+ * `.qbit` and answers the node kinds it read (`handlers_gap::post_slate`), and
+ * falls back to the `check` WS endpoint. It does NOT evaluate Lean: Lean input is
+ * refused with `unknown node header`, and the pane prints the server's refusal.
  *
  * Ported from app.js 896-908 (evalSlate).
  *
@@ -188,14 +189,17 @@ export default {
       if (!outputEl) return;
       outputEl.innerHTML = '';
       const text = view ? view.state.doc.toString() : currentBuffer;
-      termLine('$ lake env lean TempCheck.lean   (HL scratch → parse_hl → emit_lean → CIC kernel)', 'cmd', outputEl);
+      termLine('$ POST /api/slate   (parse .qbit → node kinds)', 'cmd', outputEl);
 
       try {
         {
           const slateEp = endpointOf('slate.post');
           if (slateEp && slateEp.call && slateEp.call.invoke && slateEp.call.invoke.invoke) {
             const j = await slateEp.call.invoke.invoke({ content: text });
-            termLine((j && (j.output || (j.ok ? '✓ ok' : ''))) || '✓ ok', '', outputEl);
+            /* A REFUSAL IS NOT A PASS: `j.ok` false used to fall through to '✓ ok', so a parse
+               error printed a green tick. The server's own words are the output. */
+            if (j && j.ok) termLine(j.output || '✓ ok', '', outputEl);
+            else termLine('⚠ ' + ((j && j.error) || 'refused'), 'warn', outputEl);
             return;
           }
         }
@@ -237,12 +241,12 @@ export default {
       `;
 
       const title = document.createElement('div');
-      title.textContent = 'Slate (Lean scratch)';
+      title.textContent = 'Slate (corpus text)';
       title.style.cssText = 'font-weight: 600; font-size: 12px; color: var(--ink);';
 
       const runBtn = document.createElement('button');
       runBtn.textContent = '⇥ Run';
-      runBtn.title = 'Evaluate Lean via /api/slate';
+      runBtn.title = 'Parse via /api/slate (this is not a Lean evaluator)';
       runBtn.style.cssText = `
         margin-left: auto;
         padding: 4px 12px;

@@ -189,12 +189,12 @@ export function createAppMounts(host) {
       },
     },
     switch: { module: SWITCH_PANE },
-    /* THE LEAN SCRATCH EVALUATOR. Its `ink` in-port is the text to evaluate, and the pane took that
-       text from a wire in the engine host too — this canvas had no kind for it, so the tile could not
-       be made at all. */
+    /* THE SCRATCH EDITOR. Its `ink` in-port is the corpus text to parse, and the pane took that text
+       from a wire in the engine host too — this canvas had no kind for it, so the tile could not be
+       made at all. It is not a Lean evaluator: the slate route parses `.qbit`. */
     slate: {
       module: SLATE_PANE,
-      summary: () => 'Lean scratch',
+      summary: () => 'corpus text',
       after: (p, inst) => {
         /* composes: the host's own forwarder (js/app/pane-host.js) delivers every wired input
            into the pane's ports, and this kind's handler runs after it */

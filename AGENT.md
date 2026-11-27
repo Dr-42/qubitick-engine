@@ -26,10 +26,11 @@ glyph. *Enforced by* `crates/build/tests/no_glyph_names.rs` (a source guard over
 production code) and `crates/build/tests/declaration_authority.rs`.
 
 **2. The declaration is the authority.** Fixity from the glyph line; classification from
-`Role:`; a signature from `Type:`; a binding from `Lean:` (the glyph IS a name the ground
-carries, and the engine declares nothing for it); an inductive from a `Sema:` whose
+`Role:`; a signature and a home from `Type:` (the glyph IS a name the ground carries, and
+the engine declares nothing for it); an inductive from a `Sema:` whose
 alternatives a declared connective separates; precedence from the charter. Nothing else
-may decide.
+may decide. `Lean:` was the old spelling of the binding and is retired: the parser refuses
+it and says the ground name is the argument of `Type:` now (`crates/parse/src/node.rs`).
 
 **2a. Ingestion never refuses a corpus.** All of its passes read tolerantly
 (`qubitick_parse::tolerate_prose(true)`), because a project the editor cannot open is a
@@ -38,7 +39,8 @@ project nobody can fix. The refusal is per file, by the build
 tolerance by making ingestion strict: the sentence belongs in the report.
 
 **3. The engine's whole vocabulary is the declaration FORMAT** —
-`crates/model/src/corpus.rs` (`Facet`, `DeclaredRole`) and `crates/model/src/format.rs`
+`crates/model/src/corpus.rs` (`Facet`), `crates/model/src/symbol.rs` (`DeclaredRole`) and
+`crates/model/src/format.rs`
 (the `=`, the iff, the arrow, the binders, the citation corners). Adding to either is a
 surface change: write the reason in the doc comment, make the parser read it, and make
 ingestion persist it.
@@ -56,7 +58,7 @@ fix is the document.
 **5. The tests are scaffolding.** They exist to build faithfully now and will be
 compressed to a maintenance set when construction ends. Keep them green; do not trim them
 early; do not buy permanence for an assertion that only describes a stage of construction.
-A test that pins a *promise* (the six in `README.md` §7) is not scaffolding.
+A test that pins a *promise* (the table in `README.md` §9) is not scaffolding.
 
 **6. Publishing.** Push `dev` after every change. `master` advances only on an explicit
 instruction. Each commit names its traps — the thing that was wrong, measured, not the
@@ -153,6 +155,16 @@ Consequences that have bitten:
 - `POST /api/induce` answers `{"ok": false, "error": "theorem induction not implemented yet"}`.
 - A corpus that writes an undeclared glyph still *opens* (ingestion is tolerant) and its
   build reports the refusal; `/api/parse` answers the refusal directly to the editor.
-- The axiom footprint of a theorem includes its TYPE as well as its proof term, so
-  "what did my proof use" is not what `qubitick axioms` answers.
-- `print-axioms` (the footprint Lean reports) is not surfaced.
+- The axiom footprint includes a theorem's TYPE as well as its proof term, so "what did my
+  proof use" is not what `qubitick axioms` answers.
+- `qubitick axioms` is the surface for that footprint: `lean_check::axioms_footprint` hands
+  Lean the module text plus `#print axioms <name>` and reads its own lines back
+  (`crates/build/tests/print_axioms.rs` holds it against an Init ground, a bare prelude and
+  the ship). A build never gates on it.
+- **Five HTTP routes answer "not implemented yet"**: `POST /api/rewrite` (a placeholder
+  `by sorry`), `POST /api/ir` (echoes the buffer), `POST /api/latex`, `POST /api/expand`,
+  `POST /api/handwrite`, and `POST /api/induce` (theorem induction). The routes are mounted
+  and the client shows the server's words; the features behind them are not written.
+- **The Slate pane does not evaluate Lean.** Its Run button posts to `/api/slate`, which
+  parses `.qbit` (`handlers_gap::post_slate`) and refuses Lean input with `unknown node
+  header`; the pane labels it "Lean scratch".

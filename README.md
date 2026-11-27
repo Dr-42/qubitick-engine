@@ -193,7 +193,11 @@ Emission is **term mode** against a fixed contract of 16 Lean names in three tie
 (kernel `Eq`/`Eq.refl`/`Eq.symm`/`Eq.trans`; logic `False`…`DecidableEq`; codegen
 `lcErased`/`lcAny`). `crates/build/src/prelude_contract.rs` is that list;
 `qubitick prelude-check` proves a ground satisfies it by compiling a probe with real
-`lean`.
+`lean`. It checks **compiled** ground: point `--lean-path` at the directory holding
+`Qubitick/HL.olean` (`<project>/.lake/src` after `qubitick lake`, or wherever a build put
+it). Run without one against the repository's source `prelude/` — which carries `HL.lean`
+and no `.olean` — it answers `satisfied: false` with an empty `missing`, Lean's own error
+line in `failures`, and a `hint` naming the flag.
 
 The engine embeds a base ground (`prelude/Qubitick/HL.lean`). A project replaces it by
 carrying its own — `LeanDir:` names the directory, `Module:` the module inside it — which
@@ -382,10 +386,19 @@ The rules, which are rustc's and Lean's:
 - **a position, when there is one**: `file:line:col`, and a caret run under the token. A
   Lean error's line is in the *emitted module*, and the diagnostic says so rather than
   sending a reader to a `.qbit` line that does not exist;
-- **a code per kind of refusal**, so a client acts on it without reading prose:
-  `parse.header`, `parse.type-and-sema`, `parse.not-notation`, `parse.operator.undeclared`,
-  `coverage.unhomed`, `coverage.blocked`, `cite.dangling`, `build.lean-error`,
-  `build.import-cycle`, `proof.admitted`, `corpus.duplicate`, `corpus.definition-cycle`;
+- **a code per kind of refusal**, so a client acts on it without reading prose. The
+  corpus-facing ones: `parse.header`, `parse.type-and-sema`, `parse.not-notation`,
+  `parse.operator.undeclared`, `parse.content`, `parse.expr`, `parse.lhs-rhs`,
+  `parse.refused`, `coverage.unhomed`, `coverage.blocked`, `cite.dangling`,
+  `build.lean-error`, `build.import-cycle`, `build.ground-failed`, `build.ingest-failed`,
+  `build.lake-error`, `proof.admitted`, `corpus.duplicate`, `corpus.definition-cycle`,
+  `ground.contract`, `ground.frozen`. Transport refusals the server raises on its own —
+  a missing `path`, an illegal one — carry a `server.*` code (`server.missing-path`,
+  `server.illegal-path`, `server.missing-project-id`, `server.register-project`,
+  `server.forget-project`, `server.switch-project`);
+- **the deserializer's 422 is the exception.** A body that is not the shape a handler
+  expects is refused by axum before the handler runs, so it answers a plain-text 422 and
+  not the diagnostic block;
 - **one sentence per defect.** The emit failure and the parse diagnostic for one bad file
   used to report twice; the generic one is dropped when the specific one is there;
 - **a cascade is not a report.** A glyph with no home is declared by every module that
@@ -542,6 +555,18 @@ answers rather than skipping the gates, because a gate that silently does nothin
 - **Induction** in the proof rewriter takes the induction hypothesis when the compiled
   body uses it; the declaration-side recursion is not reachable from that crate.
 - `POST /api/induce` answers that theorem induction is not implemented yet.
+- **Five more routes are mounted placeholders**: `POST /api/rewrite` answers
+  `{"lean_term": "by sorry", "ok": <the goal parsed>}` and never rewrites, `POST /api/ir`
+  echoes the buffer, and `POST /api/latex`, `POST /api/expand` and `POST /api/handwrite`
+  answer `not implemented yet`. The client shows the server's words; no client calls
+  `/api/rewrite`.
+- **The Slate pane does not evaluate Lean.** Its Run button posts to `/api/slate`, which
+  parses `.qbit` (`handlers_gap::post_slate`), so Lean text is refused with `unknown node
+  header` while the tile is labelled "Lean scratch".
+- **A stale `.lake` fails the `lake` shape.** `qubitick lake` reuses
+  `<project>/.lake/src` as it finds it, and a ground compiled by a different Lean version
+  makes it stop with `incompatible header`; `--no-build` never prunes. Delete the
+  `.lake` directory when the shape or the toolchain changes.
 - Ingestion never refuses a corpus: it builds the ledger from what it can read, and the
   refusal reaches the report per file. A corpus with a bad row opens; its build fails.
 - A corpus that writes an undeclared glyph still *opens*; its build reports the refusal.

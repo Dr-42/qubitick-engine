@@ -506,6 +506,20 @@ fn main() -> anyhow::Result<()> {
                 String::from_utf8_lossy(&out.stderr)
             );
             let missing = qubitick_build::prelude_contract::missing_from(&text);
+            // A probe can fail for a reason the contract does not name — the ground is not
+            // compiled, `lean` is not the version the corpus targets — and then `missing` is empty
+            // and `satisfied: false` says nothing a reader can act on. Lean's own error lines travel
+            // in the JSON with it, and a run with no `--lean-path` says what one is for.
+            let failures: Vec<&str> = text
+                .lines()
+                .filter(|l| l.contains("error") || l.contains("unknown module") || l.contains("unknown constant"))
+                .take(3)
+                .collect();
+            let hint = if lean_path.is_none() && !out.status.success() {
+                Some("prelude-check reads COMPILED ground: pass --lean-path <dir holding Qubitick/HL.olean> (`qubitick lake <project>` writes <project>/.lake/src)")
+            } else {
+                None
+            };
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
@@ -518,6 +532,8 @@ fn main() -> anyhow::Result<()> {
                             "tier": qubitick_build::prelude_contract::tier_of(n).map(|t| t.label()),
                         }))
                         .collect::<Vec<_>>(),
+                    "failures": failures,
+                    "hint": hint,
                 }))?
             );
             // Anything not satisfied is a failure: a probe that fails for a reason

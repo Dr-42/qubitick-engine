@@ -77,7 +77,7 @@ export function createRegistry(app, deps) {
     /* THE LEAN SCRATCH EVALUATOR: a tile you type Lean into and get a term back. `ink` is the text it
        evaluates (a wire can fill it), and the rendered `latex`/`html` of the answer go out on its two
        out ports (js/panes/slate.js). */
-    pane('slate', 'Slate · Lean scratch', mounts('slate'), { inputs: [['ink', 'Text']], outputs: [['latex', 'Text'], ['html', 'Text']] });
+    pane('slate', 'Slate · corpus text', mounts('slate'), { inputs: [['ink', 'Text']], outputs: [['latex', 'Text'], ['html', 'Text']] });
     /* the corpus build report: errors and warnings, each with its file and line */
     pane('diag', 'Diagnostics · report', mounts('diag'), { category: 'settings' });
     /* the wire layer's own switch: a boolean input, so a Constant or a program node can throw

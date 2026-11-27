@@ -5,17 +5,25 @@
  *
  * Every HTTP route (/api/…) and WebSocket route (/ws/…) used by the UI
  * must be declared here. No other file under web-next/ may contain
- * a route string (enforced by tools/lint-rules.mjs).
+ * a route string (enforced by tools/lint.mjs).
  *
  * Each entry:
  *   { name, method, path, ws?, request?(args), response?(raw), binary? }
  *
- * Every route here is MOUNTED by the engine (crates/api/src/router.rs), and one of them answers with a
- * placeholder rather than an implementation:
+ * Every route here is MOUNTED by the engine (crates/api/src/router.rs). SIX of them answer with a
+ * placeholder rather than an implementation, and a pane that calls one shows the server's own words:
  *
- *   handwrite.upload   `POST /api/handwrite` answers `{ ok: false, error: "handwriting OCR not
- *                      implemented yet" }` — the route is real, the OCR is not
- *                      (crates/api/src/handlers_gap.rs::post_handwrite)
+ *   handwrite.upload   `POST /api/handwrite` → `{ ok: false, error: "handwriting OCR not implemented
+ *                      yet" }` — the route is real, the OCR is not
+ *   ir.post            `POST /api/ir` echoes the buffer (`IR→HL emitter not yet implemented`)
+ *   latex.post         `POST /api/latex` → `LaTeX typesetting not implemented yet`
+ *   expand.post        `POST /api/expand` → `goal expansion not implemented yet`
+ *   induce.post        `POST /api/induce` → `theorem induction not implemented yet`
+ *   slate.post         `POST /api/slate` parses `.qbit`, so the Slate pane's Lean input is refused
+ *                      with `unknown node header`; the pane's label promises Lean
+ *
+ * `POST /api/rewrite` is mounted and answers `{"lean_term": "by sorry", "ok": <goal parsed>}`; it is
+ * not in this table because no pane calls it.
  *
  * `symbols.add` is NOT one of those: `POST /api/symbols` inserts a symbol row
  * (handlers_gap.rs::post_symbols, mounted at router.rs:21). It was marked a "backend gap" here long
