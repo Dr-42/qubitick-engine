@@ -250,7 +250,20 @@ pub fn warning_count(results: &[BuildFileResult]) -> usize {
 /// file still checks. `verified` alone would then say "proved", which is exactly the lie the
 /// placeholder `Eq.refl` used to tell. One warning per admitted theorem, carrying the node's own
 /// line, and the report counts them (`admitted_count`).
-fn admitted_diagnostics(nodes: &[qubitick_model::Node], src: &str, file: &str) -> Vec<Diagnostic> {
+///
+/// `refused_row` is what the strict pass found: a proof row the parser will not read. Such a
+/// file does NOT hold an admitted theorem — it holds a theorem whose proof is unreadable — and
+/// saying both is two diagnoses of one mistake. The empty step list is an artifact of the
+/// tolerant pass, not the author's declaration that the theorem is unproved.
+fn admitted_diagnostics(
+    nodes: &[qubitick_model::Node],
+    src: &str,
+    file: &str,
+    refused_row: bool,
+) -> Vec<Diagnostic> {
+    if refused_row {
+        return Vec::new();
+    }
     /* one `.qbit` file is one node, so the node's header is the first line with something on it */
     let line = src
         .lines()
@@ -420,9 +433,14 @@ fn file_diagnostics_cached(
         .into_iter()
         .map(|m| cite_diagnostic(&m, &file, &src))
         .collect();
-    out.extend(refused_row_diagnostics(ctx, path)?);
+    let refused = refused_row_diagnostics(ctx, path)?;
+    // A REFUSED ROW IS NOT AN ADMITTED PROOF. Both would be reported for the same theorem —
+    // "this row is not notation" and "this theorem is stated, not proved" — and only the
+    // first is what the author did.
+    let has_refused_row = !refused.is_empty();
+    out.extend(refused);
     out.extend(crate::latex::LatexLint::new(ctx).lint(path, &src));
-    out.extend(admitted_diagnostics(&nodes, &src, &file));
+    out.extend(admitted_diagnostics(&nodes, &src, &file, has_refused_row));
     Ok(out)
 }
 
@@ -1150,7 +1168,7 @@ mod tests {
             })
         };
 
-        let warned = admitted_diagnostics(&[thm(vec![])], src, "T_01_Open.qbit");
+        let warned = admitted_diagnostics(&[thm(vec![])], src, "T_01_Open.qbit", false);
         assert_eq!(warned.len(), 1, "one warning per admitted theorem");
         assert_eq!(warned[0].code, "proof.admitted");
         assert!(!warned[0].is_error(), "an admission is not an error: the node is just not proved");
@@ -1163,6 +1181,7 @@ mod tests {
             &[thm(vec![qubitick_model::ProofStep::Chain { rows: vec![] }])],
             src,
             "T_01_Open.qbit",
+            false,
         );
         assert!(proven.is_empty(), "a proof-carrying theorem is not admitted");
         let result = |diagnostics| BuildFileResult {

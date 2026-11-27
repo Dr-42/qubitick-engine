@@ -70,6 +70,25 @@ fn a_sentence_in_a_proof_is_reported_and_the_corpus_still_opens() {
             .any(|r| r.path.contains("T_01_Prose") && !r.verified),
         "the theorem that holds the sentence does not verify"
     );
+    /* ONE MISTAKE, ONE DIAGNOSTIC. The tolerant pass keeps a refused row out of the step
+       list, so the theorem LOOKS admitted — and the report used to say both "this row is
+       not notation" and "this theorem is stated, not proved". Only the first is what the
+       author did: admitted means no `Proof:` rows or `\sorry`, never a row we could not
+       read. */
+    assert_eq!(
+        said.iter().filter(|(c, _)| c == "parse.not-notation").count(),
+        1,
+        "exactly one diagnostic for the prose row: {said:?}"
+    );
+    assert!(
+        !said.iter().any(|(c, _)| c == "proof.admitted"),
+        "a refused row is not an admitted proof: {said:?}"
+    );
+    assert_eq!(
+        qubitick_build::pipeline::admitted_count(&results),
+        0,
+        "and the report's admitted count agrees"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
