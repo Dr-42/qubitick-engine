@@ -375,3 +375,76 @@ fn a_row_over_a_case_defined_operator_is_justified() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/* AN INDUCTION PROOF OVER A CASE-DEFINED OPERATOR VERIFIES, END TO END.
+ *
+ * Everything the path needs, in one corpus: a declared carrier (`\tau = \tau_0 \vee (^+ \tau)`),
+ * a two-case operator over it (`\oplus`, whose `Sema:` composes its type `tau → tau → tau`),
+ * and a theorem proved by induction on the carrier, each case closing by unfolding the operator.
+ *
+ * The emitted term is the carrier's recursor, and the RECURSIVE branch takes the hypothesis
+ * because the constructor's declaration says its field is the carrier:
+ *
+ *     fun a => @tau.rec (fun x_i => Eq (oplus tau_0 x_i) x_i)
+ *       (Eq.refl (oplus tau_0 tau_0))
+ *       (fun a ih => (Eq.refl (oplus tau_0 (caret a))))
+ *       a
+ *
+ * The branch used to be `fun a => …` — one binder short — because the hypothesis was added only
+ * when the compiled body happened to mention `ih`, and `tau.rec`'s branch is `fun a ih => …`.
+ */
+#[test]
+fn an_induction_over_a_case_defined_operator_verifies() {
+    if !lean_is_here() {
+        eprintln!("skipping: lean not found");
+        return;
+    }
+    let dir = root("induction");
+    corpus(&dir);
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
+        "D.S.05. Plus\na \\oplus b\nSema:\n(\\tau_0 \\oplus b = b) \\land ((^+ a) \\oplus b = ^+ (a \\oplus b))\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Theorems/T_S_01_Zero.qbit",
+        "T.S.01. ZeroPlus\n\\forall a : \\tau, \\tau_0 \\oplus a = a\nProof:\n\\mu a\n  \\tau_0 \\mapsto\n    \\tau_0 \\oplus \\tau_0\n      = \\tau_0  [D.05]\n  ^+ a \\mapsto\n    \\tau_0 \\oplus ^+ a\n      = ^+ a  [D.05]\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let ground = qubitick_build::ground::for_check(&dir).expect("the ground assembles");
+    let results =
+        qubitick_build::run_pipeline(&db, &qubitick_build::walk_qbit(&dir), Some(&ground)).unwrap();
+    let errors: Vec<String> = results
+        .iter()
+        .flat_map(|r| r.diagnostics.iter())
+        .filter(|d| d.is_error())
+        .map(|d| format!("{}: {}", d.code, d.message))
+        .collect();
+    assert!(errors.is_empty(), "an induction over a case-defined operator must build: {errors:?}");
+    assert!(
+        results.iter().all(|r| r.verified),
+        "all of it verifies: {:?}",
+        results
+            .iter()
+            .filter(|r| !r.verified)
+            .map(|r| (r.path.clone(), r.diagnostics.first().cloned()))
+            .collect::<Vec<_>>()
+    );
+    // The branch takes its hypothesis because the CONSTRUCTOR's field is the carrier.
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+    let file = dir.join("Era0/Strata0/Theorems/T_S_01_Zero.qbit");
+    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the theorem emits");
+    assert!(emitted.contains("@tau.rec"), "the proof is the carrier's recursor:\n{emitted}");
+    assert!(
+        emitted.contains("fun a ih =>"),
+        "the recursive branch takes the induction hypothesis:\n{emitted}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -180,9 +180,9 @@ Consequences that have bitten:
 - **A one-row chain is its row** (`chain.rs::fold_trans`): wrapping it in
   `@Eq.trans … (just) (Eq.refl rhs)` asks Lean to accept a `lhs = lhs` term as an ARGUMENT of
   `lhs = rhs`, a defeq unification it performs from an expected type, not from an argument's.
-- **An induction branch is one binder short** unless its body names `ih`: the recursor's
-  recursive case is `fun a ih => …`, and which case that is comes from the formation's
-  declaration, not from the symbol table.
+- **An induction branch's arity is the CONSTRUCTOR's declaration**, not the proof text: the
+  emitter builds `qubitick_rewrite::CtorFields` (ctor → its field sorts + carrier) and
+  `induction.rs` takes one `ih` per field whose sort is the carrier.
 - **A definitional row still emits a `trans` chain** (`Eq.trans (Eq.refl lhs) (Eq.refl rhs)`),
   which Lean refuses where the two sides are only definitionally equal; it wants `Eq.refl lhs`
   against the goal.

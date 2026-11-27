@@ -2306,6 +2306,23 @@ fn emit_lean_text_impl(
         .collect();
     let emit_nodes: &[Node] = &emit_owned;
 
+    /* A CONSTRUCTOR'S DECLARED FIELDS, for the induction compiler. Which branch of a
+       recursor takes an induction hypothesis is a fact of these declarations, and the
+       rewrite crate holds the symbol table rather than the nodes, so it is built here and
+       handed across (`qubitick_rewrite::CtorFields`). */
+    let ctor_fields: qubitick_rewrite::CtorFields = {
+        let mut m = qubitick_rewrite::CtorFields::new();
+        for n in nodes {
+            if let Node::Definition(d) = n
+                && let Some(FormBody::Formation(ctors)) = &d.d_block.form
+            {
+                for c in ctors {
+                    m.insert(c.constructor.primary, (c.args.clone(), d.symbol.primary));
+                }
+            }
+        }
+        m
+    };
     // Map each formation's constructor symbol → (carrier lean name, ordered ctor
     // ids) so operators can be emitted as recursors over a custom formation.
     let formations: std::collections::HashMap<u32, (String, Vec<u32>)> = {
@@ -2649,6 +2666,7 @@ let mut binder_prefix = String::new();
                     } else {
                         opts.ground_chain
                     },
+                    &ctor_fields,
                 )?;
                 // Re-register this theorem's rule with the statement it was EMITTED
                 // with, so a citation applied inside this module has the def's type.

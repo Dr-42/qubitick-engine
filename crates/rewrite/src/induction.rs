@@ -12,6 +12,14 @@ use crate::termctx::TermCtx;
 /// (Document 5 §11.1). The motive is implicit (`_`), inferred by Lean from the
 /// surrounding goal context.
 #[allow(clippy::too_many_arguments)]
+/// A CONSTRUCTOR'S DECLARED FIELDS, and the carrier it constructs: ctor symbol id →
+/// (the sorts of its fields, in order, the carrier).
+///
+/// The emitter has the formation declarations; this crate has the symbol table. Which field
+/// is RECURSIVE — the one the recursor hands an induction hypothesis for — is a fact of the
+/// declaration, so it has to cross the boundary rather than be guessed from the proof text.
+pub type CtorFields = std::collections::HashMap<u32, (Vec<u32>, u32)>;
+
 pub fn compile_induction(
     ctx: &Ctx,
     tc: &TermCtx,
@@ -21,6 +29,7 @@ pub fn compile_induction(
     rules: &crate::rules::RuleTable,
     fn_names: &std::collections::HashMap<u32, String>,
     outer_goal: &Expr,
+    ctors: &CtorFields,
 ) -> Result<String> {
     let scrut = lean_render(scrutinee, &|id| tc.resolve(id));
     // Extract the variable name being inducted on
@@ -73,6 +82,10 @@ pub fn compile_induction(
             .as_ref()
             .map(|p| p.constructor.clone())
             .unwrap_or_else(|| qubitick_model::AtomicComposite::new(0));
+        // Read before `ctor_ac` is moved into the reconstructed expression below: the
+        // declaration lookup keys on the constructor's own symbol id.
+        let ctor_id = ctor_ac.primary;
+        let ctor_ac = ctor_ac;
         let ctor_e = if binders.is_empty() {
             Expr::Sym(ctor_ac)
         } else {
@@ -107,6 +120,7 @@ pub fn compile_induction(
             &c.body,
             rules,
             fn_names,
+            ctors,
         )?;
 
         if binders.is_empty() {
@@ -121,12 +135,23 @@ pub fn compile_induction(
         // constructor does, and a non-recursive constructor's branch has none to use.
         // A proof that ignores an available hypothesis therefore needs the
         // declaration-side arity, which is the induction path's known limit.
-        let uses_ih = body
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .any(|word| word == "ih");
+        /* HOW MANY HYPOTHESES THIS BRANCH TAKES IS THE DECLARATION'S ANSWER.
+         *
+         * `tau.rec`'s branch for a constructor is `fun <fields> ih1 … ihk =>`, with one
+         * hypothesis per RECURSIVE field — a field whose declared sort is the carrier. This
+         * used to be inferred from the compiled body mentioning the word `ih`, which is wrong
+         * in both directions: a body that ignores an available hypothesis was emitted one
+         * binder short (`… but is expected to have type Eq (oplus tau_0 a) a →
+         * Eq (oplus tau_0 a.caret) a.caret`), and a body that merely mentions `ih` in a
+         * non-recursive constructor would take a binder Lean does not offer. The emitter
+         * passes the formation's declarations in; nothing here is guessed. */
+        let recursive = ctors
+            .get(&ctor_id)
+            .map(|(fields, carrier)| fields.iter().filter(|f| *f == carrier).count())
+            .unwrap_or(0);
         let mut params: Vec<String> = binders.clone();
-        if uses_ih {
-            params.push("ih".to_string());
+        for k in 0..recursive {
+            params.push(if k == 0 { "ih".to_string() } else { format!("ih{}", k + 1) });
         }
         out.push_str(&format!("  (fun {} => ({body}))\n", params.join(" ")));
     }

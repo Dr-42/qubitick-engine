@@ -23,10 +23,11 @@ pub fn compile_steps(
     steps: &[ProofStep],
     rules: &crate::rules::RuleTable,
     fn_names: &std::collections::HashMap<u32, String>,
+    ctors: &crate::induction::CtorFields,
 ) -> Result<String> {
     let tc = TermCtx::with_fn(ctx, fn_names);
     let mut env = Env::new();
-    compile_steps_with_env(ctx, &tc, &mut env, goal, steps, rules, fn_names)
+    compile_steps_with_env(ctx, &tc, &mut env, goal, steps, rules, fn_names, ctors)
 }
 
 pub(crate) fn compile_steps_with_env(
@@ -37,6 +38,7 @@ pub(crate) fn compile_steps_with_env(
     steps: &[ProofStep],
     rules: &crate::rules::RuleTable,
     fn_names: &std::collections::HashMap<u32, String>,
+    ctors: &crate::induction::CtorFields,
 ) -> Result<String> {
     let mut segments: Vec<String> = Vec::new();
     let mut open = Vec::new();
@@ -89,7 +91,7 @@ pub(crate) fn compile_steps_with_env(
     }
 
     for step in steps {
-        let seg = compile_step(ctx, tc, env, step, &cur_goal, &mut open, rules, fn_names)?;
+        let seg = compile_step(ctx, tc, env, step, &cur_goal, &mut open, rules, fn_names, ctors)?;
         segments.push(seg);
     }
 
@@ -123,6 +125,7 @@ fn compile_step(
     open: &mut Vec<String>,
     rules: &crate::rules::RuleTable,
     fn_names: &std::collections::HashMap<u32, String>,
+    ctors: &crate::induction::CtorFields,
 ) -> Result<String> {
     match step {
         ProofStep::Chain { rows } => compile_chain(ctx, tc, env, rows, rules),
@@ -135,7 +138,7 @@ fn compile_step(
         ProofStep::Rewrite { refs } => compile_rewrite(ctx, tc, env, refs),
         ProofStep::Induction { var, cases } => {
             let scrut = goal_var_expr(var);
-            compile_induction(ctx, tc, env, &scrut, cases, rules, fn_names, goal)
+            compile_induction(ctx, tc, env, &scrut, cases, rules, fn_names, goal, ctors)
         }
         ProofStep::Discriminate { hyp } => compile_discriminate(ctx, tc, hyp),
         ProofStep::Note { name, prop, body } => {
@@ -143,7 +146,7 @@ fn compile_step(
             let mut inner = String::new();
             let mut inner_open = Vec::new();
             for s in body {
-                let seg = compile_step(ctx, tc, env, s, prop, &mut inner_open, rules, fn_names)?;
+                let seg = compile_step(ctx, tc, env, s, prop, &mut inner_open, rules, fn_names, ctors)?;
                 inner.push_str(&seg);
                 inner.push('\n');
             }
@@ -162,7 +165,7 @@ fn compile_step(
             );
             for arm in arms {
                 let pat = render_pattern(ctx, &arm.pattern);
-                let body = compile_steps(ctx, goal, &arm.body, rules, fn_names)?;
+                let body = compile_steps(ctx, goal, &arm.body, rules, fn_names, ctors)?;
                 out.push_str(&format!("\n| {pat} => {body}"));
             }
             Ok(out)
@@ -178,7 +181,7 @@ fn compile_step(
                     .as_ref()
                     .map(|p| render_pattern(ctx, p))
                     .unwrap_or_else(|| "_".to_string());
-                let body = compile_steps(ctx, goal, &c.body, rules, fn_names)?;
+                let body = compile_steps(ctx, goal, &c.body, rules, fn_names, ctors)?;
                 out.push_str(&format!("\n| {pat} => {body}"));
             }
             Ok(out)
@@ -252,6 +255,7 @@ mod tests {
             &[],
             &crate::rules::RuleTable::new(),
             &Default::default(),
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(out, "Eq.refl _");
@@ -268,6 +272,7 @@ mod tests {
             &goal,
             &[step],
             &crate::rules::RuleTable::new(),
+            &Default::default(),
             &Default::default(),
         )
         .unwrap();

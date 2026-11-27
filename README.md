@@ -450,7 +450,7 @@ The tests that state a promise rather than a detail:
 |---|---|
 | `crates/build/tests/no_glyph_names.rs` | no corpus glyph appears as a string literal in the engine |
 | `crates/build/tests/declaration_authority.rs` | an undeclared operator fails naming the glyph; declaring it makes the same corpus verify |
-| `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors, its operators are typed over the carrier, and a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive a second time |
+| `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors; its operators are typed over the carrier; a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive again; a `Sema:` of cases becomes a definition over the recursor; and an induction over that operator VERIFIES, its recursive branch taking the hypothesis |
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
 | `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
@@ -587,18 +587,11 @@ answers rather than skipping the gates, because a gate that silently does nothin
   `oplus tau_0 tau_0` is only *definitionally* `tau_0`. A definitional step wants
   `Eq.refl lhs` elaborated against the goal, not a chain
   (`crates/rewrite/src/chain.rs::justify_step`).
-- **An induction's recursive branch omits the hypothesis unless the body names it.** Lean's
-  recursor branch is `fun a ih => …`; the engine adds `ih` only when the compiled body uses
-  the word (`crates/rewrite/src/induction.rs`), because deciding from the corpus needs the
-  CONSTRUCTOR's declared fields and this crate carries the symbol table rather than the
-  declarations. A case whose body ignores the hypothesis is therefore emitted one binder
-  short — measured:
-  `Eq.refl (oplus tau_0 a.caret) has type Eq (oplus tau_0 a.caret) (oplus tau_0 a.caret) but
-  is expected to have type Eq (oplus tau_0 a) a → Eq (oplus tau_0 a.caret) a.caret`. The fix is
-  to thread the formation's `CtorDecl` fields into `compile_induction`.
-- **Nothing in the suite builds a corpus that proves an induction.** The compiler emits a
-  `tau.rec`-shaped term for a `\mu` block with its cases and motive, and the block parses;
-  the crate's only induction test is `induction::tests::fresh_name`, a name generator.
+- **An induction branch takes one hypothesis per RECURSIVE field, from the declaration.** The
+  emitter passes each constructor's fields and carrier to `compile_induction`
+  (`qubitick_rewrite::CtorFields`); a field whose sort is the carrier brings an `ih`.
+  Deciding it from the proof text — "the body mentions `ih`" — was wrong in both directions,
+  and the corpus that proves it is `crates/build/tests/declared_formation.rs::an_induction_over_a_case_defined_operator_verifies`.
 - **Autoinduce writes goals, not cases.** `js/live/induce.js` substitutes the induction
   variable into the author's own text for each case group the author already wrote; the
   case patterns and the engine-side derivation do not exist, and `/api/induce` is a stub.

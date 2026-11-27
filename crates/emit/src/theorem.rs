@@ -347,6 +347,9 @@ pub fn emit_theorem(
     // Whether `class` is actually declared in the environment this module sees
     // (`false` when the module has no axiom chain of its own and imports none).
     class_declared: bool,
+    // Each constructor's declared fields and its carrier: the induction compiler asks
+    // this how many hypotheses a recursor branch takes.
+    ctors: &qubitick_rewrite::CtorFields,
 ) -> Result<(String, Expr)> {
     // Only apply nullity form if the proof chain explicitly ends at \varnothing
     let is_nullity = match &theorem.proof.last() {
@@ -392,7 +395,14 @@ pub fn emit_theorem(
             let chain_stmt =
                 unfold_relational(&nullity_form(ctx, &theorem.statement), ctx, relational_iffs);
             let chain =
-                qubitick_rewrite::compile_steps(ctx, &chain_stmt, &theorem.proof, rules, fn_names)?;
+                qubitick_rewrite::compile_steps(
+                    ctx,
+                    &chain_stmt,
+                    &theorem.proof,
+                    rules,
+                    fn_names,
+                    ctors,
+                )?;
             (
                 unfold_relational(&theorem.statement, ctx, relational_iffs),
                 Some(parts.term(&chain)),
@@ -425,7 +435,14 @@ pub fn emit_theorem(
     } else {
         match &bridge {
             Some(bridge) => bridge.clone(),
-            None => qubitick_rewrite::compile_steps(ctx, &statement, &theorem.proof, rules, fn_names)?,
+            None => qubitick_rewrite::compile_steps(
+                ctx,
+                &statement,
+                &theorem.proof,
+                rules,
+                fn_names,
+                ctors,
+            )?,
         }
     };
 
@@ -727,6 +744,7 @@ mod tests {
             // `Eq` statements with no axiom field to cite.
             &[],
             true,
+            &Default::default(),
         )
         .unwrap();
         assert!(out.contains("def Thm1"));
@@ -788,6 +806,7 @@ mod tests {
             // `Eq` statements with no axiom field to cite.
             &[],
             false,
+            &Default::default(),
         )
         .unwrap();
         // `E` is free in this statement (it appears only as the binder `a`/`b`'s
@@ -834,6 +853,7 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             true,
+            &Default::default(),
         )
         .unwrap();
         assert!(out.contains("axiom Thm1 :"), "an admitted theorem is assumed, not proved:\n{out}");
@@ -916,6 +936,7 @@ mod tests {
             // `Eq` statements with no axiom field to cite.
             &[],
             false,
+            &Default::default(),
         )
         .unwrap();
         assert!(

@@ -16,6 +16,7 @@ pub mod rewrite;
 pub mod rules;
 pub mod termctx;
 pub use compile::compile_steps;
+pub use induction::CtorFields;
 pub use diff::{RewriteRule, prove_eq_term};
 pub use env::Env;
 pub use rewrite::try_diff_apply;
