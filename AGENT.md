@@ -177,6 +177,12 @@ Consequences that have bitten:
   by whichever case matches (`crates/rewrite/src/rules.rs`, `chain.rs`). The loader must hand
   the table the EXPRESSION: stringifying a `FormBody` (`MacroExpr(…)`) or an `Expr` (`Apply(…)`)
   and re-parsing it fails in the lexer, silently, and did for every definition until now.
+- **A one-row chain is its row** (`chain.rs::fold_trans`): wrapping it in
+  `@Eq.trans … (just) (Eq.refl rhs)` asks Lean to accept a `lhs = lhs` term as an ARGUMENT of
+  `lhs = rhs`, a defeq unification it performs from an expected type, not from an argument's.
+- **An induction branch is one binder short** unless its body names `ih`: the recursor's
+  recursive case is `fun a ih => …`, and which case that is comes from the formation's
+  declaration, not from the symbol table.
 - **A definitional row still emits a `trans` chain** (`Eq.trans (Eq.refl lhs) (Eq.refl rhs)`),
   which Lean refuses where the two sides are only definitionally equal; it wants `Eq.refl lhs`
   against the goal.

@@ -587,6 +587,15 @@ answers rather than skipping the gates, because a gate that silently does nothin
   `oplus tau_0 tau_0` is only *definitionally* `tau_0`. A definitional step wants
   `Eq.refl lhs` elaborated against the goal, not a chain
   (`crates/rewrite/src/chain.rs::justify_step`).
+- **An induction's recursive branch omits the hypothesis unless the body names it.** Lean's
+  recursor branch is `fun a ih => …`; the engine adds `ih` only when the compiled body uses
+  the word (`crates/rewrite/src/induction.rs`), because deciding from the corpus needs the
+  CONSTRUCTOR's declared fields and this crate carries the symbol table rather than the
+  declarations. A case whose body ignores the hypothesis is therefore emitted one binder
+  short — measured:
+  `Eq.refl (oplus tau_0 a.caret) has type Eq (oplus tau_0 a.caret) (oplus tau_0 a.caret) but
+  is expected to have type Eq (oplus tau_0 a) a → Eq (oplus tau_0 a.caret) a.caret`. The fix is
+  to thread the formation's `CtorDecl` fields into `compile_induction`.
 - **Nothing in the suite builds a corpus that proves an induction.** The compiler emits a
   `tau.rec`-shaped term for a `\mu` block with its cases and motive, and the block parses;
   the crate's only induction test is `induction::tests::fresh_name`, a name generator.

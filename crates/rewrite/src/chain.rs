@@ -55,6 +55,15 @@ pub fn compile_chain(
 
 /// Fold the collected row terms into nested `@Eq.trans` applications.
 fn fold_trans(rows: &[(String, String, String)]) -> String {
+    /* A ONE-ROW CHAIN IS ITS ROW. Wrapping it in `@Eq.trans … (just) (Eq.refl rhs)` asks
+       Lean to accept `just`, whose type is `lhs = lhs` for a definitional step, as a value
+       of `lhs = rhs` — a defeq unification the elaborator performs from an EXPECTED type
+       (which is how `Eq.refl lhs` closes a definitional goal) but not from an argument's
+       type. Measured on a row over a case-defined operator:
+       `Type mismatch … Eq.trans (Eq.refl (oplus tau_0 (caret a))) (Eq.refl (caret a))`. */
+    if rows.len() == 1 {
+        return rows[0].2.clone();
+    }
     // The whole chain ends at the LAST row's rhs. Start from the end, closed by
     // `Eq.refl <last-rhs>`, and fold forward: `@Eq.trans _ lhs_i rhs_i final
     // (just_i) (rest)` — the final endpoint is the LAST row's rhs throughout, not
@@ -740,20 +749,42 @@ mod tests {
         Expr::Sym(AtomicComposite::new(id))
     }
 
+    /* A ONE-ROW CHAIN IS ITS ROW, and a two-row chain nests `@Eq.trans`.
+     *
+     * The wrapper used to be unconditional, which for a DEFINITIONAL row asked Lean to accept
+     * `Eq.refl lhs` — type `lhs = lhs` — as an ARGUMENT of `@Eq.trans` typed `lhs = rhs`. Lean
+     * performs that defeq unification from an expected type, not from an argument's type, so
+     * the row was refused (`Type mismatch … Eq.trans (Eq.refl (oplus tau_0 (caret a)))
+     * (Eq.refl (caret a))`). */
     #[test]
-    fn compiles_trans_chain() {
+    fn a_one_row_chain_is_its_row_and_two_rows_nest_trans() {
         let ctx = ctx();
         let tc = TermCtx::new(&ctx);
         let env = Env::new();
-        let row = ChainRow {
+        let one = ChainRow {
             line: 1,
             lhs: Some(sym(1)),
             rhs: sym(1),
             rel: StepRel::Eq,
             just: ChainJust::Rfl,
         };
-        let out = compile_chain(&ctx, &tc, &env, &[row], &crate::rules::RuleTable::new()).unwrap();
-        assert!(out.contains("@Eq.trans"));
+        let out = compile_chain(&ctx, &tc, &env, &[one.clone()], &crate::rules::RuleTable::new())
+            .unwrap();
+        assert!(!out.contains("@Eq.trans"), "one row needs no composition: {out}");
+        assert!(out.contains("Delta"));
+
+        let two = vec![
+            one,
+            ChainRow {
+                line: 2,
+                lhs: None,
+                rhs: sym(1),
+                rel: StepRel::Eq,
+                just: ChainJust::Rfl,
+            },
+        ];
+        let out = compile_chain(&ctx, &tc, &env, &two, &crate::rules::RuleTable::new()).unwrap();
+        assert!(out.contains("@Eq.trans"), "two rows compose: {out}");
         assert!(out.contains("Delta"));
     }
 
@@ -968,6 +999,28 @@ fn justify_hypothesis(
     } else {
         (&args[0], &args[1])
     };
+
+    // A HYPOTHESIS ALSO PROVES AN EQUALITY UNDER A SHARED HEAD.
+    //
+    // `ih : a ⊕ τ_0 = a` is what closes the recursive case of an induction, but the row it
+    // closes is `^+ (a ⊕ τ_0) = ^+ a` — the same step one constructor up, which is congruence
+    // and not a root match. Without it no induction over a recursive carrier can be proved,
+    // because the hypothesis only ever matches at the root.
+    if let Some(term) = crate::diff::prove_eq_term(
+        lhs,
+        rhs,
+        Some(&crate::diff::RewriteRule::new(
+            pat.clone(),
+            tgt.clone(),
+            Some(term_name.to_string()),
+        )),
+        &|id| tc.resolve(id),
+    )
+    .ok()
+    .filter(|t| t.contains(term_name))
+    {
+        return Some(term);
+    }
 
     // Check root match
     if let Some(b) = qubitick_pattern::bind_pat(pat, lhs) {
