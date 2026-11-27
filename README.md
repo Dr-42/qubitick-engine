@@ -264,7 +264,9 @@ Four constructs, and nothing else: `def`, `inductive`, `theorem`, and a referenc
 - **a formation** — `set_option genInjectivity false in inductive C : Type | ...` with each
   constructor's declared argument sorts, plus one `def ctor : ... := C.ctor` alias per
   constructor, and a `C.rec` definition for an operator whose `Sema:` recurses on one of
-  them;
+  them. The inductive is declared by the module that OWNS the formation's node and by no
+  other: a module that merely names the carrier imports that module, the way it imports any
+  definition it does not declare (`crates/build/tests/declared_formation.rs`);
 - **a theorem** — a `theorem`, with the proof's chain compiled to a term; an equality
   through the nullity operator is emitted in the nullity form the corpus's `Role:` marks;
 - **a reference** — a glyph whose home is the ground (`Type: ISA.Capacity`, `Type: R.plus`)
@@ -438,7 +440,7 @@ The tests that state a promise rather than a detail:
 |---|---|
 | `crates/build/tests/no_glyph_names.rs` | no corpus glyph appears as a string literal in the engine |
 | `crates/build/tests/declaration_authority.rs` | an undeclared operator fails naming the glyph; declaring it makes the same corpus verify |
-| `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors, and its operators are typed over the carrier |
+| `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors, its operators are typed over the carrier, and a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive a second time |
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
 | `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
@@ -567,12 +569,6 @@ answers rather than skipping the gates, because a gate that silently does nothin
 - **The Slate pane does not evaluate Lean.** Its Run button posts to `/api/slate`, which
   parses `.qbit` (`handlers_gap::post_slate`), so Lean text is refused with `unknown node
   header` while the tile is labelled "Lean scratch".
-- **A formation's inductive is written into every module that names its carrier.** Two such
-  modules, where one imports the other, give Lean two `tau`s and the build stops with
-  `has already been declared`; each module alone verifies. A corpus with a declared
-  formation and a citation across modules therefore does not build today
-  (`crates/build/tests/declared_formation.rs` emits single files, which is why the suite
-  does not see it).
 - **Nothing in the suite builds a corpus that proves an induction.** The compiler emits a
   `tau.rec`-shaped term for a `\mu` block with its cases and motive, and the block parses;
   the crate's only induction test is `induction::tests::fresh_name`, a name generator.

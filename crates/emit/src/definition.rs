@@ -21,7 +21,7 @@ pub fn emit_definition(ctx: &Ctx, def: &Definition) -> Result<String> {
         &Default::default(),
         &HashMap::new(),
         &HashMap::new(),
-        false,
+        &std::cell::Cell::new(false),
     )
 }
 
@@ -37,9 +37,11 @@ pub fn emit_definition_in(
     sorts: &std::collections::HashSet<u32>,
     formations: &HashMap<u32, (String, Vec<u32>)>,
     known: &HashMap<String, String>,
-    // Emitting a GROUND: the file that DECLARES the class, so a field of the instance
-    // names itself (`plus`) rather than being reached through it (`R.plus`).
-    ground: bool,
+    // SET WHEN THE BODY REACHES A FIELD OF THE INSTANCE (`R.plus`). A caller decides where
+    // the definition belongs by asking this, not by searching the rendered text for "R.":
+    // the answer is a property of the SYMBOL (a `bound` field), and a string test would
+    // trip over any corpus that writes an expression containing those two characters.
+    needs_instance: &std::cell::Cell<bool>,
 ) -> Result<String> {
     // A dual-use glyph declares its APPLIED form under the `_fn` name: its authored
     // `Type:` describes `\mathfrak{L}(t)`, while the bare `\mathfrak{L}` stays the
@@ -50,11 +52,15 @@ pub fn emit_definition_in(
     let base = crate::resolver_with_sorts(ctx, fn_names, sorts);
     let resolver = move |id: u32| -> String {
         let name = base(id);
-        if ground {
-            name.strip_prefix("R.").map(str::to_string).unwrap_or(name)
-        } else {
-            name
+        /* A GLYPH REACHED THROUGH THE INSTANCE IS NAMED THROUGH IT. `plus` is a field of a
+           class the GROUND declares, and a definition is written outside that class, so its
+           body says `R.plus` and needs the instance in scope. Stripping the qualifier here
+           is what made an era ground read `:= plus a a` with no `plus` in scope — the bug
+           that stopped `lake --mesh` compiling. */
+        if name.starts_with("R.") {
+            needs_instance.set(true);
         }
+        name
     };
     /* A GLYPH WITH A GROUND NAME IS THE GROUND'S TO DECLARE.
      *

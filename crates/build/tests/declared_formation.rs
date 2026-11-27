@@ -135,3 +135,68 @@ fn the_declared_formation_builds_and_verifies() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+/* A FORMATION DECLARED ONCE, IN ONE MODULE, EVEN WHEN TWO MODULES NAME THE CARRIER.
+ *
+ * The frame used to declare an inductive in EVERY module that mentioned its carrier, which
+ * each module survived alone and no environment survived twice: put a citing module and the
+ * formation's own module in one build and Lean saw `Qubitick.HL.tau has already been
+ * declared` — three times, once per name. A corpus with a declared formation and a citation
+ * across modules could not build at all.
+ *
+ * The theorem below is the minimal shape that forces the collision: its statement names the
+ * CARRIER (`\\forall a : \\tau, ...`), so its module must see the inductive, and the node that
+ * declares that inductive is another file. The fix is the rule the emitter already used for
+ * definitions: a module DECLARES what it owns and IMPORTS the rest.
+ */
+#[test]
+fn a_theorem_that_names_the_carrier_imports_the_formation_instead_of_repeating_it() {
+    let dir = root("across-modules");
+    corpus(&dir);
+    wit(
+        &dir,
+        "Era0/Strata0/Theorems/T_S_01_CarrierRefl.qbit",
+        "T.S.01. CarrierRefl\n\\forall a : \\tau, \\tau_0 = \\tau_0\nProof:\n\\tau_0\n  = \\tau_0\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+
+    // The theorem's module imports the module that declares the inductive, and declares none.
+    let file = dir.join("Era0/Strata0/Theorems/T_S_01_CarrierRefl.qbit");
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the theorem emits");
+    assert!(
+        emitted.contains("import Qubitick.Corpus.Era0.Strata0.Definitions.D_S_02_Tick"),
+        "the module that names the carrier must import the module that declares it:\n{emitted}"
+    );
+    assert!(
+        !emitted.contains("inductive tau"),
+        "and must not declare the inductive a second time:\n{emitted}"
+    );
+
+    if !lean_is_here() {
+        eprintln!("skipping the build half: lean not found");
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
+    // ...and the corpus builds: two modules naming one carrier is one environment, not two.
+    let ground = qubitick_build::ground::for_check(&dir).expect("the ground assembles");
+    let results =
+        qubitick_build::run_pipeline(&db, &qubitick_build::walk_qbit(&dir), Some(&ground)).unwrap();
+    let errors: Vec<String> = results
+        .iter()
+        .flat_map(|r| r.diagnostics.iter())
+        .filter(|d| d.is_error())
+        .map(|d| format!("{}: {}", d.code, d.message))
+        .collect();
+    assert!(errors.is_empty(), "the corpus must build clean: {errors:?}");
+    assert!(
+        results.iter().all(|r| r.verified),
+        "all of it verifies: {:?}",
+        results
+            .iter()
+            .filter(|r| !r.verified)
+            .map(|r| (r.path.clone(), r.diagnostics.first().cloned()))
+            .collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

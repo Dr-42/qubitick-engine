@@ -162,10 +162,11 @@ Consequences that have bitten:
   Lean the module text plus `#print axioms <name>` and reads its own lines back
   (`crates/build/tests/print_axioms.rs` holds it against an Init ground, a bare prelude and
   the ship). A build never gates on it.
-- **A formation's inductive is inlined into every module that names the carrier**, so two
-  such modules where one imports the other collide (`build.lean-error`: `has already been
-  declared`). Fixing it means the import graph decides where the inductive lives; until
-  then a corpus with a formation and a cross-module citation does not build.
+- **A formation is declared by the module that OWNS its node, and imported by everyone else.**
+  The frame used to declare an inductive in every module that named the carrier — fine one
+  module at a time, `Qubitick.HL.tau has already been declared` the moment two of them met
+  in one environment (`crates/emit/src/module.rs`, the formation loop in
+  `symbol_declarations`, gated on `emit_nodes`; `declared_formation.rs` holds it).
 - **Autoinduce is client-side text substitution** (`js/live/induce.js`): it writes each case
   goal under a case pattern the author wrote, and nothing derives the patterns.
   `tests/unit/induce.test.mjs` holds the laws; `/api/induce` is a stub.

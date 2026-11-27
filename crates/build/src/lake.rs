@@ -92,25 +92,25 @@ fn sanitise(text: &str) -> String {
     out
 }
 
-/// Write the package: the prelude, one module per node, and the library root.
-///
-/// Returns the modules written, paired with the corpus file each came from, so a
-/// build failure can be reported against the `.qbit` a human wrote.
-/// How the corpus is laid out inside the package.
+/// How the corpus is laid out inside the package. There are two shapes and both are
+/// reachable from the command line (`lake`, `lake --mesh`); a third variant nothing selects
+/// would be a shape nobody can run and nobody can break, which is how `Shape::Meshed` sat
+/// unbuilt long enough to stop compiling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
-    /// One module per node: each is checked in its own environment (today's
-    /// per-file semantics), which is why the shared frame never collides.
+    /// One module per node: each is checked in its own environment, so the shared frame
+    /// never collides.
     PerNode,
-    /// One module for the whole corpus. Kept as a target shape: it needs the same
-    /// curated context `Meshed` needs, and no CLI flag selects it yet.
-    Single,
-    /// A shared `Qubitick.Frame` holding the ground, and one module per node that
-    /// imports it plus the modules of the theorems it cites. One environment,
-    /// nothing declared twice, and Lake's import graph is the dependency order.
+    /// One era ground that declares the classes and the definitions, plus one module per
+    /// scope that imports it. One environment, nothing declared twice, and Lake's own
+    /// import graph is the dependency order.
     Meshed,
 }
 
+/// Write the package: the prelude, the modules, and the library root.
+///
+/// Returns the modules written, paired with the corpus file each came from, so a
+/// build failure can be reported against the `.qbit` a human wrote.
 pub fn write_package(
     ctx: &Ctx,
     conn: &qubitick_db::Db,

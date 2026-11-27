@@ -1167,6 +1167,27 @@ fn symbol_declarations(
                 continue;
             }
             let carrier = name_of(d.symbol.primary);
+            /* WHO DECLARES THE INDUCTIVE: THE MODULE THAT OWNS THE NODE, AND ONLY IT.
+             *
+             * The frame declares a formation the module NAMES, which is what made every
+             * module that mentioned the carrier write its own `inductive tau`. Each one
+             * compiled alone; put two of them in one environment — the moment a module
+             * cites another and imports it — and Lean sees `tau has already been declared`.
+             * A corpus with a declared formation and a citation across modules could not
+             * build at all.
+             *
+             * The rule is the one the rest of the emitter already uses: a module declares
+             * what it OWNS (`emit_nodes`) and imports the rest. A formation the module only
+             * names is in another module's file, so this one imports that module — the same
+             * treatment a `Sema:` definition gets. */
+            let owns = emitted.iter().any(|n| matches!(n, Node::Definition(x) if x.base.id == d.base.id));
+            if !owns {
+                let home = ctx
+                    .by_id(i64::from(d.symbol.primary))
+                    .map(|r| r.home_node)
+                    .unwrap_or(-1);
+                needed.push((carrier.clone(), home));
+            }
             // A constructor's Lean type: its carrier when nullary, its declared argument
             // sorts armed into the carrier when it takes arguments.
             let ctor_ty = |c: &qubitick_model::CtorDecl| -> String {
@@ -1211,16 +1232,18 @@ fn symbol_declarations(
                     declared_types.insert(cnam, carrier.clone());
                 }
             }
-            out.push_str(&f); // the `inductive` FIRST
-            for c in ctors {
-                let cnam = name_of(c.constructor.primary);
-                // The corpus writes the bare glyph, so the glyph gets a name of its own
-                // bound to the constructor — typed with the CONSTRUCTOR's type, or a
-                // recursive one would be closed over the wrong arity.
-                out.push_str(&format!(
-                    "def {cnam} : {} := {carrier}.{cnam}\n",
-                    ctor_ty(c)
-                ));
+            if owns {
+                out.push_str(&f); // the `inductive` FIRST
+                for c in ctors {
+                    let cnam = name_of(c.constructor.primary);
+                    // The corpus writes the bare glyph, so the glyph gets a name of its own
+                    // bound to the constructor — typed with the CONSTRUCTOR's type, or a
+                    // recursive one would be closed over the wrong arity.
+                    out.push_str(&format!(
+                        "def {cnam} : {} := {carrier}.{cnam}\n",
+                        ctor_ty(c)
+                    ));
+                }
             }
         }
     }
@@ -2531,8 +2554,9 @@ let mut binder_prefix = String::new();
                    definition that does not need it is free. */
                 /* THE QUALIFIER STAYS IN. A definition is not the class body: it is
                    written OUTSIDE it, where a field of the instance is reachable only as
-                   `R.plus`. Stripping it here is what produced `plus a a` in a file whose
-                   only `plus` is a field of `class ISA`. */
+                   `R.plus`. Stripping it is what produced `plus a a` in a file whose only
+                   `plus` is a field of `class ISA`. */
+                let needs_instance = std::cell::Cell::new(false);
                 let def_text = crate::definition::emit_definition_in(
                     ctx,
                     d,
@@ -2542,12 +2566,13 @@ let mut binder_prefix = String::new();
                     &frame_sorts,
                     &formations,
                     &known_types,
-                    false,
+                    &needs_instance,
                 )?;
                 if opts.ground_only {
-                    /* Which side of the class this definition belongs on: it names the
-                       instance (`R.`) or it does not. See the split above. */
-                    if def_text.contains("R.") {
+                    /* Which side of the class this definition belongs on — asked of the
+                       SYMBOL the body resolved (a `bound` field of the instance), never of
+                       the rendered text. See the split above. */
+                    if needs_instance.get() {
                         ground_instance.push(def_text);
                     } else {
                         ground_plain.push(def_text);
