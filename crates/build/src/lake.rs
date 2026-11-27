@@ -386,6 +386,31 @@ fn write_meshed(
         written.push((module, format!("{era}: ground, {} files", members.len())));
     }
 
+    // ── node id -> Lean module name, in the MESHED shape ──────────────────────
+    //
+    // The emitter needs this map to resolve a glyph a module names but does not
+    // declare (`Frame::needed`). It CANNOT be rebuilt from the parsed nodes this
+    // path holds: a symbol's `home_node` is a DATABASE node id (`times` is 4 on
+    // the algebra corpus) while `parse_content` numbers nodes per file (0, 1, 2),
+    // so a parsed index would miss every home. The map is therefore assembled once
+    // from the corpus's own node list (`get_node_list`: id -> filename) keyed by
+    // the DB id the DB assigned at ingest.
+    //
+    // A definition's home in the mesh is the ERA GROUND module (one per era), not
+    // its per-file module; a theorem's home is its scope module; anything else gets
+    // no entry (the emitter then finds no home and reports the glyph).
+    let mut home_modules: std::collections::HashMap<i64, String> =
+        std::collections::HashMap::new();
+    for header in qubitick_db::read::get_node_list(conn)? {
+        let scope = scope_of(Path::new(&header.filename), corpus);
+        let module = match header.node_type {
+            qubitick_model::NodeKind::Definition => era_ground_module(&era_of(&scope)),
+            qubitick_model::NodeKind::Theorem => module_of_scope(&scope),
+            _ => continue,
+        };
+        home_modules.insert(header.id, module);
+    }
+
     for (scope_id, members) in &scopes {
         // The nearest unit visible from `scope_id` among `cands` — the module that
         // must be imported for a citation or a glyph to resolve.
@@ -570,6 +595,7 @@ fn write_meshed(
             // (Era1's live in Era0, which it cannot see, so its scopes hypothesize
             // nothing and cite no axiom field).
             era_has_axioms,
+            &home_modules,
         )
         .with_context(|| format!("emit scope {scope_id}"))?;
         let module = module_of_scope(scope_id);

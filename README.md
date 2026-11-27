@@ -582,13 +582,13 @@ answers rather than skipping the gates, because a gate that silently does nothin
 - **A refusal that comes back as HTTP 422 is thrown away by the client.** `app.rows` and
   its siblings `throw` on `!r.ok`, so a `parse.content` refusal — which carries real
   diagnostics — leaves the check strip with no verdicts and the console with an error.
-- **`lake --mesh` does not produce a package.** It stops at `emit scope Era0/Strata0`
-  (`times` is named in this module and nothing declares it) and leaves a half-written
-  `src/` with no `lakefile.toml`; the per-node shape builds the same corpus. The meshed
-  emitter hands the module an empty `home_modules`, so the first `Sema:` definition a
-  scope module names — in this shape it lives in the era's ground — has no home
-  (`crates/emit/src/module.rs`, `emit_lean_text_meshed`); the era ground also writes a
-  definition before the class that declares its `plus`, so it would not compile either.
+- **`lake --mesh` writes the package and does not compile it.** Emission now completes
+  (`home_modules` is built for the meshed shape from the corpus's node list: a definition's
+  home is its era's ground module, a theorem's is its scope module), and `lake build` stops
+  in the era ground: `Ground.lean:26: Unknown identifier plus`. The ground writes its
+  definitions BEFORE the class that carries their symbols, and writes a class field with the
+  `R.` qualifier stripped and no `section variable [R : ...]` to bind it
+  (`crates/emit/src/module.rs::emit_ground`).
 - **A stale `.lake` fails the `lake` shape.** `qubitick lake` reuses
   `<project>/.lake/src` as it finds it, and a ground compiled by a different Lean version
   makes it stop with `incompatible header`; `--no-build` never prunes. Delete the

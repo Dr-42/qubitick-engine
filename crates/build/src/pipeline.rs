@@ -713,6 +713,10 @@ pub fn emit_file_with(
             // The per-node external shape imports a `Qubitick.Frame` that carries
             // the chain.
             true,
+            // Per-node emission: home_modules comes from the EmitCache (node id ->
+            // Lean module for the whole corpus). Empty map resolves nothing, which
+            // matches the old behaviour for this caller.
+            &opts.home_modules,
         )?;
         return Ok(emitted);
     }

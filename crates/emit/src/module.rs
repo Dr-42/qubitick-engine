@@ -2904,16 +2904,27 @@ pub fn emit_lean_text_meshed(
     extra_imports: Vec<String>,
     declare_cited: bool,
     ground_chain: bool,
+    home_modules: &HashMap<i64, String>,
 ) -> Result<String> {
     let mut all: Vec<Node> = Vec::with_capacity(context.len() + own.len());
     all.extend_from_slice(context);
     all.extend_from_slice(own);
+    // The corpus's node-id -> Lean-module map. `opts.home_modules` is how the emitter
+    // resolves a glyph the module names but does not declare (`Frame::needed`).
+    //
+    // This map CANNOT be rebuilt from the parsed nodes the meshed path holds: a
+    // symbol's `home_node` is a DATABASE node id (`times` is 4 on the algebra
+    // corpus), while `parse_content` numbers nodes per file (0, 1, 2). So the caller
+    // assembles it once from `qubitick_db::read::get_node_list` (node id -> filename)
+    // and passes it in. Without an entry, a glyph with no home is an error, not a
+    // silent axiom — which is exactly the "emit scope Era0/Strata0" refusal this
+    // parameter removes for the meshed shape.
     let opts = Options {
         ground: Ground::External,
         ground_module: ground_module.to_string(),
         declare_cited,
         extra_imports,
-        home_modules: std::collections::HashMap::new(),
+        home_modules: home_modules.clone(),
         ground_chain,
         ground_only: false,
     };
