@@ -43,11 +43,20 @@ pub fn try_diff_apply(_ctx: &Ctx, goal: &Expr, lhs: &Expr, rhs: &Expr) -> Option
 /// Human-readable form of a citation name.
 pub fn cite_name(name: &qubitick_model::CiteName) -> String {
     use qubitick_model::CiteName;
+    // THE TIER, WHEN THE CITATION NAMES ONE — so a refusal quotes the id the corpus wrote
+    // (`[D.BT.0.1]`, `[T.HD.14.3]`) rather than a number that two tiers share.
+    let id = |tier: &str, n: u32| {
+        if tier.is_empty() {
+            format!("{n}")
+        } else {
+            format!("{tier}.{n}")
+        }
+    };
     match name {
         CiteName::Local(v) => v.clone(),
         CiteName::AxiomLine { node, line } => format!("A{node}.{line}"),
-        CiteName::TheoremId(id) => format!("T.{id}"),
-        CiteName::DefId(id) => format!("D.{id}"),
+        CiteName::TheoremId { tier, n } => format!("T.{}", id(tier, *n)),
+        CiteName::DefId { tier, n } => format!("D.{}", id(tier, *n)),
     }
 }
 

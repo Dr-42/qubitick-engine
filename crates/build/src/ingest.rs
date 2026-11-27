@@ -111,6 +111,10 @@ struct Entry {
     /// and reading its 0 as "unnumbered" made every surface fall back to the ledger
     /// ordinal, which put the carrier's label at `D.A.02` and collided with Mul's.
     authored: Option<u32>,
+    /// The TIER that number is in — the id's text without its last segment (`D.BT.0.7` ->
+    /// `BT.0`; a flat corpus numbers with none, and this is empty). It is half of a node's
+    /// identity, so two tiers may both number a node 7 and a citation says which one it means.
+    division: String,
     /// (glyph tex, SymbolKind as_str) — only present for Definitions.
     glyph: Option<(String, String)>,
     /// Distinct LaTeX control words used in the file.
@@ -240,7 +244,8 @@ pub fn ingest_file_symbols(
         name: node.base().name.clone(),
         // THE HEADER LINE DECIDES whether the node carries a number: a node numbered
         // `00` and a node numbered by nothing both reach the model as `id: 0`.
-        authored: authored_of(&src, node.base().id),
+        authored: authored_of(&src).0,
+        division: authored_of(&src).1,
         glyph,
         words: content_words(&src),
     };
@@ -374,7 +379,8 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             path: path.clone(),
             kind: node.base().kind,
             name: node.base().name.clone(),
-            authored: authored_of(&src, node.base().id),
+            authored: authored_of(&src).0,
+        division: authored_of(&src).1,
             glyph,
             words: content_words(&src),
         });
@@ -447,8 +453,11 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
                 Claimed::Name => format!("{era}/Strata{strata}"),
             };
             let value = match claimed {
+                // THE WHOLE ID, NOT THE NUMBER: a tiered corpus numbers within its tier
+                // (`D.BT.0.1` and `D.QB.0.1` are two definitions, not one claimed twice).
                 Claimed::Number => match e.authored {
-                    Some(n) => n.to_string(),
+                    Some(n) if e.division.is_empty() => n.to_string(),
+                    Some(n) => format!("{}.{n}", e.division),
                     None => continue,
                 },
                 Claimed::Name => e.name.clone(),
@@ -496,8 +505,8 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
         let (era, strata) = era_strata_of(project_root, &e.path);
         tx.execute(
             "INSERT INTO nodes
-               (id, node_type, era, strata, name, filename, node_hash, godel, authored)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+               (id, node_type, era, strata, name, filename, node_hash, godel, authored, division)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             rusqlite::params![
                 node_id,
                 e.kind.as_str(),
@@ -510,7 +519,8 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
                 /* NULL means the header carried no number at all, so the readers fall
                    back to the ledger ordinal. A node numbered `00` is NOT that case: it
                    stores 0, and 0 is what `D.A.00` cites. */
-                e.authored.map(|n| n as i64)
+                e.authored.map(|n| n as i64),
+                e.division
             ],
         )?;
     }
@@ -1059,7 +1069,7 @@ pub fn walk_qbit(root: &Path) -> Vec<PathBuf> {
 /// 0. The header LINE is the authority: digits there mean the node is numbered, and the
 /// number is what a citation names. A node numbered `00` is the first of its kind and is
 /// cited as `D.A.00`; a node with no number cannot be addressed at all.
-fn authored_of(src: &str, parsed_id: u32) -> Option<u32> {
+fn authored_of(src: &str) -> (Option<u32>, String) {
     let header = src
         .lines()
         .find(|l| {
@@ -1070,9 +1080,13 @@ fn authored_of(src: &str, parsed_id: u32) -> Option<u32> {
     // The id part is the first whitespace-delimited word of the header.
     let id_part = header.split_whitespace().next().unwrap_or("");
     if id_part.chars().any(|c| c.is_ascii_digit()) {
-        Some(parsed_id)
+        // A node's identity is the TIER it is numbered in and the number itself, read by the one
+        // function the citation reader uses (`qubitick_parse::split_tier`) — so `D.BT.0.7` is
+        // tier `BT.0`, number 7, and `[D.BT.0.7]` names it however many other tiers number a 7.
+        let (tier, n) = qubitick_parse::split_tier(id_part);
+        (Some(n), tier)
     } else {
-        None
+        (None, String::new())
     }
 }
 
@@ -1099,8 +1113,8 @@ fn cite_text(name: &qubitick_model::CiteName) -> String {
     use qubitick_model::CiteName;
     match name {
         CiteName::AxiomLine { node, line } => format!("A{node}.{line}"),
-        CiteName::TheoremId(n) => format!("T.{n}"),
-        CiteName::DefId(n) => format!("D.{n}"),
+        CiteName::TheoremId { n, .. } => format!("T.{n}"),
+        CiteName::DefId { n, .. } => format!("D.{n}"),
         CiteName::Local(v) => v.clone(),
     }
 }

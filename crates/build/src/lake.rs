@@ -239,7 +239,10 @@ fn write_if_changed(path: &Path, content: &str) -> Result<()> {
 /// compiler reports as "never read" is a field that is only pretending to be data.
 struct Unit {
     scope: String,
-    /// The division a citation names (`D.37` → 37). 0 when the stem has no number.
+    /// The TIER the file's node is numbered in (`D.BT.0.7` → `BT.0`), and the number a
+    /// citation names (`D.BT.0.7` → 7). Together they are the id; a flat corpus carries an
+    /// empty tier and its number alone.
+    tier: String,
     division: u32,
     nodes: Vec<qubitick_model::Node>,
 }
@@ -299,10 +302,17 @@ fn write_meshed(
         let fctx = owned.as_ref().unwrap_or(ctx);
         let text = std::fs::read_to_string(file)?;
         let nodes = qubitick_parse::parse_content(fctx, &text)?;
-        let division =
-            crate::axioms::division_of_filename(&file.display().to_string()).unwrap_or(0);
+        // The node's own header is the authority for its id: the tier and the number as the
+        // author wrote them (`D.BT.0.7`), not a convention read off the filename.
+        let (tier, division) = crate::axioms::header_id(&text)
+            .or_else(|| {
+                crate::axioms::division_of_filename(&file.display().to_string())
+                    .map(|d| (String::new(), d))
+            })
+            .unwrap_or((String::new(), 0));
         units.push(Unit {
             scope,
+            tier,
             division,
             nodes,
         });
@@ -326,14 +336,19 @@ fn write_meshed(
     // module's import at a later one and closed an import CYCLE. Ownership is
     // therefore asked per citing scope, and only ever answers with a scope the
     // citing scope can actually see.
-    let mut defined_divisions: std::collections::HashMap<u32, Vec<usize>> =
+    // Keyed by the theorem's whole id — (tier, number) — because two tiers number their
+    // theorems independently.
+    let mut defined_divisions: std::collections::HashMap<(String, u32), Vec<usize>> =
         std::collections::HashMap::new();
     let mut defined_glyphs: std::collections::HashMap<u32, Vec<usize>> =
         std::collections::HashMap::new();
     for (i, unit) in units.iter().enumerate() {
         for node in &unit.nodes {
             if let qubitick_model::Node::Theorem(_) = node {
-                defined_divisions.entry(unit.division).or_default().push(i);
+                defined_divisions
+                    .entry((unit.tier.clone(), unit.division))
+                    .or_default()
+                    .push(i);
             }
             if let qubitick_model::Node::Definition(def) = node {
                 defined_glyphs.entry(def.symbol.primary).or_default().push(i);
@@ -423,8 +438,8 @@ fn write_meshed(
                 })
                 .max_by_key(|i| scope_rank(&units[*i].scope))
         };
-        let owner_of_division = |d: u32| -> Option<usize> {
-            nearest_visible(defined_divisions.get(&d).map(|v| v.as_slice()).unwrap_or(&[]))
+        let owner_of_division = |id: &(String, u32)| -> Option<usize> {
+            nearest_visible(defined_divisions.get(id).map(|v| v.as_slice()).unwrap_or(&[]))
         };
         let owner_of_glyph = |sym: u32| -> Option<usize> {
             nearest_visible(defined_glyphs.get(&sym).map(|v| v.as_slice()).unwrap_or(&[]))
@@ -438,8 +453,8 @@ fn write_meshed(
         // which earlier scopes this one needs
         let mut imports_of_scope: Vec<String> = Vec::new();
         for &i in members {
-            for d in crate::axioms::cited_divisions(&units[i].nodes) {
-                if let Some(owner) = owner_of_division(d)
+            for id in crate::axioms::cited_divisions(&units[i].nodes) {
+                if let Some(owner) = owner_of_division(&id)
                     && units[owner].scope != *scope_id
                 {
                     imports_of_scope.push(module_of_scope(&units[owner].scope));
@@ -471,8 +486,11 @@ fn write_meshed(
         // The nearest visible scope answers first, which is what makes a division
         // number mean one thing here: an era's own definition wins over the one it
         // inherits.
-        let mut def_index: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-        let mut thm_index: std::collections::HashMap<u32, (String, qubitick_model::Expr)> =
+        /* KEYED BY THE IDENTITY A CITATION NAMES: a definition by its glyph, a theorem by
+           (tier, number) — two tiers number their theorems independently. */
+        let mut def_index: std::collections::HashMap<u32, (String, u32)> =
+            std::collections::HashMap::new();
+        let mut thm_index: std::collections::HashMap<(String, u32), (String, qubitick_model::Expr)> =
             std::collections::HashMap::new();
         let mut rules = qubitick_rewrite::RuleTable::new();
         let mut owners: Vec<usize> = (0..units.len())
@@ -492,12 +510,12 @@ fn write_meshed(
                         // this node's glyph is a definition with a citable
                         // unfolding, and a glyph that has one must not also be
                         // declared as a frame axiom.
-                        def_index.insert(def.symbol.primary, unit.division);
+                        def_index.insert(def.symbol.primary, (unit.tier.clone(), unit.division));
                         if let Some(qubitick_model::FormBody::MacroExpr(sema)) = &def.d_block.form {
                             // The parsed expression itself: stringifying it and re-parsing
                             // never worked (the lexer refuses `Apply`/`MacroExpr`).
                             for case in crate::axioms::definition_cases(era_ctx, sema.clone()) {
-                                rules.insert_definition(unit.division, case);
+                                rules.insert_definition(&unit.tier, unit.division, case);
                             }
                         }
                     }
@@ -505,7 +523,7 @@ fn write_meshed(
                     // imported, and the loop below registers them as citations.
                     qubitick_model::Node::Theorem(theorem) if own => {
                         thm_index.insert(
-                            unit.division,
+                            (unit.tier.clone(), unit.division),
                             (
                                 qubitick_emit::lemma_name(&theorem.base.name),
                                 theorem.statement.clone(),
@@ -522,12 +540,15 @@ fn write_meshed(
         // still be registered, or every row justified by it fails as `not in this
         // module` even though the import is present and correct.
         for &i in members {
-            for div in crate::axioms::cited_divisions(&units[i].nodes) {
-                if thm_index.contains_key(&div) {
+            for (tier, div) in crate::axioms::cited_divisions(&units[i].nodes) {
+                if thm_index.contains_key(&(tier.clone(), div)) {
                     continue;
                 }
-                if let Some(t) = crate::axioms::load_theorem(conn, era_ctx, scope_id, div)? {
-                    thm_index.insert(div, (qubitick_emit::lemma_name(&t.name), t.statement));
+                if let Some(t) = crate::axioms::load_theorem(conn, era_ctx, scope_id, &tier, div)? {
+                    thm_index.insert(
+                        (tier, div),
+                        (qubitick_emit::lemma_name(&t.name), t.statement),
+                    );
                 }
             }
         }
@@ -670,14 +691,15 @@ fn module_of_scope(scope: &str) -> String {
 /// then theorems by their citation graph. A cycle among theorems is reported: a proof
 /// that needs a proof that needs it is not an assumption to make, it is a defect.
 fn citation_order(units: &[Unit], members: &[usize]) -> Result<Vec<usize>> {
-    let mut by_division: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut by_division: std::collections::HashMap<(String, u32), usize> =
+        std::collections::HashMap::new();
     for &i in members {
         if units[i]
             .nodes
             .iter()
             .any(|n| matches!(n, qubitick_model::Node::Theorem(_)))
         {
-            by_division.insert(units[i].division, i);
+            by_division.insert((units[i].tier.clone(), units[i].division), i);
         }
     }
     // edges: cited -> citing
@@ -687,7 +709,7 @@ fn citation_order(units: &[Unit], members: &[usize]) -> Result<Vec<usize>> {
         indegree.entry(i).or_insert(0);
     }
     for &i in members {
-        let Some(&citing) = by_division.get(&units[i].division) else {
+        let Some(&citing) = by_division.get(&(units[i].tier.clone(), units[i].division)) else {
             continue;
         };
         for cited in crate::axioms::cited_divisions(&units[i].nodes) {
@@ -730,7 +752,13 @@ fn citation_order(units: &[Unit], members: &[usize]) -> Result<Vec<usize>> {
         let stuck: Vec<String> = by_division
             .iter()
             .filter(|(_, i)| indegree.get(i).copied().unwrap_or(0) > 0)
-            .map(|(d, _)| format!("T.{d}"))
+            .map(|((tier, d), _)| {
+                if tier.is_empty() {
+                    format!("T.{d}")
+                } else {
+                    format!("T.{tier}.{d}")
+                }
+            })
             .collect();
         anyhow::bail!(
             "these theorems cite each other in a loop, so no declaration order exists: {}",

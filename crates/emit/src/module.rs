@@ -2396,8 +2396,8 @@ pub fn emit_lean_text_split(
     context: &[Node],
     own: &[Node],
     namespace: &str,
-    def_index: &HashMap<u32, u32>,
-    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    def_index: &HashMap<u32, (String, u32)>,
+    thm_index: &HashMap<(String, u32), (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
 ) -> Result<String> {
     emit_lean_text_split_with(
@@ -2423,8 +2423,8 @@ pub fn emit_lean_text_split_with(
     context: &[Node],
     own: &[Node],
     namespace: &str,
-    def_index: &HashMap<u32, u32>,
-    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    def_index: &HashMap<u32, (String, u32)>,
+    thm_index: &HashMap<(String, u32), (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
     opts: &Options,
 ) -> Result<String> {
@@ -2440,8 +2440,8 @@ pub fn emit_lean_text_indexed(
     ctx: &Ctx,
     nodes: &[Node],
     namespace: &str,
-    def_index: &HashMap<u32, u32>,
-    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    def_index: &HashMap<u32, (String, u32)>,
+    thm_index: &HashMap<(String, u32), (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
 ) -> Result<String> {
     emit_lean_text_impl(ctx, nodes, nodes, namespace, def_index, thm_index, rules, &Options::inline())
@@ -2454,8 +2454,8 @@ pub fn emit_lean_text_era(
     ctx: &Ctx,
     nodes: &[Node],
     namespace: &str,
-    def_index: &HashMap<u32, u32>,
-    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    def_index: &HashMap<u32, (String, u32)>,
+    thm_index: &HashMap<(String, u32), (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
     extra_imports: Vec<String>,
 ) -> Result<String> {
@@ -2548,8 +2548,8 @@ fn emit_lean_text_impl(
     nodes: &[Node],
     emit_nodes: &[Node],
     namespace: &str,
-    def_index: &HashMap<u32, u32>,
-    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    def_index: &HashMap<u32, (String, u32)>,
+    thm_index: &HashMap<(String, u32), (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
     opts: &Options,
 ) -> Result<String> {
@@ -2716,17 +2716,17 @@ fn emit_lean_text_impl(
     // corpus division index.
     for node in nodes {
         if let Node::Definition(d) = node
-            && let Some(division) = def_index.get(&d.symbol.primary)
+            && let Some((tier, division)) = def_index.get(&d.symbol.primary)
             && let Some(FormBody::MacroExpr(sema)) = &d.d_block.form
         {
-            rules.insert_definition(*division, sema.clone());
+            rules.insert_definition(tier, *division, sema.clone());
         }
     }
     // Cited theorems are declared as assumed lemmas (they are proven in their
     // own files) and registered so a `[T.BT.<n>]` citation applies them.
     let mut thm_decls = String::new();
     let mut collect_extra: Vec<Node> = Vec::new();
-    for (division, (name, stmt)) in thm_index {
+    for ((tier, division), (name, stmt)) in thm_index {
         let mut s = stmt.clone();
         split_expr(&mut s, &dual, ctx, &mut fn_names);
         // A cited theorem whose file leaves its parameters FREE (no \forall in
@@ -2793,7 +2793,7 @@ let mut binder_prefix = String::new();
         thm_decls.push_str(&format!(
             "axiom {lemma} : {binder_prefix}{lean_stmt}\n"
         ));
-        rules.insert_theorem(*division, lemma, s.clone());
+        rules.insert_theorem(tier, *division, lemma, s.clone());
         // Collect the lemma's symbols into the frame so any fn-variant it uses
         // is declared.
         collect_extra.push(Node::Axiom(Axiom {
@@ -3001,8 +3001,10 @@ let mut binder_prefix = String::new();
                 // Re-register this theorem's rule with the statement it was EMITTED
                 // with, so a citation applied inside this module has the def's type.
                 let lemma = crate::lemma_name(&t.base.name);
-                if let Some((division, _)) = thm_index.iter().find(|(_, (n, _))| n == &lemma) {
-                    rules.insert_theorem(*division, lemma, emitted);
+                if let Some(((tier, division), _)) =
+                    thm_index.iter().find(|(_, (n, _))| n == &lemma)
+                {
+                    rules.insert_theorem(tier, *division, lemma, emitted);
                 }
                 body.push_str(&text);
                 body.push('\n');
@@ -3444,8 +3446,8 @@ pub fn emit_lean_text_meshed(
     context: &[Node],
     own: &[Node],
     namespace: &str,
-    def_index: &HashMap<u32, u32>,
-    thm_index: &HashMap<u32, (String, qubitick_model::Expr)>,
+    def_index: &HashMap<u32, (String, u32)>,
+    thm_index: &HashMap<(String, u32), (String, qubitick_model::Expr)>,
     rules: &mut RuleTable,
     ground_module: &str,
     extra_imports: Vec<String>,

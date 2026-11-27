@@ -249,6 +249,7 @@ mod tests {
             version: 1,
             godel: None,
             authored: Some(1),
+            division: String::new(),
         };
         let headers = vec![axiom.clone()];
 

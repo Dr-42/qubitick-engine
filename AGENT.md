@@ -72,7 +72,7 @@ report a green run you did not run. If a binary is involved, rebuild it first: a
 ## Gates
 
 ```bash
-cargo test --workspace                    # 51 targets
+cargo test --workspace                    # 54 targets
 cargo clippy --workspace --all-targets    # clean — keep it that way
 cargo test -p qubitick-parse --lib        # one crate while iterating
 cargo test -p qubitick-build --test declared_formation   # one promise
@@ -203,6 +203,17 @@ Consequences that have bitten:
   declaration format already has. Left as a bare colon, the body failed to parse and the
   tolerant pass kept the whole definition as raw text — a node that looked like a definition
   and said nothing.
+- **A node's identity is `(kind, tier, number)`, and the header is its one source**
+  (`nodes.division` + `nodes.authored`, read by `parse::split_tier` and written by ingest):
+  `D.BT.0.7` is tier `BT.0`, number 7. The id's text before its last `.` is the tier, the last
+  segment the number — one function for the header and for the citation, so the two cannot
+  disagree. Every reader takes the tier: `cites::resolve`, `cite_target::resolve` and
+  `RuleTable` (`CiteKey`), the duplicate check, the lake's ownership and citation-order maps,
+  and the printed label (`label_of` prints the header's tier, nothing else). A citation that
+  names NO tier is a wildcard by number, which is what a flat corpus writes. Why it matters:
+  the number alone made `[D.BT.0.1]` and `[D.QB.0.1]` one citation resolved to whichever node
+  the walk reached first, and `extract_number` concatenated every digit — `T.HD.14.3` was 143
+  and `T.HD.1.43` was the same node.
 - **A node carries ONE statement, and a definition ONE body.** `parse_theorem` used to
   overwrite the statement with every bare line before `Proof:`, so the last one won and the
   earlier ones vanished without a word — a theorem file whose first line was a scrap of the

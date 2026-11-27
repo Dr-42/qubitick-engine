@@ -355,14 +355,18 @@ pub fn dangling_in_file(conn: &qubitick_db::Db, path: &Path) -> Result<Vec<Strin
     crate::cites::dangling(conn, &ctx, &headers, &nodes)
 }
 
+/// One definition's citable equations, keyed later by `(tier, number)`.
+type DefRule = (String, u32, qubitick_model::Expr);
+
 /// Emit (but do not check) the Lean module for one `.qbit` file.
 ///
 /// Split out of [`build_file`] so tooling can inspect exactly what a file emits
 /// without paying for a `lean` invocation (`qubitick emit <file>`).
-/// Per-build memory of the expensive, INVARIANT context lookups: the definition
-/// corpus, the axiom classes, and the source-parsed definitions. Without this,
-/// every file re-parsed all ~79 definitions + 6 axioms + every definition source
-/// (O(files x definitions)); the emit phase dominated the build because of it.
+///
+/// Per-build memory of the expensive, INVARIANT context lookups: the definition corpus, the
+/// axiom classes, and the source-parsed definitions. Without this, every file re-parsed all
+/// ~79 definitions + 6 axioms + every definition source (O(files x definitions)); the emit
+/// phase dominated the build because of it.
 #[derive(Default)]
 pub struct EmitCache {
     defs: std::collections::HashMap<String, std::sync::Arc<Vec<crate::axioms::LoadedDefinition>>>,
@@ -371,7 +375,8 @@ pub struct EmitCache {
     /// `(division, definitional equation)` pairs for the RuleTable. Building these
     /// used to run `format!("{:?}") + parse_expr` for EVERY definition on EVERY
     /// file — the single most expensive part of the emit phase.
-    def_rules: std::collections::HashMap<String, std::sync::Arc<Vec<(u32, qubitick_model::Expr)>>>,
+    /// One definition's rules: `(tier, number, one equation per case)`.
+    def_rules: std::collections::HashMap<String, std::sync::Arc<Vec<DefRule>>>,
     /// Node id -> the Lean module that node's file becomes, for one corpus.
     ///
     /// A module that NAMES a glyph another module defines imports that module; the
@@ -497,7 +502,7 @@ fn load_source_definitions(
     path: &Path,
     cache: &mut EmitCache,
     context: &mut Vec<qubitick_model::Node>,
-    def_index: &mut std::collections::HashMap<u32, u32>,
+    def_index: &mut std::collections::HashMap<u32, (String, u32)>,
 ) {
     let src_key = format!("{}|{}", ctx.scope(), corpus_root(path).display());
     let src_nodes = cached_sources(ctx, path, cache, &src_key);
@@ -571,7 +576,8 @@ pub fn emit_file_with(
     // themselves re-emitted. Re-emitting them collided with the frame
     // (`Qubitick.HL.<Name> has already been declared`), which cascaded through
     // every theorem module.
-    let mut def_index: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut def_index: std::collections::HashMap<u32, (String, u32)> =
+        std::collections::HashMap::new();
     let mut context: Vec<qubitick_model::Node> = Vec::new();
     // The corpus's DEFINITIONS reach a module two ways, and they are not the same load. The
     // DB-REBUILT nodes below are context for a theorem/axiom module, which resolves citations,
@@ -630,7 +636,7 @@ pub fn emit_file_with(
         for d in defs.iter() {
             let (node, division) = (&d.node, d.division);
             if let qubitick_model::Node::Definition(def) = node {
-                def_index.insert(def.symbol.primary, division);
+                def_index.insert(def.symbol.primary, (d.tier.clone(), division));
             }
             context.push(node.clone());
         }
@@ -718,20 +724,22 @@ pub fn emit_file_with(
      * the citing module imports it (the import graph does the ordering) and the citation
      * applies the proof that exists. The statement is still loaded, because the rewrite
      * needs to know what the citation says. */
-    let mut thm_index: std::collections::HashMap<u32, (String, qubitick_model::Expr)> =
+    // Keyed by the theorem's whole id — (tier, number) — because a tiered corpus numbers its
+    // theorems per tier.
+    let mut thm_index: std::collections::HashMap<(String, u32), (String, qubitick_model::Expr)> =
         std::collections::HashMap::new();
     let mut cited_imports: Vec<String> = Vec::new();
-    for div in cited {
-        if let Some(t) = crate::axioms::load_theorem(conn, ctx, ctx.scope(), div)? {
+    for (tier, div) in cited {
+        if let Some(t) = crate::axioms::load_theorem(conn, ctx, ctx.scope(), &tier, div)? {
             if !cited_imports.contains(&t.module) {
                 cited_imports.push(t.module.clone());
             }
-            thm_index.insert(div, (t.name.clone(), t.statement));
+            thm_index.insert((tier, div), (t.name.clone(), t.statement));
         }
     }
     let mut rules = qubitick_rewrite::RuleTable::new();
-    for (div, (name, stmt)) in &thm_index {
-        rules.insert_theorem(*div, name.clone(), stmt.clone());
+    for ((tier, div), (name, stmt)) in &thm_index {
+        rules.insert_theorem(tier, *div, name.clone(), stmt.clone());
     }
     // Load the definitional rules into the RuleTable (built ONCE per scope and
     // cached: deriving them runs a Debug-format + re-parse per definition).
@@ -739,7 +747,7 @@ pub fn emit_file_with(
     let def_rules = match cache.def_rules.get(&rules_key) {
         Some(v) => v.clone(),
         None => {
-            let mut v: Vec<(u32, qubitick_model::Expr)> = Vec::new();
+            let mut v: Vec<(String, u32, qubitick_model::Expr)> = Vec::new();
             for d in crate::axioms::load_definition_nodes(conn, ctx, ctx.scope())? {
                 if let qubitick_model::Node::Definition(def) = &d.node {
                     /* THE EXPRESSION ITSELF. This used to stringify the `FormBody` and feed
@@ -756,7 +764,7 @@ pub fn emit_file_with(
                     // One rule per section: a case-defined operator is one citation over
                     // one equation per constructor (crate::axioms::definition_cases).
                     for case in crate::axioms::definition_cases(ctx, sema.clone()) {
-                        v.push((d.division, case));
+                        v.push((d.tier.clone(), d.division, case));
                     }
                 }
             }
@@ -765,8 +773,8 @@ pub fn emit_file_with(
             v
         }
     };
-    for (div, expr) in def_rules.iter() {
-        rules.insert_definition(*div, expr.clone());
+    for (tier, div, expr) in def_rules.iter() {
+        rules.insert_definition(tier, *div, expr.clone());
     }
     let mut all: Vec<qubitick_model::Node> = context.clone();
     all.extend(nodes.iter().cloned());

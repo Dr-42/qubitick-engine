@@ -20,6 +20,8 @@ use std::collections::HashMap;
 /// The index is the `nn` of a `D_BT_<nn>_` filename, i.e. the number a proof
 /// citation `[D.BT.<nn>]` names.
 pub struct LoadedDefinition {
+    /// The tier the definition is numbered in (`D.BT.0.7` -> `BT.0`).
+    pub tier: String,
     pub division: u32,
     pub node: Node,
 }
@@ -55,12 +57,18 @@ pub fn load_definition_nodes(
 
     let mut out = Vec::new();
     let mut seen_symbols: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut claimed_divisions: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    // Claimed by (tier, number): two tiers number their definitions independently, so a
+    // second `D.QB.0.1` is not the first `D.BT.0.1` seen again.
+    let mut claimed_divisions: std::collections::HashSet<(String, u32)> =
+        std::collections::HashSet::new();
     for header in ordered {
-        let Some(division) = division_of_filename(&header.filename) else {
+        // THE DB ROW IS THE AUTHORITY: `authored` is the number the header wrote and
+        // `division` the tier it is numbered in, so a tiered corpus needs no filename
+        // convention to be addressable.
+        let Some(division) = header.authored.map(|a| a as u32).or_else(|| division_of_filename(&header.filename)) else {
             continue;
         };
-        if !claimed_divisions.insert(division) {
+        if !claimed_divisions.insert((header.division.clone(), division)) {
             continue; // a nearer era already owns this division number
         }
         let mut statements = Vec::new();
@@ -86,6 +94,7 @@ pub fn load_definition_nodes(
                 continue;
             };
             out.push(LoadedDefinition {
+                tier: header.division.clone(),
                 division,
                 node: Node::Definition(qubitick_model::Definition {
                     base: NodeBase {
@@ -141,6 +150,7 @@ pub fn load_definition_nodes(
             ),
         };
         out.push(LoadedDefinition {
+            tier: header.division.clone(),
             division,
             node: Node::Definition(qubitick_model::Definition {
                 base: NodeBase {
@@ -415,6 +425,8 @@ pub fn load_axiom_nodes(conn: &qubitick_db::Db, ctx: &Ctx, _scope: &str) -> Resu
 /// index (the `nn` of `T_BT_<nn>`).
 #[derive(Debug, Clone)]
 pub struct CitedTheorem {
+    /// The tier the theorem is numbered in (`T.HD.14.3` -> `HD.14`).
+    pub tier: String,
     pub division: u32,
     pub name: String,
     pub statement: qubitick_model::Expr,
@@ -432,6 +444,7 @@ pub fn load_theorem(
     conn: &qubitick_db::Db,
     ctx: &Ctx,
     _scope: &str,
+    tier: &str,
     division: u32,
 ) -> Result<Option<CitedTheorem>> {
     let sym_hashes: std::collections::HashMap<u32, u128> = ctx
@@ -453,11 +466,16 @@ pub fn load_theorem(
         if d != division {
             continue;
         }
+        // The tier the citation named, when it named one: two tiers number independently.
+        if !tier.is_empty() && header.division != tier {
+            continue;
+        }
         let Some(root) = qubitick_db::queries::statement_root(conn, header.id, 0)? else {
             continue;
         };
         let expr = reconstruct_expr(conn, &cache, root, &hash_of)?;
         return Ok(Some(CitedTheorem {
+            tier: header.division.clone(),
             division,
             name: header.name.clone(),
             statement: (*expr).clone(),
@@ -468,20 +486,23 @@ pub fn load_theorem(
     Ok(None)
 }
 
-/// Collect the `T_BT.<n>` division indices a theorem's proof cites, in order.
-pub fn cited_divisions(nodes: &[qubitick_model::Node]) -> Vec<u32> {
+/// Collect the theorems a proof cites, as the `(tier, number)` each citation names, in order.
+///
+/// The tier is part of the citation (`[T.HD.14.3]`): two tiers number their theorems
+/// independently, and a citation that names no tier carries an empty one.
+pub fn cited_divisions(nodes: &[qubitick_model::Node]) -> Vec<(String, u32)> {
     use qubitick_model::{ChainJust, CiteName, Node, ProofStep};
-    fn walk(steps: &[ProofStep], out: &mut Vec<u32>) {
+    fn walk(steps: &[ProofStep], out: &mut Vec<(String, u32)>) {
         for step in steps {
             match step {
                 ProofStep::Chain { rows } => {
                     for row in rows {
                         if let ChainJust::Rewrite { refs } = &row.just {
                             for r in refs {
-                                if let CiteName::TheoremId(div) = r.name
-                                    && !out.contains(&div)
+                                if let CiteName::TheoremId { tier, n: div } = &r.name
+                                    && !out.contains(&(tier.clone(), *div))
                                 {
-                                    out.push(div);
+                                    out.push((tier.clone(), *div));
                                 }
                             }
                         }
@@ -519,4 +540,20 @@ pub fn cited_divisions(nodes: &[qubitick_model::Node]) -> Vec<u32> {
         }
     }
     out
+}
+
+/// The id a `.qbit` source's header states, as `(tier, number)` — `D.BT.0.7. Name` → (`BT.0`, 7).
+///
+/// The one reading of a header id: the parser's `split_tier`, so a header and a citation agree
+/// about what a node is called without either learning the other's convention.
+pub fn header_id(src: &str) -> Option<(String, u32)> {
+    let header = src.lines().find(|l| {
+        let t = l.trim();
+        !t.is_empty() && !t.starts_with('%') && !t.starts_with('#') && !t.starts_with("//")
+    })?;
+    let id_part = header.split_whitespace().next()?;
+    if !id_part.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(qubitick_parse::split_tier(id_part))
 }

@@ -121,6 +121,7 @@ mod tests {
             godel: None,
             // the number the author wrote; this fixture's id doubles as it
             authored: Some(id),
+            division: String::new(),
         }
     }
 

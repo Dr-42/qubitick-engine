@@ -15,7 +15,7 @@ use rusqlite::Connection;
 
 /// Compatibility stamp for `DDL`. Any other value means the file on disk was
 /// built by a different schema, and since it is a cache, it is rebuilt.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Bring the connection up to the current schema.
 ///
@@ -346,6 +346,10 @@ CREATE TABLE "nodes" (
                node_hash BLOB NOT NULL,
                version INTEGER NOT NULL DEFAULT 1,
                godel INTEGER, authored INTEGER,
+               -- The TIER the node is numbered in: an id's own text without its last segment
+               -- (`D.BT.0.7` -> `BT.0`). A node's identity is (kind, division, authored), so two
+               -- tiers may both number a node 7 and a citation says which one it means.
+               division TEXT NOT NULL DEFAULT '',
                UNIQUE (era, strata, filename),
                FOREIGN KEY (falsify_expr_id) REFERENCES exprs(id)
              );

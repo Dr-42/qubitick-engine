@@ -140,11 +140,14 @@ pub fn read(corpus: &Path) -> Result<Option<Canon>> {
     }))
 }
 
-/// One directed edge of the theorem graph: `from` cites `to` (both as `T.<n>`).
+/// One directed edge of the theorem graph: `from` cites `to`.
+///
+/// An endpoint is a theorem's whole id without its kind letter — `HD.14.3` — because a tiered
+/// corpus numbers its theorems per tier and the number alone does not name one.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Edge {
-    pub from: u32,
-    pub to: u32,
+    pub from: String,
+    pub to: String,
 }
 
 /// Where the compiled artifact lives (next to the charter, and ignored by git).
@@ -157,9 +160,9 @@ pub fn artifact_path(corpus: &Path) -> PathBuf {
 /// Acyclic is a *computation*, not a proof: this walks the edges. Lean's part is to
 /// certify a found cycle (a `Path` term), not to enumerate 300 nodes by hand.
 pub fn acyclic(edges: &[Edge]) -> bool {
-    let mut adj: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut adj: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
     for e in edges {
-        adj.entry(e.from).or_default().push(e.to);
+        adj.entry(e.from.as_str()).or_default().push(e.to.as_str());
     }
     #[derive(Clone, Copy, PartialEq)]
     enum Mark {
@@ -167,13 +170,13 @@ pub fn acyclic(edges: &[Edge]) -> bool {
         Open,
         Done,
     }
-    let mut state: std::collections::HashMap<u32, Mark> = std::collections::HashMap::new();
+    let mut state: std::collections::HashMap<&str, Mark> = std::collections::HashMap::new();
     // Iterative DFS: a corpus graph is small, but recursion depth is not worth it.
     for start in adj.keys().copied().collect::<Vec<_>>() {
         if state.get(&start).is_some_and(|m| *m != Mark::New) {
             continue;
         }
-        let mut stack: Vec<(u32, usize)> = vec![(start, 0)];
+        let mut stack: Vec<(&str, usize)> = vec![(start, 0)];
         state.insert(start, Mark::Open);
         while let Some((node, idx)) = stack.pop() {
             let next = adj.get(&node).and_then(|v| v.get(idx)).copied();
@@ -214,7 +217,10 @@ pub fn write_artifact(
     edges.dedup();
     let mut dag = String::new();
     for e in edges.iter() {
-        dag.push_str(&format!("  {{\"from\": \"T.{}\", \"to\": \"T.{}\"}},\n", e.from, e.to));
+        dag.push_str(&format!(
+            "  {{\"from\": \"T.{}\", \"to\": \"T.{}\"}},\n",
+            e.from, e.to
+        ));
     }
     let mut census = String::new();
     for (kind, n) in kinds {
@@ -271,17 +277,25 @@ fn json_string(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// An edge between two ids written the way a corpus writes them (`HD.14.3`).
+    fn edge(from: &str, to: &str) -> Edge {
+        Edge {
+            from: from.to_string(),
+            to: to.to_string(),
+        }
+    }
+
     #[test]
     fn a_chain_is_acyclic_and_a_loop_is_not() {
-        let chain = [Edge { from: 1, to: 2 }, Edge { from: 2, to: 3 }];
+        let chain = [edge("1", "2"), edge("2", "3")];
         assert!(acyclic(&chain));
         let loop_ = [
-            Edge { from: 1, to: 2 },
-            Edge { from: 2, to: 3 },
-            Edge { from: 3, to: 1 },
+            edge("1", "2"),
+            edge("2", "3"),
+            edge("3", "1"),
         ];
         assert!(!acyclic(&loop_));
-        let self_loop = [Edge { from: 7, to: 7 }];
+        let self_loop = [edge("7", "7")];
         assert!(!acyclic(&self_loop));
         assert!(acyclic(&[]));
     }

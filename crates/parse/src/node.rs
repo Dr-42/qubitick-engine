@@ -114,7 +114,9 @@ fn parse_header(line: &str) -> Result<(NodeKind, u32, String)> {
     } else {
         bail!("unknown node header: {line}");
     };
-    let id = extract_number(&id_part).unwrap_or(0);
+    // The node's own number is the LAST segment of its id (`D.BT.0.7` → 7, `T.HD.14.3` → 3),
+    // by the same reading a citation uses.
+    let (_, id) = split_tier(&id_part);
     Ok((kind, id, name))
 }
 
@@ -313,7 +315,7 @@ fn parse_theorem(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Resu
             for rf in refs {
                 let id = match rf.name {
                     CiteName::AxiomLine { node, .. } => node,
-                    CiteName::TheoremId(id) | CiteName::DefId(id) => id,
+                    CiteName::TheoremId { n: id, .. } | CiteName::DefId { n: id, .. } => id,
                     CiteName::Local(_) => 0,
                 };
                 if id != 0 && !req.contains(&id) {
@@ -1367,12 +1369,46 @@ fn cite_to_enum(name: &str) -> CiteName {
         let (node, line) = parse_axiom_line(name);
         CiteName::AxiomLine { node, line }
     } else if name.starts_with('T') {
-        CiteName::TheoremId(extract_number(name).unwrap_or(0))
+        let (tier, n) = split_tier(name);
+        CiteName::TheoremId { tier, n }
     } else if name.starts_with('D') {
-        CiteName::DefId(extract_number(name).unwrap_or(0))
+        let (tier, n) = split_tier(name);
+        CiteName::DefId { tier, n }
     } else {
         CiteName::Local(name.to_string())
     }
+}
+
+/// A written id — `D.BT.0.7`, `T.HD.14.3`, `D.A.02`, `D.7` — as the TIER it is numbered in and
+/// the number itself: everything before the last `.` is the tier, the last segment is the number.
+///
+/// This is the one reading of an id, shared by the header reader (`parse_header`) and the
+/// citation reader, so a corpus's own id round-trips: `D.BT.0.7. Name` declares tier `BT.0`,
+/// number 7, and `[D.BT.0.7]` names exactly that node. Concatenating the digits instead (what
+/// this used to do) made `T.HD.14.3` number 143 and `T.HD.1.43` the same node.
+pub fn split_tier(id_text: &str) -> (String, u32) {
+    let mut text = id_text.trim().trim_end_matches('.');
+    // The kind letter, and the separator after it, are not part of the tier.
+    for prefix in ["D.", "T.", "FT.", "S.", "A."] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            text = rest;
+            break;
+        }
+    }
+    match text.rsplit_once('.') {
+        Some((tier, n)) => (tier.trim().to_string(), number_of(n)),
+        None => (String::new(), number_of(text)),
+    }
+}
+
+/// The digits of one id segment (`07` → 7), or 0 when it carries none.
+fn number_of(segment: &str) -> u32 {
+    segment
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse::<u32>()
+        .unwrap_or(0)
 }
 
 fn parse_proof_steps(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ProofStep>> {

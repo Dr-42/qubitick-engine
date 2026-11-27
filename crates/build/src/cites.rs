@@ -37,8 +37,8 @@ pub fn dangling(
         for cite in cites {
             let problem = match cite {
                 CiteName::AxiomLine { node, line } => {
-                    let label = node_display(NodeKind::Axiom, *node);
-                    match resolve(headers, scope, NodeKind::Axiom, *node) {
+                    let label = node_display(NodeKind::Axiom, "", *node);
+                    match resolve(headers, scope, NodeKind::Axiom, "", *node) {
                         None => Some(format!("[{label}.{line}] names no axiom")),
                         Some(header) => {
                             let statements: i64 = conn.query_row(
@@ -57,12 +57,26 @@ pub fn dangling(
                         }
                     }
                 }
-                CiteName::DefId(n) => resolve(headers, scope, NodeKind::Definition, *n)
-                    .is_none()
-                    .then(|| format!("[{}] names no definition", node_display(NodeKind::Definition, *n))),
-                CiteName::TheoremId(n) => resolve(headers, scope, NodeKind::Theorem, *n)
-                    .is_none()
-                    .then(|| format!("[{}] names no theorem", node_display(NodeKind::Theorem, *n))),
+                CiteName::DefId { tier, n } => {
+                    resolve(headers, scope, NodeKind::Definition, tier, *n)
+                        .is_none()
+                        .then(|| {
+                            format!(
+                                "[{}] names no definition",
+                                node_display(NodeKind::Definition, tier, *n)
+                            )
+                        })
+                }
+                CiteName::TheoremId { tier, n } => {
+                    resolve(headers, scope, NodeKind::Theorem, tier, *n)
+                        .is_none()
+                        .then(|| {
+                            format!(
+                                "[{}] names no theorem",
+                                node_display(NodeKind::Theorem, tier, *n)
+                            )
+                        })
+                }
                 // A local hypothesis is in scope by construction; there is nothing
                 // in the corpus for it to name.
                 CiteName::Local(_) => None,
@@ -77,13 +91,18 @@ pub fn dangling(
 }
 
 /// How a citation of this kind reads in a diagnostic (`[A4.2]`, `[T.81]`).
-fn node_display(kind: NodeKind, number: u32) -> String {
-    match kind {
-        NodeKind::Axiom => format!("A{number}"),
-        NodeKind::Definition => format!("D.{number}"),
-        NodeKind::Theorem => format!("T.{number}"),
-        NodeKind::Calibration => format!("S.{number}"),
-        NodeKind::Census => format!("FT.{number}"),
+fn node_display(kind: NodeKind, tier: &str, number: u32) -> String {
+    let kind = match kind {
+        NodeKind::Axiom => "A",
+        NodeKind::Definition => "D",
+        NodeKind::Theorem => "T",
+        NodeKind::Calibration => "S",
+        NodeKind::Census => "FT",
+    };
+    if tier.is_empty() {
+        format!("{kind}.{number}")
+    } else {
+        format!("{kind}.{tier}.{number}")
     }
 }
 
@@ -95,11 +114,19 @@ fn resolve<'a>(
     headers: &'a [NodeHeader],
     scope: &str,
     kind: NodeKind,
+    tier: &str,
     number: u32,
 ) -> Option<&'a NodeHeader> {
     let mut inherited = None;
     for header in headers {
         if header.node_type != kind {
+            continue;
+        }
+        /* THE TIER IS PART OF THE IDENTITY. Two tiers number their nodes independently
+           (`D.BT.0.7` and `D.QB.0.7` are different definitions), so a citation that names a
+           tier must match it — otherwise the number alone decides, and the walk decides for it.
+           A citation that names no tier (`[D.7]`) matches by number, as it always did. */
+        if !tier.is_empty() && header.division != tier {
             continue;
         }
         if header.authored.unwrap_or(header.id) as u32 != number {
@@ -164,6 +191,7 @@ mod tests {
             version: 1,
             godel: Some(id),
             authored: Some(i64::from(number)),
+            division: String::new(),
         }
     }
 
@@ -207,13 +235,13 @@ mod tests {
         let ctx = Ctx::from_rows("Era0/Strata0", vec![]);
         // the corpus has theorem 7; the proof cites [T.9]
         let headers = vec![header(1, NodeKind::Theorem, 7, "Era0", 0)];
-        let nodes = citing(vec![CiteName::TheoremId(9)]);
+        let nodes = citing(vec![CiteName::TheoremId { tier: String::new(), n: 9 }]);
         let problems = dangling(&conn, &ctx, &headers, &nodes).unwrap();
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(problems[0].contains("T.9"), "{problems:?}");
 
         // and the same citation against a theorem that exists is clean
-        let nodes = citing(vec![CiteName::TheoremId(7)]);
+        let nodes = citing(vec![CiteName::TheoremId { tier: String::new(), n: 7 }]);
         assert!(dangling(&conn, &ctx, &headers, &nodes).unwrap().is_empty());
     }
 
@@ -235,7 +263,7 @@ mod tests {
         // era 1's own scope cannot see era 0's definition of the same number
         let ctx = Ctx::from_rows("Era1/Strata1", vec![]);
         let headers = vec![header(1, NodeKind::Definition, 2, "Era0", 0)];
-        let nodes = citing(vec![CiteName::DefId(2)]);
+        let nodes = citing(vec![CiteName::DefId { tier: String::new(), n: 2 }]);
         let problems = dangling(&conn, &ctx, &headers, &nodes).unwrap();
         assert_eq!(problems.len(), 1, "an inherited definition is not visible: {problems:?}");
 
@@ -259,12 +287,12 @@ mod tests {
             header(1, NodeKind::Axiom, 1, "Era0", 0),
             header(2, NodeKind::Axiom, 1, "Era1", 1),
         ];
-        let picked = resolve(&headers, "Era1/Strata1", NodeKind::Axiom, 1).unwrap();
+        let picked = resolve(&headers, "Era1/Strata1", NodeKind::Axiom, "", 1).unwrap();
         assert_eq!(picked.id, 2, "the era's own A1 answers, not Era0's");
-        let picked = resolve(&headers, "Era0/Strata0", NodeKind::Axiom, 1).unwrap();
+        let picked = resolve(&headers, "Era0/Strata0", NodeKind::Axiom, "", 1).unwrap();
         assert_eq!(picked.id, 1);
         // a scope that cannot see either era answers nothing
-        assert!(resolve(&headers, "Era0/Strata1", NodeKind::Axiom, 1).is_some());
+        assert!(resolve(&headers, "Era0/Strata1", NodeKind::Axiom, "", 1).is_some());
         let _ = Scope("Era1/Strata1".into());
     }
 }

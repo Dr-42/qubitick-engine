@@ -11,7 +11,7 @@ pub mod parser;
 pub mod semantic;
 
 pub use lexer::{FieldKind, LexError, Span, Token, lex};
-pub use node::{cite_name, definition_arity, parse_content};
+pub use node::{cite_name, definition_arity, parse_content, split_tier};
 pub use semantic::{Diagnostic, ParseError, Severity, elab, parse_expr, Phase};
 thread_local! {
     /// True while a STRUCTURAL pass reads a corpus that has no declarations yet.

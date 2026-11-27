@@ -98,7 +98,12 @@ a + b
 A row that is none of those — an English sentence, a stray expression — is **refused**,
 and the build reports it per file naming the row.
 
-The header is `<kind>.<division>.<n>. <Name>` (`D.` definition, `A.` axiom, `T.` theorem).
+The header is `<kind>.<tier>.<n>. <Name>` (`D.` definition, `A.` axiom, `T.` theorem), and
+the last segment is the number: `D.BT.0.7. Distinction` declares definition 7 in tier `BT.0`,
+and `[D.BT.0.7]` names it. **A node's identity is its kind, its tier and its number** — a
+corpus that numbers inside tiers (`BT`, `QB`, `T.HD.14.3`) may reuse a number in each, and two
+tiers numbering a `1` are two nodes. A citation that writes no tier (`[D.7]`) names the number
+in any tier, which is how a corpus that numbers flat keeps working.
 The first bare line is the **glyph line**. The fields a node may carry are a closed,
 short list: `Type:`, `Sema:`, `Role:`, `Proof:`, `Falsify:`, `Math:`, `Phys:`, and — for a
 calibration — `Symbol:`, `QUnits:`, `Dims:`, `Rate:`.

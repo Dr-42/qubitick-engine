@@ -58,7 +58,7 @@ pub fn cite_rules(ctx: &Ctx, conn: &qubitick_db::Db) -> Result<Vec<CiteRule>> {
         };
         if let Some(rule) = equation_rule(sema) {
             out.push(CiteRule {
-                cite: format!("D.{}", loaded.division),
+                cite: crate::cite_target::label_of_division(&loaded.tier, loaded.division),
                 rule,
             });
         }
@@ -71,12 +71,14 @@ pub fn cite_rules(ctx: &Ctx, conn: &qubitick_db::Db) -> Result<Vec<CiteRule>> {
         let Some(division) = crate::axioms::division_of_filename(&header.filename) else {
             continue;
         };
-        let Some(cited) = crate::axioms::load_theorem(conn, ctx, scope, division)? else {
+        let Some(cited) =
+            crate::axioms::load_theorem(conn, ctx, scope, &header.division, division)?
+        else {
             continue;
         };
         if let Some(rule) = equation_rule(&cited.statement) {
             out.push(CiteRule {
-                cite: format!("T.{division}"),
+                cite: crate::cite_target::label_of_division(&cited.tier, division),
                 rule,
             });
         }

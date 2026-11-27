@@ -5,6 +5,7 @@
 //! `Eq lhs rhs`, and rows are folded right-to-left.
 
 use crate::env::Env;
+use crate::rules::CiteKey;
 use crate::termctx::TermCtx;
 use anyhow::{Result, bail};
 use qubitick_ctx::Ctx;
@@ -141,11 +142,11 @@ fn render_just(
                 }
                 // ---- Axiom / theorem / definition citation ----
                 let cite = crate::rewrite::cite_name(&rf.name);
-                let Some((node, line)) = cite_axiom_line(&rf.name) else {
+                let Some(key) = cite_key(&rf.name) else {
                     tried.push(format!("{cite} (not an axiom line)"));
                     continue;
                 };
-                let cases = rules.all(node, line);
+                let cases = rules.all(&key);
                 if cases.is_empty() {
                     tried.push(format!("{cite} (not in this module)"));
                     continue;
@@ -153,7 +154,7 @@ fn render_just(
                 /* EVERY STATEMENT THE CITATION NAMES IS TRIED: a definition written as cases
                    is one citation over one equation per constructor, and the row matches
                    exactly one of them. */
-                for rule in cases {
+                for rule in &cases {
                     if let Some(term) = justify_step(rule, lhs, rhs, rf.rev, tc) {
                         return Ok(term);
                     }
@@ -184,12 +185,22 @@ fn render_just(
     }
 }
 
-fn cite_axiom_line(name: &qubitick_model::CiteName) -> Option<(u32, u32)> {
+/// The table key a citation names: its kind, its TIER and its number — the id the corpus
+/// wrote, so two tiers may number a node the same and each citation finds its own.
+fn cite_key(name: &qubitick_model::CiteName) -> Option<CiteKey> {
     match name {
-        qubitick_model::CiteName::AxiomLine { node, line } => Some((*node, *line)),
-        // Definitions are keyed as node `0` at their corpus division index.
-        qubitick_model::CiteName::DefId(div) => Some((0, *div)),
-        qubitick_model::CiteName::TheoremId(div) => Some((u32::MAX, *div)),
+        qubitick_model::CiteName::AxiomLine { node, line } => Some(CiteKey::AxiomLine {
+            node: *node,
+            line: *line,
+        }),
+        qubitick_model::CiteName::DefId { tier, n } => Some(CiteKey::Definition {
+            tier: tier.clone(),
+            n: *n,
+        }),
+        qubitick_model::CiteName::TheoremId { tier, n } => Some(CiteKey::Theorem {
+            tier: tier.clone(),
+            n: *n,
+        }),
         _ => None,
     }
 }
@@ -410,18 +421,19 @@ fn justify_multi(
 ) -> Option<String> {
     const MAX_DEPTH: usize = 4;
     const MAX_STEPS: usize = 600;
-    let laws: Vec<Law> = refs
+    // OWNED for the length of the function: a law borrows the rule it came from, and a rule
+    // fetched for a citation that names no tier is gathered from every tier that numbers it.
+    let mut owned: Vec<(crate::rules::AxRule, bool)> = Vec::new();
+    for r in refs {
+        if let Some(key) = cite_key(&r.name) {
+            for rule in rules.all(&key) {
+                owned.push((rule, r.rev));
+            }
+        }
+    }
+    let laws: Vec<Law> = owned
         .iter()
-        .flat_map(|r| {
-            let Some((node, line)) = cite_axiom_line(&r.name) else {
-                return Vec::new();
-            };
-            rules
-                .all(node, line)
-                .iter()
-                .filter_map(|rule| law_of(rule, r.rev))
-                .collect::<Vec<_>>()
-        })
+        .filter_map(|(rule, rev)| law_of(rule, *rev))
         .collect();
     if laws.is_empty() {
         return None;
@@ -934,7 +946,7 @@ mod tests {
             )),
         );
         let mut table = crate::rules::RuleTable::new();
-        table.insert_definition(2, sema);
+        table.insert_definition("", 2, sema);
         let row = ChainRow {
             line: 1,
             lhs: Some(Expr::Sym(AtomicComposite::new(6))),
@@ -943,7 +955,7 @@ mod tests {
             just: ChainJust::Rewrite {
                 refs: vec![JustRef {
                     rev: false,
-                    name: CiteName::DefId(2),
+                    name: CiteName::DefId { tier: String::new(), n: 2 },
                     args: vec![],
                 }],
             },

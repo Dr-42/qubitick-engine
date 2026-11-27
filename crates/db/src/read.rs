@@ -34,6 +34,11 @@ pub struct NodeHeader {
     /// names THIS number, so a corpus may number its nodes with gaps and in any
     /// file order without moving what a citation points at.
     pub authored: Option<i64>,
+    /// The TIER that number is in: the id's text without its last segment
+    /// (`D.BT.0.7` -> `BT.0`; `D.7` -> ``). A node's identity is
+    /// `(kind, division, authored)` — that is what makes a tiered numbering
+    /// addressable, and it is empty for a corpus that numbers flat.
+    pub division: String,
 }
 
 fn parse_kind(s: &str) -> NodeKind {
@@ -50,7 +55,7 @@ fn parse_kind(s: &str) -> NodeKind {
 /// List all node headers (`get_node_list`, SymbolDB §14.2).
 pub fn get_node_list(conn: &Connection) -> Result<Vec<NodeHeader>> {
     let mut stmt = conn.prepare(
-        "SELECT id, node_type, era, strata, name, filename, tag, version, godel, authored
+        "SELECT id, node_type, era, strata, name, filename, tag, version, godel, authored, division
          FROM nodes ORDER BY era, strata, godel",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -65,6 +70,7 @@ pub fn get_node_list(conn: &Connection) -> Result<Vec<NodeHeader>> {
             version: r.get(7)?,
             godel: r.get(8)?,
             authored: r.get(9)?,
+            division: r.get(10)?,
         })
     })?;
     rows.map(|r| r.map_err(anyhow::Error::from)).collect()

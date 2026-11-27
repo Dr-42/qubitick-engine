@@ -49,15 +49,16 @@ pub struct CiteTarget {
 /// where the two would part company.
 pub fn label_of(header: &NodeHeader) -> String {
     let number = header.authored.unwrap_or(header.id) as u32;
-    /* WITH THE DIVISION TAG THE FILENAME CARRIES.
+    /* WITH THE TIER THE ID ITSELF CARRIES.
      *
-     * A corpus numbers its nodes `D.<tag>.<nn>` (`D.A.02`, `D.BT.04`, `D.S.01`) and cites them
-     * that way — `[D.A.02]` is what the author writes and what the corpus text says. A label
-     * without the tag (`D.2`) is a different string from the citation it names, so every
-     * surface that PRINTS a label disagreed with the text it was reporting on: the row check
-     * said `one step of D.2`, the render tile said `D.A.02`, and both were describing one
-     * citation. A corpus that tags nothing (`D_00_Delta.qbit`) labels as before. */
-    let tag = division_tag(&header.filename);
+     * A corpus numbers its nodes inside a tier (`D.A.02`, `D.BT.0.7`, `T.HD.14.3`) and cites
+     * them that way — the id in the header is what the author writes and what the corpus text
+     * says. A label that printed `D.7` described one citation with a string the corpus never
+     * uses, so the report could not be matched against the file it reported on. The tier comes
+     * from the header (`nodes.division`); a filename tag is the fallback for a corpus that
+     * The filename decides nothing: a node's id is what its header states, and a label that
+     * printed a tag the header never wrote would describe one citation with another string. */
+    let tag: Option<String> = (!header.division.is_empty()).then(|| header.division.clone());
     let dotted = |kind: &str, number: u32| match &tag {
         Some(t) => format!("{kind}.{t}.{number:02}"),
         None => format!("{kind}.{number}"),
@@ -71,27 +72,6 @@ pub fn label_of(header: &NodeHeader) -> String {
     }
 }
 
-/// The division tag a node's filename carries: `D_A_02_Mul.qbit` -> `A`, `T_BT_01_Comm.qbit`
-/// -> `BT`, `D_00_Delta.qbit` -> none.
-///
-/// The tag is the middle field of the name the corpus walk made — `<kind>[_<tag>]_<nn>_<Name>`.
-/// It is decoration for resolution (the number is what resolves) and load-bearing for display:
-/// it is the difference between the label and the citation.
-fn division_tag(filename: &str) -> Option<String> {
-    let stem = filename.rsplit('/').next().unwrap_or(filename);
-    let stem = stem.strip_suffix(".qbit").unwrap_or(stem);
-    let mut fields = stem.split('_');
-    let kind = fields.next()?;
-    if !matches!(kind, "D" | "T" | "A" | "S" | "FT") {
-        return None;
-    }
-    let second = fields.next()?;
-    // A tag is a word; the number is digits. `D_00_Delta` has no tag.
-    if second.is_empty() || second.chars().any(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    Some(second.to_string())
-}
 
 /// The label of one statement of an axiom: `A1.4`.
 pub fn label_of_line(header: &NodeHeader, line: u32) -> String {
@@ -108,13 +88,13 @@ pub fn label_of_line(header: &NodeHeader, line: u32) -> String {
 pub fn resolve_cite(ctx: &Ctx, headers: &[NodeHeader], name: &str) -> Option<CiteTarget> {
     let scope = ctx.scope();
     let cite = qubitick_parse::cite_name(name);
-    let (kind, number, statement) = match cite.clone() {
-        CiteName::AxiomLine { node, line } => (NodeKind::Axiom, node, Some(line)),
-        CiteName::TheoremId(n) => (NodeKind::Theorem, n, None),
-        CiteName::DefId(n) => (NodeKind::Definition, n, None),
+    let (kind, tier, number, statement) = match cite.clone() {
+        CiteName::AxiomLine { node, line } => (NodeKind::Axiom, String::new(), node, Some(line)),
+        CiteName::TheoremId { tier, n } => (NodeKind::Theorem, tier, n, None),
+        CiteName::DefId { tier, n } => (NodeKind::Definition, tier, n, None),
         CiteName::Local(_) => return None,
     };
-    let header = resolve(headers, scope, kind, number)?;
+    let header = resolve(headers, scope, kind, &tier, number)?;
     Some(CiteTarget {
         label: match statement {
             Some(line) => label_of_line(header, line),
@@ -138,11 +118,17 @@ fn resolve<'a>(
     headers: &'a [NodeHeader],
     scope: &str,
     kind: NodeKind,
+    tier: &str,
     number: u32,
 ) -> Option<&'a NodeHeader> {
     let mut inherited = None;
     for header in headers {
         if header.node_type != kind {
+            continue;
+        }
+        // The TIER is part of an id (`D.BT.0.7`). A citation that names one matches it; a
+        // citation that names none (`[D.7]`) matches by number, as a flat corpus writes it.
+        if !tier.is_empty() && header.division != tier {
             continue;
         }
         /* BY THE NUMBER THE AUTHOR WROTE, AND BY NOTHING ELSE.
@@ -178,13 +164,13 @@ fn resolve<'a>(
 /// report says against what the file says.
 pub fn printed_label(ctx: &Ctx, headers: &[NodeHeader], name: &qubitick_model::CiteName) -> String {
     use qubitick_model::CiteName;
-    let (kind, number) = match name {
-        CiteName::AxiomLine { node, .. } => (NodeKind::Axiom, *node),
-        CiteName::TheoremId(n) => (NodeKind::Theorem, *n),
-        CiteName::DefId(n) => (NodeKind::Definition, *n),
+    let (kind, tier, number) = match name {
+        CiteName::AxiomLine { node, .. } => (NodeKind::Axiom, String::new(), *node),
+        CiteName::TheoremId { tier, n } => (NodeKind::Theorem, tier.clone(), *n),
+        CiteName::DefId { tier, n } => (NodeKind::Definition, tier.clone(), *n),
         CiteName::Local(s) => return s.clone(),
     };
-    match resolve(headers, ctx.scope(), kind, number) {
+    match resolve(headers, ctx.scope(), kind, &tier, number) {
         Some(header) => match name {
             CiteName::AxiomLine { line, .. } => label_of_line(header, *line),
             _ => label_of(header),
@@ -198,8 +184,8 @@ fn label_of_shape(name: &qubitick_model::CiteName) -> String {
     use qubitick_model::CiteName;
     match name {
         CiteName::AxiomLine { node, line } => format!("A{node}.{line}"),
-        CiteName::TheoremId(n) => format!("T.{n}"),
-        CiteName::DefId(n) => format!("D.{n}"),
+        CiteName::TheoremId { n, .. } => format!("T.{n}"),
+        CiteName::DefId { n, .. } => format!("D.{n}"),
         CiteName::Local(s) => s.clone(),
     }
 }
@@ -219,7 +205,7 @@ pub fn rule_of_cite(
     match cite {
         CiteName::AxiomLine { node, line } => {
             let headers = qubitick_db::read::get_node_list(conn).ok()?;
-            let header = resolve(&headers, scope, NodeKind::Axiom, node)?;
+            let header = resolve(&headers, scope, NodeKind::Axiom, "", node)?;
             let loaded = crate::axioms::load_axiom_nodes(conn, ctx, scope)
                 .ok()?
                 .into_iter()
@@ -228,18 +214,18 @@ pub fn rule_of_cite(
             let statement = axiom.statements.get(line.checked_sub(1)? as usize)?;
             crate::cite_rules::equation_rule(statement)
         }
-        CiteName::DefId(_) | CiteName::TheoremId(_) => {
+        CiteName::DefId { .. } | CiteName::TheoremId { .. } => {
             let headers = qubitick_db::read::get_node_list(conn).ok()?;
-            let kind = if matches!(cite, CiteName::DefId(_)) {
+            let kind = if matches!(cite, CiteName::DefId { .. }) {
                 NodeKind::Definition
             } else {
                 NodeKind::Theorem
             };
-            let number = match cite {
-                CiteName::DefId(n) | CiteName::TheoremId(n) => n,
+            let (tier, number) = match cite {
+                CiteName::DefId { tier, n } | CiteName::TheoremId { tier, n } => (tier, n),
                 _ => return None,
             };
-            let header = resolve(&headers, scope, kind, number)?;
+            let header = resolve(&headers, scope, kind, &tier, number)?;
             let division = division_of_filename(&header.filename)?;
             match kind {
                 NodeKind::Definition => {
@@ -256,7 +242,8 @@ pub fn rule_of_cite(
                     }
                 }
                 _ => {
-                    let loaded = crate::axioms::load_theorem(conn, ctx, scope, division).ok()??;
+                    let loaded =
+                        crate::axioms::load_theorem(conn, ctx, scope, &tier, division).ok()??;
                     crate::cite_rules::equation_rule(&loaded.statement)
                 }
             }
@@ -271,11 +258,33 @@ pub fn is_local(name: &str) -> bool {
     matches!(qubitick_parse::cite_name(name), CiteName::Local(_))
 }
 
+/// The id a `(tier, number)` pair prints as — `T.HD.14.3` when the tier is named, `T.3` when
+/// the corpus numbers flat. Used wherever a label is built without a header in hand.
+pub fn label_of_division(tier: &str, division: u32) -> String {
+    if tier.is_empty() {
+        format!("T.{division}")
+    } else {
+        format!("T.{tier}.{division}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn header(kind: NodeKind, authored: i64, name: &str, filename: &str) -> NodeHeader {
+        // A node's id in these tests is its FILE (`D_BT_02_Neg.qbit` -> tier `BT`).
+        let tier = filename
+            .rsplit('/')
+            .next()
+            .unwrap_or(filename)
+            .strip_suffix(".qbit")
+            .unwrap_or(filename)
+            .split('_')
+            .nth(1)
+            .filter(|t| !t.chars().any(|c| c.is_ascii_digit()))
+            .unwrap_or("")
+            .to_string();
         NodeHeader {
             id: authored,
             node_type: kind,
@@ -287,6 +296,7 @@ mod tests {
             version: 1,
             godel: None,
             authored: Some(authored),
+            division: tier,
         }
     }
 

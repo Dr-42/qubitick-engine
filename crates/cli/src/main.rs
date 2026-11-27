@@ -410,15 +410,26 @@ fn main() -> anyhow::Result<()> {
                         let kind = node.base().kind.as_str().to_string();
                         *kinds.entry(kind).or_insert(0) += 1;
                     }
-                    let from = qubitick_build::axioms::division_of_filename(
-                        &file.display().to_string(),
-                    );
+                    // The graph's endpoints are the ids the corpus writes: the tier a theorem is
+                    // numbered in and the number (`HD.14.3`), so two tiers never merge.
+                    let from = qubitick_build::axioms::header_id(&text).map(|(tier, n)| {
+                        if tier.is_empty() {
+                            n.to_string()
+                        } else {
+                            format!("{tier}.{n}")
+                        }
+                    });
                     if let Some(from) = from
                         && let Some(qubitick_model::Node::Theorem(_)) =
                             nodes.iter().find(|n| matches!(n, qubitick_model::Node::Theorem(_)))
                     {
-                        for to in qubitick_build::axioms::cited_divisions(&nodes) {
-                            edges.push(qubitick_build::Edge { from, to });
+                        for (tier, n) in qubitick_build::axioms::cited_divisions(&nodes) {
+                            let to = if tier.is_empty() {
+                                n.to_string()
+                            } else {
+                                format!("{tier}.{n}")
+                            };
+                            edges.push(qubitick_build::Edge { from: from.clone(), to });
                         }
                     }
                 }

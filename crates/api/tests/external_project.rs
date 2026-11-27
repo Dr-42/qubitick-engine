@@ -512,12 +512,12 @@ async fn rows_confirm_what_the_corpus_can_derive_and_show_what_it_cannot() {
         vec!["confirmed", "confirmed", "confirmed"],
         "each row is one application of the equation it cites: {body}"
     );
-    /* ONE CITATION, TWO SPELLINGS. The parser keeps a citation as a NODE plus a number, not as
-       the text the author wrote: `D.X.01` and `D.1` are the same reference (the digits are the
-       number), and the engine reports the canonical one. A client shows the author's own text —
-       it has it — and what it needs from here is the verdict. */
+    /* ONE CITATION, TWO SPELLINGS. A citation names a node by its TIER and its number, and the
+       node's own header is the authority for both: this file's header is `D.X.01`, so that is
+       the canonical form the engine reports. A row written `[D.1]` names no tier and still
+       resolves by number; what a client needs from here is the verdict, and it has the text. */
     assert_eq!(
-        body["rows"][0]["cite"], json!("D.1"),
+        body["rows"][0]["cite"], json!("D.X.01"),
         "the citation is reported in the engine's canonical form: {body}"
     );
 
@@ -651,7 +651,8 @@ async fn the_pdf_material_is_a_document_whose_citations_are_links() {
         target_line("A1.3")
     );
     assert!(
-        doc.contains("\\hypertarget{cite:A1}{}") && doc.contains("\\hypertarget{cite:T.1}{}"),
+        doc.contains("\\hypertarget{cite:A1}{}")
+            && doc.contains("\\hypertarget{cite:T.X.01}{}"),
         "and a node itself is a target, not only its statements"
     );
 
