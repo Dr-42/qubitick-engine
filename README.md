@@ -308,7 +308,7 @@ qubitick lake    <root>            # emit the corpus as one Lake package
 qubitick rows    <root> <file>     # the file's proof rows and their verdicts
 qubitick steps   <root> <expr>     # the rewrites the corpus can cite from an expression
 qubitick autocite <root> <lhs> <rhs>  # the citations that bridge two expressions
-qubitick pdf     <root> [--latex]  # the corpus as a document
+qubitick pdf     <root> [--latex]  # the corpus as a document (--latex: no engine needed)
 qubitick prelude-check --module M  # prove a ground against the emitter's contract
 qubitick axioms  <root> <file>     # what Lean says the file's theorems stand on
 ```
@@ -316,6 +316,19 @@ qubitick axioms  <root> <file>     # what Lean says the file's theorems stand on
 `qubitick-server` serves the same engine over HTTP (the routes the web client in
 `web-next/` uses: `files`, `parse`, `emit`, `build`, `rows`, `steps`, `autocite`,
 `pdf`, `symbols`, `palette`, `projects`, `settings`, `induce`, …).
+
+### PDF export
+
+`GET /api/pdf` renders the corpus as a document with its citations as hyperlinks. It uses
+the first LaTeX engine it finds — `tectonic`, then `pdflatex`, then `xelatex` — and a machine
+with none of them gets a `503` that names all three, with `GET /api/pdf?latex=1` (or
+`qubitick pdf <root> --latex`) as the way to get the source, which needs no engine at all.
+
+The document compiles under `pdflatex` without edits: the preamble carries `xcolor` (for
+`hyperref`'s colours), `inputenc`, and a `newunicodechar` map for every Unicode operator a
+corpus writes (`×`, `→`, `⊢`, `∎`, `∧`, …); display maths always gets its own paragraph; and
+each node's anchor is the number its own header carries, so a node numbered `00` is `D.A.00`
+and not the ledger ordinal — two nodes can never share a cite id.
 
 ---
 
@@ -412,7 +425,9 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
 | `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
-| `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, and the build reports the row |
+| `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, the build reports the row, and a refused row is not also an admitted theorem |
+| `crates/build/tests/undeclared_operator.rs` | an operator nothing declares is named, in a statement and in a proof row |
+| `crates/build/tests/pdf_export.rs` | two nodes never share a cite id, the preamble carries what the body uses, display maths never opens in a text run, and the ship's document compiles when an engine is installed |
 | `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship stands on nothing |
 | `crates/build/tests/coverage.rs` | an A-block glyph with no D node fails naming it; the shipped ship homes every glyph its A blocks write; and `scaffold` writes the chain |
 | `crates/build/tests/emission_surface.rs` | no module emits an `axiom`; a ground-named glyph declares nothing; a sort word is a literal; a cross-module definition is imported; a `Type:` with no name is refused |

@@ -6,7 +6,7 @@ use qubitick_db::read::NodeHeader;
 pub fn document(nodes: &[NodeHeader]) -> String {
     let mut out = String::from(LATEX_PREAMBLE);
     out.push_str("\\begin{document}\n");
-    out.push_str("\\title{Quibque Quibitick Corpus}\n\\maketitle\n");
+    out.push_str("\\title{Qubitick Corpus}\n\\maketitle\n");
     let mut kinds = nodes.to_vec();
     kinds.sort_by(|a, b| {
         let ka = (a.node_type.as_str().to_string(), a.era.clone(), a.name.clone());
@@ -42,8 +42,37 @@ fn escape(s: &str) -> String {
 /// reference it is.
 pub const LATEX_PREAMBLE: &str = r#"\documentclass[11pt]{article}
 \usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
 \usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
 \usepackage{amsmath,amssymb}
+\usepackage{newunicodechar}
+% THE CORPUS WRITES UNICODE OPERATORS (`×`, `→`, `⊢`, `∎`) AND THE DOCUMENT PRINTS THEM.
+% pdflatex's text and math encodings carry some of these and not others; naming each one
+% keeps the source free of the question, and a glyph added to the corpus later fails HERE
+% rather than as an "Unicode character not set up" error in the middle of a paragraph.
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{→}{\ensuremath{\rightarrow}}
+\newunicodechar{←}{\ensuremath{\leftarrow}}
+\newunicodechar{↔}{\ensuremath{\leftrightarrow}}
+\newunicodechar{⊢}{\ensuremath{\vdash}}
+\newunicodechar{∎}{\ensuremath{\blacksquare}}
+\newunicodechar{□}{\ensuremath{\square}}
+\newunicodechar{■}{\ensuremath{\blacksquare}}
+\newunicodechar{≡}{\ensuremath{\equiv}}
+\newunicodechar{∈}{\ensuremath{\in}}
+\newunicodechar{⊆}{\ensuremath{\subseteq}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{≥}{\ensuremath{\geq}}
+\newunicodechar{≠}{\ensuremath{\neq}}
+\newunicodechar{∧}{\ensuremath{\land}}
+\newunicodechar{∨}{\ensuremath{\lor}}
+\newunicodechar{¬}{\ensuremath{\lnot}}
+\newunicodechar{∀}{\ensuremath{\forall}}
+\newunicodechar{∃}{\ensuremath{\exists}}
+\newunicodechar{∞}{\ensuremath{\infty}}
+\newunicodechar{·}{\ensuremath{\cdot}}
+\newunicodechar{−}{\ensuremath{-}}
 \usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
 "#;
 
@@ -56,7 +85,7 @@ pub const LATEX_PREAMBLE: &str = r#"\documentclass[11pt]{article}
 pub fn document_sections(sections: &[(String, Vec<String>)]) -> String {
     let mut out = String::from(LATEX_PREAMBLE);
     out.push_str("\\begin{document}\n");
-    out.push_str("\\title{Quibitick Corpus}\\maketitle\n");
+    out.push_str("\\title{Qubitick Corpus}\\maketitle\n");
     out.push_str("\\tableofcontents\n\\newpage\n");
     for (title, lines) in sections {
         out.push_str(&format!("\\section*{{{title}}}\n"));

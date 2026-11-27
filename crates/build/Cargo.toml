@@ -16,3 +16,9 @@ qubitick-pattern = { workspace = true }
 rusqlite = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# The PDF tests compile the document with whichever engine is installed, which means they
+# belong beside the code that writes it. `qubitick-pdf` does not depend on this crate, so
+# this is a test-only edge and not a cycle.
+qubitick-pdf = { workspace = true }

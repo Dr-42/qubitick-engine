@@ -122,7 +122,7 @@ fn lines_of(ctx: &Ctx, headers: &[NodeHeader], header: &NodeHeader, src: &str) -
             if header.node_type == NodeKind::Axiom {
                 let anchor = crate::cite_target::label_of_line(header, statement);
                 out.push(format!(
-                    "\\noindent\\hypertarget{{cite:{}}}{{}}{}\\ [{}]",
+                    "\\noindent\\hypertarget{{cite:{}}}{{}}{}\\hfill [{}]",
                     escape_key(&anchor),
                     math(&row_markup(ctx, headers, t)),
                     escape_key(&anchor)
@@ -142,11 +142,19 @@ fn lines_of(ctx: &Ctx, headers: &[NodeHeader], header: &NodeHeader, src: &str) -
         }
         /* a labelled line: a label with a value is mathematics (`Type: \tau \to \mathfrak{E}`), a
            label with nothing after it is just the label (`Proof:`), and both may carry a citation */
+        /* DISPLAY MATHS IS NEVER PUT INSIDE A TEXT-MODE GROUP. `\texttt{Type}:\ [E]` is the
+           shape that made pdflatex answer "Bad math environment delimiter": the `\[`
+           follows a closing brace, in a paragraph that had already started, and TeX reads the
+           `\` of `\[` as the line break `\\` followed by a stray `[`. Ending the text run
+           with a blank line first gives the display its own paragraph, which is what the
+           maths is. */
         if rest.trim().is_empty() {
             out.push(format!("\\noindent\\texttt{{{}}}:", escape_text(label)));
         } else {
             out.push(format!(
-                "\\noindent\\texttt{{{}}}:\\ {}",
+                "\\noindent\\texttt{{{}}}:
+
+{}",
                 escape_text(label),
                 math(&row_markup(ctx, headers, rest.trim()))
             ));

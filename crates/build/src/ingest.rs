@@ -104,8 +104,13 @@ struct Entry {
     kind: NodeKind,
     name: String,
     /// The number the author wrote in the header (`A4. Counting` -> 4, `D.BT.43`
-    /// -> 43). This, not the ledger ordinal, is what a citation names.
-    authored: u32,
+    /// -> 43, `D.A.00` -> 0). This, not the ledger ordinal, is what a citation names.
+    ///
+    /// `None` is a header that carries NO number: it is not the same as a node numbered
+    /// 0. The ship's carrier is `D.A.00` — the first definition, cited as exactly that —
+    /// and reading its 0 as "unnumbered" made every surface fall back to the ledger
+    /// ordinal, which put the carrier's label at `D.A.02` and collided with Mul's.
+    authored: Option<u32>,
     /// (glyph tex, SymbolKind as_str) — only present for Definitions.
     glyph: Option<(String, String)>,
     /// Distinct LaTeX control words used in the file.
@@ -233,7 +238,9 @@ pub fn ingest_file_symbols(
         path: path.to_path_buf(),
         kind: node.base().kind,
         name: node.base().name.clone(),
-        authored: node.base().id,
+        // THE HEADER LINE DECIDES whether the node carries a number: a node numbered
+        // `00` and a node numbered by nothing both reach the model as `id: 0`.
+        authored: authored_of(&src, node.base().id),
         glyph,
         words: control_words(&src),
     };
@@ -336,7 +343,7 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
             path: path.clone(),
             kind: node.base().kind,
             name: node.base().name.clone(),
-            authored: node.base().id,
+            authored: authored_of(&src, node.base().id),
             glyph,
             words: control_words(&src),
         });
@@ -376,8 +383,10 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
                 Claimed::Name => format!("{era}/Strata{strata}"),
             };
             let value = match claimed {
-                Claimed::Number if e.authored == 0 => continue,
-                Claimed::Number => e.authored.to_string(),
+                Claimed::Number => match e.authored {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                },
                 Claimed::Name => e.name.clone(),
             };
             let key = (scope.clone(), e.kind.as_str(), value.clone());
@@ -434,13 +443,10 @@ pub fn ingest_corpus(conn: &mut Connection, project_root: &Path) -> Result<Inges
                 e.path.display().to_string(),
                 node_hash.to_le_bytes().to_vec(),
                 node_id,
-                // 0 means the header carried no number at all; store NULL so the
-                // readers fall back to the ledger ordinal rather than to "zero".
-                if e.authored == 0 {
-                    None
-                } else {
-                    Some(e.authored as i64)
-                }
+                /* NULL means the header carried no number at all, so the readers fall
+                   back to the ledger ordinal. A node numbered `00` is NOT that case: it
+                   stores 0, and 0 is what `D.A.00` cites. */
+                e.authored.map(|n| n as i64)
             ],
         )?;
     }
@@ -981,6 +987,29 @@ pub fn walk_qbit(root: &Path) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+/// The number a file's header carries, or `None` when it carries none.
+///
+/// The model keeps only a `NodeId`, so `D.A.00` and a header with no digits both arrive as
+/// 0. The header LINE is the authority: digits there mean the node is numbered, and the
+/// number is what a citation names. A node numbered `00` is the first of its kind and is
+/// cited as `D.A.00`; a node with no number cannot be addressed at all.
+fn authored_of(src: &str, parsed_id: u32) -> Option<u32> {
+    let header = src
+        .lines()
+        .find(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with('%') && !t.starts_with('#') && !t.starts_with("//")
+        })
+        .unwrap_or("");
+    // The id part is the first whitespace-delimited word of the header.
+    let id_part = header.split_whitespace().next().unwrap_or("");
+    if id_part.chars().any(|c| c.is_ascii_digit()) {
+        Some(parsed_id)
+    } else {
+        None
+    }
 }
 
 /// Derive the node `(era, strata)` from a file's path under the project root,

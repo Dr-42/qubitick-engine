@@ -649,6 +649,7 @@ dependencies = [
  "qubitick-model",
  "qubitick-parse",
  "qubitick-pattern",
+ "qubitick-pdf",
  "qubitick-rewrite",
  "rusqlite",
  "serde_json",

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::{Html, IntoResponse};
 use axum::Json;
 use serde::Deserialize;
@@ -642,7 +642,10 @@ pub async fn post_build(
 /// the target its statement declares) and the typesetter is `qubitick_pdf` (the preamble — with
 /// `hyperref` — and the assembly). The document used to be a list of node HEADERS: no statements
 /// and no proofs, so there was nothing for a citation to point at.
-pub async fn get_pdf(State(state): State<Arc<AppState>>) -> axum::response::Response {
+pub async fn get_pdf(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<PdfQuery>,
+) -> axum::response::Response {
     /* build the material before taking the db lock again for the compile */
     let sections = {
         let ctx = state.ctx.read().unwrap();
@@ -657,17 +660,57 @@ pub async fn get_pdf(State(state): State<Arc<AppState>>) -> axum::response::Resp
             }
         }
     };
-    match qubitick_pdf::render_sections_pdf(&sections, &std::env::temp_dir().join("qubitick_pdf")) {
-        Ok(bytes) => build_pdf_response(bytes),
-        Err(e) => {
-            let msg = e.to_string();
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                msg,
-            )
-                .into_response()
+    /* THE SOURCE NEEDS NO ENGINE, AND IT IS WHAT THE ERROR POINTS AT. A reader with no TeX
+       installation still gets the corpus as a document; they paste it into whatever they do
+       have. */
+    if q.latex {
+        return (
+            [
+                ("content-type", "text/plain; charset=utf-8"),
+                ("x-qubitick-pdf", "latex-source"),
+            ],
+            qubitick_pdf::latex::document_sections(&sections),
+        )
+            .into_response();
+    }
+    /* NO ENGINE IS NOT A SERVER FAULT. A machine with no `tectonic` used to answer 500 with
+       "failed to spawn the tectonic binary (is it on PATH?)", which reads as a bug in the
+       engine when it is a fact about the machine — and one the caller can act on, because the
+       LaTeX source needs no engine at all. So the message names every engine that would do,
+       names the route that gives the source instead, and the status says so. */
+    match qubitick_pdf::engine::find() {
+        Err(e) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            [
+                ("content-type", "text/plain; charset=utf-8"),
+                ("x-qubitick-pdf", "no-engine"),
+            ],
+            e.to_string(),
+        )
+            .into_response(),
+        Ok(engine) => {
+            let workdir = std::env::temp_dir().join("qubitick_pdf");
+            match qubitick_pdf::engine::compile_with(
+                engine,
+                &qubitick_pdf::latex::document_sections(&sections),
+                &workdir,
+            ) {
+                Ok(bytes) => build_pdf_response(bytes),
+                Err(e) => (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("{}. The LaTeX source is available from GET /api/pdf?latex=1", e),
+                )
+                    .into_response(),
+            }
         }
     }
+}
+
+/// `GET /api/pdf?latex=1` asks for the source instead of a rendering.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct PdfQuery {
+    #[serde(default)]
+    latex: bool,
 }
 
 fn build_pdf_response(bytes: Vec<u8>) -> axum::response::Response {

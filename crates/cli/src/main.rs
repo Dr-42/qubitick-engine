@@ -282,8 +282,8 @@ fn main() -> anyhow::Result<()> {
             );
         }
         Commands::Pdf { root, latex } => {
-            /* THE ROUTE'S OWN MATERIAL, printed. `--latex` is here because compiling a PDF needs
-               `tectonic`, and a document nobody can look at is a document nobody can check. */
+            /* THE ROUTE'S OWN MATERIAL, printed. `--latex` needs no engine at all, and the
+               document is the deliverable a PDF is one rendering of. */
             let mut db = qubitick_db::open_in_memory()?;
             let root_path = PathBuf::from(&root);
             qubitick_build::ingest_corpus(&mut db, &root_path)?;
@@ -294,7 +294,8 @@ fn main() -> anyhow::Result<()> {
             if latex {
                 print!("{doc}");
             } else {
-                let bytes = qubitick_pdf::tectonic::compile(&doc, &std::env::temp_dir().join("qubitick_pdf"))?;
+                let bytes =
+                    qubitick_pdf::engine::compile(&doc, &std::env::temp_dir().join("qubitick_pdf"))?;
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json!({
