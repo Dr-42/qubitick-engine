@@ -8,6 +8,7 @@ pub mod handlers_gap;
 pub mod respond;
 pub mod router;
 pub mod settings;
+pub mod static_pages;
 pub mod state;
 
 pub use router::router;

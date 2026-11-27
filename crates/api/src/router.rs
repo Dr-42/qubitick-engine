@@ -56,10 +56,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/ws/slate", get(handlers_gap::ws_slate))
         .route("/ws/build", get(handlers_gap::ws_build));
 
-    // Static web assets: `web-next/` is the only frontend (index.html at `/`),
-    // served under the API/WS routes above. There is no legacy shell to fall
-    // back to any more, so a missing `web-next/` is an empty 404 rather than a
-    // quietly older app.
+    // Static web assets: `web-next/` is the only frontend, served under the API/WS
+    // routes above. There is no legacy shell to fall back to any more, so a missing
+    // `web-next/` is an empty 404 rather than a quietly older app.
+    //
+    // `/` IS THE DOCKING SHELL (dock.html) and `/index.html` is the canvas. A directory
+    // default served by `ServeDir` would always be `index.html`, so the two pages get
+    // their names here: the shell is what you land on, and the canvas is one link away.
     // A single executable runs from anywhere, so the client is looked for where a
     // packaged one would put it: `QUBITICK_WEB`, then `web-next/` beside the binary,
     // then the app root (the development checkout).
@@ -75,8 +78,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         })
         .unwrap_or_else(|| state.app_root.join("web-next"));
 
+    /* `/` → the docking shell, and a bare `/shell`/`/canvas` keep working as names. */
+    let web_for_route = web_dir.clone();
     Router::new()
         .merge(api)
+        .route("/", get(move || async move { crate::static_pages::page(&web_for_route, "dock.html") }))
         .fallback_service(ServeDir::new(web_dir))
         .layer(cors)
         .with_state(state)

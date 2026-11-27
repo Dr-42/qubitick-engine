@@ -23,6 +23,7 @@ import leanPane from './lean.js';
 import renderPane from './render.js';
 import outputPane from './output.js';
 import diagPane from './diag.js';
+import buildPane from './build.js';
 import slatePane from './slate.js';
 import symbolAddPane from './symbol-add.js';
 import settingsThemePane from './settings-theme.js';
@@ -111,6 +112,12 @@ export function createPaneRegistry() {
 
     // diag: in { diagnostics }, out { jump }, call { rerun } (M4.22)
     registerPane(diagPane);
+
+    /* build: in { diagnostics }, out { jump }, call { rerun } — the corpus build as a panel:
+       how many files verified and what the corpus still admits. `diag` says what is wrong and
+       where; this says whether it built and what it takes on faith, which are different
+       questions with different answers (a corpus with one admitted theorem builds clean). */
+    registerPane(buildPane);
 
     // graph: in { highlight, graphData }, out { selection }, call { resetCamera } (M4.26)
     registerPane(graphPane);

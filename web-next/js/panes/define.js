@@ -20,6 +20,10 @@ const VALID_KINDS = new Set([
      mounts in either app (js/panes/projects.js). It was missing here, so a layout document that
      named it in the engine shell was "Unknown pane kind" and drew a placeholder. */
   'projects',
+  /* the corpus BUILD — verified/admitted/errors from one report (js/panes/build.js). `diag` answers
+     "what is wrong and where"; this answers "did it build, and what is still taken on faith", and
+     the docking shell's Build panel is the one that asks. */
+  'build',
 ]);
 
 const VALID_PORT_TYPES = new Set(['value', 'event', 'call']);

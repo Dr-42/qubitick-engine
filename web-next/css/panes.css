@@ -236,3 +236,48 @@
     padding: 8px 12px;
   }
 }
+
+/* ---------- the corpus tree: nesting that fits its dock ----------
+   `js/panes/tree.js` writes nested `<ul>`s and no list styles, so every level took the
+   browser's default `padding-left: 40px` — four levels of that is 160px, and in a 240px
+   dock the file names were clipped mid-word. A tree is a dense list: one narrow indent per
+   level, no bullets, one line per node. */
+.tree-pane ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 9px;
+}
+.tree-pane .tree-root {
+  padding-left: 0;
+}
+.tree-pane li {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.55;
+}
+.tree-pane li:hover {
+  background: var(--wash-1);
+}
+.tree-pane .tdot {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--dim);
+  margin-top: 6px;
+}
+.tree-pane .ng-caret,
+.tree-pane .td-label,
+.tree-pane .node-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-pane .ng-count {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 9.5px;
+}
