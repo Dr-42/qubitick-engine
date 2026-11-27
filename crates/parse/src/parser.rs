@@ -66,8 +66,22 @@ pub struct StructBinder {
 }
 
 /// Parse a full expression from a token stream.
+///
+/// A FRAGMENT IS PARSED WHOLE, OR IT IS NOT PARSED. A Pratt parser stops where the
+/// grammar stops, and a prefix of a stream is not a parse of it: `a \Delta b` came back
+/// as `a` — the `\Delta` was never consumed and never judged — so a glyph nothing
+/// declares reached the rewriter as a term, and the corpus was told `cannot justify
+/// rewrite (a → b)` about an operator it had not declared. Every caller here wants the
+/// whole fragment: the lexer produced the tokens from the whole string.
 pub fn parse_struct(tokens: &[Token], ctx: &Ctx) -> Result<(StructExpr, usize), Diagnostic> {
     let (e, pos) = parse_flat(tokens, 0, 0, ctx)?;
+    if !matches!(tokens.get(pos), Some(Token::Eof(_))) {
+        return Err(synth_diag(
+            pos,
+            "the expression ends before the input does: what follows is not notation this \
+             corpus can read",
+        ));
+    }
     Ok((e, pos))
 }
 

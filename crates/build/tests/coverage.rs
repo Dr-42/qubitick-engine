@@ -160,16 +160,22 @@ fn a_line_that_resolves_to_nothing_names_the_glyphs_it_writes() {
         .map(|g| g.sentence())
         .collect();
     assert!(
-        said.iter().any(|m| m.contains("`\\Delta` is not declared")),
+        said.iter().any(|m| m.contains("`\\Delta` is used as an operator")
+            && m.contains("nothing declares it")),
         "the operator the corpus never declares is named: {said:?}"
     );
     assert!(
         said.iter().any(|m| m.contains("`\\mathfrak{E}` is not declared")),
         "and so is the carrier: {said:?}"
     );
+    /* THE OPERATOR AND THE CARRIER ARE TWO KINDS, AND EACH IS REPORTED IN ITS OWN WORDS.
+       `\Delta` is an operator the parser's gate refused before any term was built, so it
+       carries the parser's sentence and the parser's code (`parse.operator.undeclared`).
+       `\mathfrak{E}` is a glyph in a position the gate does not judge, so it is the
+       coverage hole, naming the stratum that would home it. Both name the glyph. */
     assert!(
-        said.iter().all(|m| m.contains("is not declared in Era0/Strata0")),
-        "each names the glyph and the stratum that would home it: {said:?}"
+        said.iter().any(|m| m.contains("is not declared in Era0/Strata0")),
+        "the carrier names the stratum that would home it: {said:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -177,6 +177,12 @@ mod tests {
     fn z_ctor_patterns_parse() {
         // Deterministic check of the induction-pattern strings: do the bare
         // ℤ-ctor tex forms parse as operands?
+        //
+        // A GLYPH APPLIED TO AN OPERAND IS A PREFIX OPERATOR, and the fixture says so:
+        // `\mathbb{Z}^{+} n` is the glyph applied to `n`, which is what the corpus
+        // declares (`role: prefix` on `\mathbb{Z}^{+}`). Without the role the fragment
+        // `\mathbb{Z}^{+} n` is a glyph and then a var, and the parser refuses it — as it
+        // must, because `a \Delta b` for an undeclared `\Delta` is exactly that shape.
         let row = |id: i64, tex: &str| SymbolRow { facets: 0,
             id,
             scope: "".into(),
@@ -197,15 +203,22 @@ mod tests {
             elab: None,
             binder_kind: None,
         };
+        let with_role = |id: i64, tex: &str, role: &str| {
+            let mut r = row(id, tex);
+            r.role = Some(role.to_string());
+            r
+        };
         let ctx = qubitick_ctx::Ctx::from_rows(
             "",
             vec![
                 row(100, "\\mathbb{Z}"),
                 row(101, "\\mathbb{Z}_{0}"),
                 row(102, "\\mathbb{Z}_0"),
-                row(103, "\\mathbb{Z}^{+}"),
-                row(104, "\\mathbb{Z}^{-}"),
-                row(105, "^+"),
+                // The two signed copies are PREFIX operators: the corpus writes
+                // `\mathbb{Z}^{+} n`, the glyph applied to its operand.
+                with_role(103, "\\mathbb{Z}^{+}", "prefix"),
+                with_role(104, "\\mathbb{Z}^{-}", "prefix"),
+                with_role(105, "^+", "prefix"),
                 row(106, "\\tau_0"),
             ],
         );

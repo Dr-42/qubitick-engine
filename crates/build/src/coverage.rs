@@ -37,6 +37,11 @@ pub enum GapKind {
     /// A statement that did not resolve at all: the parser kept the line as opaque text
     /// because a glyph in it has no declaration.
     Unresolved,
+    /// The parser REFUSED the statement as an operator nothing declares. The refusal is
+    /// the parser's own sentence (`parse.operator.undeclared`), and it already names the
+    /// glyph and says what a declaration looks like. This kind carries it to the report
+    /// so the build does not answer with the collapsed text or a Lean type error instead.
+    UndeclaredOperator,
 }
 
 /// One glyph an A block writes that no D node in its stratum homes.
@@ -70,6 +75,16 @@ impl Gap {
             span.len = self.len;
         }
         let (title, help) = match self.kind {
+            GapKind::UndeclaredOperator => (
+                format!(
+                    "`{}` is used as an operator, but nothing declares it",
+                    self.glyph
+                ),
+                format!(
+                    "declare it with a glyph line `a {} b` and a `Type:` or `Sema:`",
+                    self.glyph
+                ),
+            ),
             GapKind::Unresolved => (
                 format!("`{}` is not declared in {}", self.glyph, self.sector),
                 "add a D node whose glyph line is that glyph, with a `Type:` or `Sema:` \
@@ -90,9 +105,16 @@ impl Gap {
                 ),
             ),
         };
-        Diagnostic::error(Phase::Scope, "coverage.unhomed", title)
+        /* THE CODE IS THE PARSER'S when the parser is the one that refused: a client acts
+           on `parse.operator.undeclared`, not on a coverage code it would have to learn. */
+        let (phase, code) = match self.kind {
+            GapKind::UndeclaredOperator => (Phase::Parse, "parse.operator.undeclared"),
+            _ => (Phase::Scope, "coverage.unhomed"),
+        };
+        Diagnostic::error(phase, code, title)
             .at(span)
             .label(match self.kind {
+                GapKind::UndeclaredOperator => "used as an operator".to_string(),
                 GapKind::Unresolved => "used here".to_string(),
                 GapKind::NoGroundName => "signature with no name".to_string(),
                 GapKind::Unhomed => "written here".to_string(),
@@ -128,6 +150,8 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
     // Statements that resolved to nothing, paired with the sector and file they are in.
     // (sector, file, the line as written, the glyphs it carries)
     let mut unresolved: Vec<(String, PathBuf, String, Vec<String>)> = Vec::new();
+    // Statements the PARSER refused, already carrying the sentence that says why.
+    let mut refused: Vec<Gap> = Vec::new();
     let mut ctors: BTreeSet<u32> = BTreeSet::new();
     for path in files {
         let sector = crate::pipeline::scope_of_path(path);
@@ -147,7 +171,7 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
             Some(Node::Axiom(a)) => {
                 let mut declared: BTreeSet<u32> = BTreeSet::new();
                 for stmt in &a.statements {
-                    unresolved_stmt(ctx, &sector, path, stmt, &mut unresolved);
+                    unresolved_stmt(ctx, &sector, path, stmt, &mut unresolved, &mut refused);
                     glyphs(stmt, &mut declared);
                 }
                 writes.push((sector.clone(), path.clone(), declared));
@@ -156,15 +180,15 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
             // declares leaves the line as opaque text, and a green build would say
             // nothing about it.
             Some(Node::Theorem(t)) => {
-                unresolved_stmt(ctx, &sector, path, &t.statement, &mut unresolved);
+                unresolved_stmt(ctx, &sector, path, &t.statement, &mut unresolved, &mut refused);
             }
             Some(Node::Definition(d)) => {
                 if let Some(qubitick_model::FormBody::MacroExpr(e)) = &d.d_block.form {
-                    unresolved_stmt(ctx, &sector, path, e, &mut unresolved);
+                    unresolved_stmt(ctx, &sector, path, e, &mut unresolved, &mut refused);
                 }
                 for extra in &d.extra_symbols {
                     if let Some(qubitick_model::FormBody::MacroExpr(e)) = &extra.d_block.form {
-                        unresolved_stmt(ctx, &sector, path, e, &mut unresolved);
+                        unresolved_stmt(ctx, &sector, path, e, &mut unresolved, &mut refused);
                     }
                 }
                 let set = homed.entry(sector.clone()).or_default();
@@ -191,6 +215,14 @@ pub fn gaps(conn: &qubitick_db::Db, files: &[PathBuf]) -> Result<Vec<Gap>> {
         }
     }
     let mut out: Vec<Gap> = Vec::new();
+    // A REFUSED STATEMENT IS REPORTED AS THE PARSER REFUSED IT, before the word-scan and
+    // in place of it: the sentence names the glyph, and the glyph nothing declares is
+    // not something a pass over the text can find — it has no row to scan for.
+    for gap in refused {
+        if !out.contains(&gap) {
+            out.push(gap);
+        }
+    }
     for (sector, file, ids) in writes {
         let ctx = &scope_ctxs[&sector];
         let declared = homed.get(&sector);
@@ -344,15 +376,47 @@ fn unresolved_stmt(
     path: &Path,
     e: &Expr,
     out: &mut Vec<(String, PathBuf, String, Vec<String>)>,
+    refused: &mut Vec<Gap>,
 ) {
     let Expr::Var(raw) = e else { return };
     // A real metavariable is one identifier. A whole line of source is not a variable.
     if !raw.contains(char::is_whitespace) && !raw.contains('\\') {
         return;
     }
+    /* WHEN THE PARSER CAN SAY WHY, IT SAYS IT. A statement kept as text may be one whose
+       operator gate fired (`a \Delta b` with no declaration for `\Delta`): that refusal
+       names the glyph and the fix, and the word-scan below would only guess from the text.
+       The refusal is the corpus's diagnostic, so it is reported as one. */
+    let mut refused_glyph: Option<String> = None;
+    if let Some(said) = qubitick_parse::statement_refusal(ctx, e)
+        && let Some(glyph) = said.split('`').nth(1)
+        && said.contains("is used as an operator")
+    {
+        // A statement's text is the line it was written on (see `locate`).
+        let located = locate(path, raw);
+        let gap = Gap {
+            file: path.to_path_buf(),
+            glyph: glyph.to_string(),
+            sector: sector.to_string(),
+            kind: GapKind::UndeclaredOperator,
+            line: located.as_ref().map(|(l, _)| *l),
+            col: located.as_ref().and_then(|(_, text)| {
+                text.find(glyph).map(|at| text[..at].chars().count() as u32 + 1)
+            }),
+            len: Some(glyph.chars().count() as u32),
+        };
+        refused_glyph = Some(glyph.to_string());
+        if !refused.contains(&gap) {
+            refused.push(gap);
+        }
+    }
     let mut words: Vec<String> = Vec::new();
     for tex in control_words(raw) {
         if is_format_token(&tex) {
+            continue;
+        }
+        // The operator the gate refused is already in `refused`, with a better sentence.
+        if refused_glyph.as_deref() == Some(tex.as_str()) {
             continue;
         }
         let id = ctx

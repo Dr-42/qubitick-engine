@@ -984,6 +984,27 @@ pub fn row_refusal(ctx: &Ctx, text: &str) -> Option<String> {
     }
 }
 
+/// The sentence a THEOREM STATEMENT earns when the corpus cannot read it, or `None`.
+///
+/// A statement is read exactly as a proof row is, and refused by the same gate: a glyph
+/// nothing declares that heads a term is `operator.undeclared`, named, with the caret on
+/// the glyph. The build reports THAT sentence instead of the collapsed `Var` it leaves
+/// behind — a theorem whose statement became a lump of text would otherwise emit a Lean
+/// binder with no type and be reported as `Failed to infer type of binder a`, which names
+/// neither the corpus's mistake nor the glyph that caused it.
+pub fn statement_refusal(ctx: &Ctx, statement: &Expr) -> Option<String> {
+    let Expr::Var(raw) = statement else { return None };
+    // A real metavariable is one identifier; a whole line of source is a statement the
+    // parser kept as text because it could not resolve it.
+    if !raw.contains(char::is_whitespace) && !raw.contains('\\') {
+        return None;
+    }
+    match crate::semantic::parse_expr(raw.trim(), ctx) {
+        Ok(_) => None,
+        Err(e) => Some(format!("{e:#}")),
+    }
+}
+
 fn parse_row_expr(ctx: &Ctx, src: &str, line: &str) -> anyhow::Result<Expr> {
     if let Some(e) = parse_expr_retry(ctx, src) {
         return Ok(e);
