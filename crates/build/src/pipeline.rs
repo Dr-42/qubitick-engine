@@ -65,7 +65,24 @@ fn refused_row_diagnostics(ctx: &Ctx, path: &Path) -> Result<Vec<Diagnostic>> {
     let file = path.display().to_string();
     qubitick_parse::tolerate_prose(false);
     match qubitick_parse::parse_content(ctx, &src) {
-        Ok(_) => Ok(Vec::new()),
+        /* A FILE THAT PARSES CAN STILL CARRY A BODY THE PARSER COULD NOT READ.
+         *
+         * Tolerance keeps a `Sema:` it cannot resolve as the line's own text, so the file opens
+         * and the node exists — and the strict pass is the one that has to say so, because
+         * nothing else does: the emitter got as far as `cannot be rendered as a Lean term` (or
+         * the corpus reported a coverage hole in the CONSTRUCTOR files, which is a different
+         * file entirely). */
+        Ok(nodes) => {
+            let mut out: Vec<Diagnostic> = Vec::new();
+            for n in &nodes {
+                if let qubitick_model::Node::Definition(d) = n
+                    && let Some(said) = qubitick_parse::sema_refusal(ctx, d)
+                {
+                    out.push(refusal(&said, &file, &src));
+                }
+            }
+            Ok(out)
+        }
         Err(e) => Ok(vec![refusal(&format!("{e:#}"), &file, &src)]),
     }
 }

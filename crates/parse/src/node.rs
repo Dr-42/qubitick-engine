@@ -576,6 +576,21 @@ fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> R
     for (k, v) in fields {
         match k.as_str() {
             "sema" => {
+                /* `Sema:` WITH NO BODY STATES NOTHING.
+                 *
+                 * Written alone (or with the body still to come) it is not an empty
+                 * expression: it is a definition that declares a glyph and then says nothing
+                 * about it. Kept as an empty raw text, the node reached the emitter as a body
+                 * that "cannot be rendered as a Lean term", naming neither the field nor the
+                 * file's mistake. `Type:` with no argument is refused the same way, right
+                 * above. */
+                if v.trim().is_empty() {
+                    bail!(
+                        "`Sema:` states no body: write the operator's meaning on the line \
+                         after it (`Sema:` then `a \\star b = ...`), one expression with the \
+                         cases joined by a declared connective and parenthesised."
+                    );
+                }
                 // Sema: is an Eq-level relation; it is the atom's meaning.
                 let exclude = symbol_id_for_glyph(ctx, glyph.as_deref());
                 crate::parser::exclude_connective(exclude);
@@ -1061,6 +1076,48 @@ pub fn row_refusal(ctx: &Ctx, text: &str) -> Option<String> {
         Ok(_) => None,
         Err(e) => Some(format!("{e:#}")),
     }
+}
+
+/// The sentence a `Sema:` body earns when the corpus cannot read it, or `None`.
+///
+/// Tolerance is what lets a file open while it is being written: a body the parser cannot read
+/// is kept as the line's own text (`Expr::Var`), and the node still exists. Nothing then NAMES
+/// the body — the build reported the emitter's `cannot be rendered as a Lean term` when it got
+/// that far, or a coverage hole in the CONSTRUCTOR files when it did not. The strict pass asks
+/// here instead, and the sentence is the parser's own: it names the glyph that stopped it.
+pub fn sema_refusal(ctx: &Ctx, d: &qubitick_model::Definition) -> Option<String> {
+    use qubitick_model::Expr;
+    let Some(qubitick_model::FormBody::MacroExpr(Expr::Var(raw))) = &d.d_block.form else {
+        return None;
+    };
+    // A body that RESOLVED is not a `Var` at all, and a body that is ONE IDENTIFIER is a name
+    // the corpus wrote and the parser read (a body that is not an equation is the emitter's
+    // refusal, naming the field). Everything else is source text kept for the report.
+    let ident = !raw.is_empty()
+        && raw
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+        && raw
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '\'');
+    if ident {
+        return None;
+    }
+    let exclude = symbol_id_for_glyph(ctx, Some(""));
+    crate::parser::exclude_connective(exclude);
+    crate::parser::in_sema_body(true);
+    let said = crate::semantic::parse_expr(raw.trim(), ctx)
+        .map(|_| None)
+        .unwrap_or_else(|e| Some(format!("{e:#}")));
+    crate::parser::in_sema_body(false);
+    crate::parser::exclude_connective(0);
+    said.map(|why| {
+        format!(
+            "`Sema:` body for `{}` cannot be read: {why}",
+            d.base.name
+        )
+    })
 }
 
 /// The sentence a THEOREM STATEMENT earns when the corpus cannot read it, or `None`.

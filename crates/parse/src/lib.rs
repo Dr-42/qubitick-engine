@@ -6,7 +6,7 @@
 pub mod atomic;
 pub mod lexer;
 pub mod node;
-pub use node::{row_refusal, statement_refusal};
+pub use node::{row_refusal, sema_refusal, statement_refusal};
 pub mod parser;
 pub mod semantic;
 

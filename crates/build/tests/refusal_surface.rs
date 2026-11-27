@@ -316,6 +316,42 @@ fn a_citation_of_a_node_that_does_not_exist_is_reported() {
 }
 
 #[test]
+fn a_sema_body_that_is_not_an_equation_is_refused_by_name() {
+    // `\tau_0 \oplus b` is an equation the author did not finish. Read as a term it "cannot be
+    // rendered", which names neither the field nor the missing `=`.
+    let files = formation_with(&[(
+        "Era0/Strata0/Definitions/D_S_05_Half.qbit",
+        "D.S.05. Half\na \\oplus b\nSema:\n\\tau_0 \\oplus b\n",
+    )]);
+    let dir = corpus("notanequation", &files);
+    let o = run(&dir, &[]);
+    assert!(!o.all_verified, "half an equation defines nothing");
+    assert!(
+        says(&o, "is not an equation"),
+        "the sentence names the field and the shape it wants: {}",
+        detail(&o)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_sema_with_no_body_at_all_is_refused_by_name() {
+    let files = formation_with(&[(
+        "Era0/Strata0/Definitions/D_S_05_Empty.qbit",
+        "D.S.05. Empty\na \\oplus b\nSema:\n",
+    )]);
+    let dir = corpus("emptybody", &files);
+    let o = run(&dir, &[]);
+    assert!(!o.all_verified, "a `Sema:` that states nothing declares nothing");
+    assert!(
+        says(&o, "states no body"),
+        "the refusal names the field: {}",
+        detail(&o)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_sema_section_that_misses_a_constructor_is_a_hole_and_the_build_says_where() {
     let files = formation_with(&[(
         "Era0/Strata0/Definitions/D_S_05_Part.qbit",

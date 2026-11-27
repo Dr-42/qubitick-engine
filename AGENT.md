@@ -100,6 +100,36 @@ the workspace, exports `LEAN_PATH`, and stops with a message naming what is miss
 matters; the bare commands above are the same thing. `QUBITICK_SANDBOX=1` selects the
 original sandbox's store path instead — nothing here depends on it.
 
+## State of the engine, for whoever works on it next
+
+What is SOLID, with the check that says so:
+
+- **Every corpus input either builds or is refused by name.** `crates/build/tests/refusal_surface.rs`
+  carries thirteen shapes a person plausibly writes — keyword glyphs, ground-owned names, unicode
+  operators, unknown punctuation, word-prefix glyphs, one-name-two-glyphs, a stray bare line, an
+  unparenthesised case chain, an undeclared operator, an empty `Type:`, an empty `Sema:`, a body
+  that is not an equation, an unknown `Role:`, a dangling citation, a partial case definition.
+- **No production path panics on corpus data.** Every prefix of every corpus file parses or is
+  refused (`crates/parse/tests/never_panics.rs`), and the arithmetic that once overflowed on a
+  reserved id is checked (`fn_variant`).
+- **One glyph, one Lean name, in every module.** Derived from the glyph alone: keywords take `_`,
+  ground-owned names and glyphs that read alike take `lx_` (`\Eq` → `lx_Eq`, `×` → `lx_times`).
+- **Diagnostics are per file and name the thing.** A row, a body, a glyph, a citation, a
+  constructor the cases miss, a name another glyph holds.
+- **The gates are green and clean**: `cargo test --workspace` (352), `cargo clippy
+  --workspace --all-targets` (no warnings), `node tools/check.mjs`, the starter ship, and both
+  `qubitick lake` shapes.
+
+What is OPEN, so nobody rediscovers it as a bug:
+
+- The Sema composition is evidence plus one fallback, not type inference: an operator whose body
+  constrains a parameter nowhere and which nothing uses is typed over `Prop`.
+- A glyph written inside another declaration's signature but declared nowhere renders as `Prop`
+  (a `Type:`-declared or ground-bound carrier renders as its name).
+- `qubitick lake --mesh` builds, but the five not-implemented HTTP routes below are still stubs.
+- The rewriter's `C.rec` branch takes the induction hypothesis when the compiled body uses it;
+  declaration-side recursion is not reachable from that crate.
+
 ## Ingestion order, and the traps in it
 
 Ingest is four passes over the same files, and the order is load-bearing:
@@ -156,6 +186,12 @@ Consequences that have bitten:
   `glyph_line_refusal`): three or more tokens whose middle token is no operator name nothing
   (`a foo b`), and the refusal quotes the line and lists the operators the corpus can read.
   One token is a glyph, two are a prefix declaration (`times a`).
+- **A body the parser could not read is NAMED by the strict reading** (`parse::sema_refusal`,
+  reported per file by `pipeline::refused_row_diagnostics`): tolerance keeps it as the line's
+  own text so the file opens, and that is a report owed to the author — before this, the file
+  said nothing and the complaint arrived as `cannot be rendered as a Lean term`, or as a
+  coverage hole in the CONSTRUCTOR files. A body that is not an equation at all
+  (`\tau_0 \oplus b`) and a `Sema:` with no body are refused where they are written.
 - **A partial case definition is a HOLE, named** (`crates/emit/src/definition.rs`,
   `missing_cases`): an operator over a two-constructor carrier with one case emits no `def`,
   and must not fall through to the term path — that path sees one parameter against two and

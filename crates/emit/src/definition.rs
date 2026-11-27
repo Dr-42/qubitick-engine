@@ -98,6 +98,22 @@ pub fn emit_definition_in(
              * give (`cannot be rendered as a Lean term ... simplify the body`) named neither
              * the glyph nor the file's mistake. It was also masked: the case machinery spoke
              * first, about a missing constructor, because one case really was missing. */
+            /* A `Sema:` BODY IS AN EQUATION, OR CASES OF ONE.
+             *
+             * The shapes are the format's: `lhs = rhs`, several of those joined by a declared
+             * connective, or a relational definition linked with the iff. Anything else — a
+             * bare application (`\tau_0 \oplus b`, an equation the author did not finish) — is
+             * not a definition, and reading it as a term made the emitter say `cannot be
+             * rendered as a Lean term ... simplify the body`, which names neither the field
+             * nor the missing `=`. */
+            if !is_definition_body(ctx, e) {
+                return Err(anyhow::anyhow!(
+                    "the `Sema:` body of `{name}` is not an equation.\n  A body states the \
+                     operator's meaning as `lhs = rhs` (or several of those joined by a \
+                     declared connective and parenthesised: `(A = B) \\land (C = D)`); a \
+                     relational definition links it with the iff."
+                ));
+            }
             if let Some(word) = undeclared_word(e) {
                 return Err(anyhow::anyhow!(
                     "the `Sema:` body of `{name}` names `{word}`, which no node declares.\n  \
@@ -862,6 +878,26 @@ fn undeclared_word(e: &qubitick_model::Expr) -> Option<String> {
     let mut out = None;
     walk(e, &mut out);
     out
+}
+
+/// Whether a `Sema:` body is one of the shapes a definition is written in: an equation, a
+/// conjunction of them, or a relational definition linked with the iff.
+fn is_definition_body(ctx: &Ctx, e: &qubitick_model::Expr) -> bool {
+    use qubitick_model::Expr;
+    let Expr::Apply(h, args) = e else { return false };
+    if args.len() != 2 {
+        return false;
+    }
+    let is_iff = ctx
+        .by_id(h.primary as i64)
+        .is_some_and(|r| qubitick_model::format::is_iff(&r.tex));
+    if h.primary == qubitick_model::EQ_SYM || is_iff {
+        return true;
+    }
+    if crate::module::is_conjunct_head(ctx, h.primary) {
+        return is_definition_body(ctx, &args[0]) && is_definition_body(ctx, &args[1]);
+    }
+    false
 }
 
 #[cfg(test)]

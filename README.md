@@ -201,7 +201,9 @@ Lean `inductive` and its constructor aliases. Several CASES of one operator are 
 expression, their equations joined by a declared connective and parenthesised —
 `(\tau_0 \oplus b = b) \land ((^+ a) \oplus b = ^+ (a \oplus b))` — because inside a
 `Sema:` a connective is a term and `=` binds left; a second bare line after the glyph line
-is refused, since a definition carries one body.
+is refused, since a definition carries one body. So is a `Sema:` with no body at all, and so
+is a body that is not an equation (`\tau_0 \oplus b`, an equation its author did not
+finish) — a definition SAYS something, and each of those three refusals names the field.
 
 **Precedence** is the charter's, not a glyph's: `Precedence:` lines run loosest first, and a
 glyph the table does not name binds looser than every glyph it does. Association is not
@@ -472,7 +474,7 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 51 targets, 348 tests, 2 ignored
+cargo test --workspace        # 52 targets, 352 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets     # clean: no warnings
 cargo build -p qubitick-cli
@@ -495,6 +497,7 @@ The tests that state a promise rather than a detail:
 |---|---|
 | `crates/build/tests/no_glyph_names.rs` | no corpus glyph appears as a string literal in the engine |
 | `crates/build/tests/declaration_authority.rs` | an undeclared operator fails naming the glyph; declaring it makes the same corpus verify |
+| `crates/parse/tests/never_panics.rs` | every prefix of a corpus file — including one that ends mid-character — parses or is refused, never panics; and a body the tolerant pass keeps as text is named by `sema_refusal` |
 | `crates/build/tests/refusal_surface.rs` | hostile-but-plausible input: a keyword glyph, a ground-owned name, an unknown punctuation glyph and a unicode operator BUILD; a second bare line, an unparenthesised case chain, an undeclared operator, an empty `Type:`, an unknown `Role:`, a dangling citation and a partial case definition are each REFUSED, by name |
 | `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors; its operators are typed over the carrier; an operator defined through another one is typed BY it, and imports that module; a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive again; a `Sema:` of cases becomes a definition over the recursor; and an induction over that operator VERIFIES, its recursive branch taking the hypothesis |
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
