@@ -428,6 +428,8 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/no_prose_in_a_proof.rs` | a sentence in a proof still lets the corpus OPEN, the build reports the row, and a refused row is not also an admitted theorem |
 | `crates/build/tests/undeclared_operator.rs` | an operator nothing declares is named, in a statement and in a proof row |
 | `crates/build/tests/pdf_export.rs` | two nodes never share a cite id, the preamble carries what the body uses, display maths never opens in a text run, and the ship's document compiles when an engine is installed |
+| `tools/verify-dock.mjs` | the shell: four docks, three presets, the Custom slot, splitter drag and reset, collapse, reload, the keyboard chords, no console errors |
+| `tools/verify-project-switch.mjs` | a layout belongs to its corpus: switching projects does not inherit one, and coming back restores it |
 | `crates/build/tests/print_axioms.rs` | an Init ground prints Init's three, the bare prelude prints nothing, and the ship stands on nothing |
 | `crates/build/tests/coverage.rs` | an A-block glyph with no D node fails naming it; the shipped ship homes every glyph its A blocks write; and `scaffold` writes the chain |
 | `crates/build/tests/emission_surface.rs` | no module emits an `axiom`; a ground-named glyph declares nothing; a sort word is a literal; a cross-module definition is imported; a `Type:` with no name is refused |
@@ -480,6 +482,41 @@ relocate them). It is opt-in: nothing in the repository depends on those paths.
 
 `web-next/` is the client the server serves. `corpus-templates/algebra/` is the starter
 corpus. `prelude/Qubitick/HL.lean` is the embedded base ground.
+
+### The workspace: a docking shell, and a canvas
+
+`/` serves the **docking shell** (`web-next/dock.html`): a corpus tree on the left, the
+editor in the centre, what the caret implies on the right, the build below, and a status
+strip under all of it. `/index.html` is the **canvas** — a pannable world of tiles, for
+laying a corpus out spatially — and the strip links to it. Both pages boot the same
+`web-next/js/main.js`, mount the same pane modules, and honour the same theme files.
+
+| preset | what it is for |
+|---|---|
+| **Minimal** (`Ctrl+Alt+1`) | editor full width, the side docks railed to a spine, the bottom dock railed. For writing. |
+| **Standard** (`Ctrl+Alt+2`) | tree 18%, editor 52%, right dock 30% (Goal over Lean/Render/Graph/Symbols), bottom 22% (Diagnostics, Build, Graph). Stats is not shown until the palette opens it. |
+| **Power** (`Ctrl+Alt+3`) | tree over outline/graph on the left, two editors in the centre, four groups on the right (Goal, Steps/Symbols, Lean/Render, Stats), Diagnostics and Build side by side below. |
+| **Custom** (`Ctrl+Alt+0`) | whatever you last arranged: any drag, collapse, tab or opened panel fills this slot, and it is restored on reload. |
+
+| chord | does |
+|---|---|
+| `Ctrl+1..9` | focus the Nth visible panel |
+| `Ctrl+Alt+1/2/3`, `Ctrl+Alt+0` | Minimal / Standard / Power / Custom |
+| `Ctrl+Alt+R` | reset the layout to its preset |
+| `Ctrl+B`, `Ctrl+J`, `Ctrl+\` | toggle the left, bottom and right dock |
+| `Ctrl+K` | the command palette (every command and every panel, with its chord) |
+| `Ctrl+Enter` | run the corpus check |
+
+Splitters drag between docks and between the groups inside one; each dock has a minimum and a
+viewport-relative maximum, and double-clicking a splitter puts that split back to the size the
+layout came up with. The layout is stored **per project** in `localStorage`
+(`qubitick.dock.v1.<project>`), so two corpora get two arrangements, and a stored layout is
+normalised on the way in — a panel this build does not ship cannot paint an empty dock.
+
+`docs/layouts/` holds a screenshot of each preset in two themes; `tools/shots-layouts.mjs`
+takes them and `tools/verify-dock.mjs` + `tools/verify-project-switch.mjs` drive the shell
+the way a person does (presets, drags, the Custom slot, a reload, a project switch) and fail
+on a console error.
 
 ---
 
