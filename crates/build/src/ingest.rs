@@ -1646,7 +1646,39 @@ fn lean_name(tex: &str) -> String {
     if LEAN_KEYWORDS.contains(&s.as_str()) {
         s.push('_');
     }
+    /* A NAME THE GROUND OWNS IS THE GROUND'S: THE GLYPH TAKES A LETTER CODE.
+     *
+     * Every module is emitted inside `namespace Qubitick.HL` and the ground declares its
+     * names at that namespace's ROOT (`Eq`, `False`, `And`, ...). A corpus glyph that
+     * derived one of those names does not collide — it SHADOWS: `\Eq` became `def Eq : tau
+     * → tau → tau`, and from that line on, every `Eq` written in the module meant the
+     * corpus's operator, including the kernel equality the emitter itself had written. The
+     * corpus still parsed and `qubitick build` still said the files verified; the damage
+     * surfaced in an UNRELATED file as `Unknown constant CoeSort`, because a theorem's type
+     * had silently become an operator application.
+     *
+     * The answer is a name no declaration can reach: `lx_` and then the derived name
+     * (`\Eq` → `lx_Eq`). A LaTeX control word cannot contain `_`, so no glyph in any corpus
+     * can derive it, and the code is derived ONLY from the glyph — the same glyph always
+     * gets the same name, in every module. */
+    if ground_owned_name(&s) {
+        return format!("{LETTER_CODE}{s}");
+    }
     s
+}
+
+/// The prefix a glyph takes when its own derived name would take one the ground owns.
+const LETTER_CODE: &str = "lx_";
+
+/// Whether the GROUND already declares this name.
+///
+/// The list is the emitter's contract (`prelude_contract::REQUIRED`) — the names every
+/// ground must carry, in three tiers — with each dotted name reduced to its bare first
+/// segment (`Eq.refl` is a member of `Eq`, not a name of its own).
+fn ground_owned_name(name: &str) -> bool {
+    crate::prelude_contract::REQUIRED
+        .iter()
+        .any(|(n, _)| n.split('.').next() == Some(name))
 }
 
 #[cfg(test)]
@@ -2406,5 +2438,26 @@ mod tests {
 
         let head = head_control_word("a = b");
         assert_eq!(head.as_deref(), Some("="), "head_control_word must return `=` for 'a = b'");
+    }
+
+    /* A GLYPH THAT WOULD TAKE A NAME THE GROUND OWNS GETS A LETTER CODE.
+     *
+     * The modules are emitted inside `namespace Qubitick.HL`, where the ground declares `Eq`
+     * at the root. A corpus glyph deriving `Eq` does not clash with it — it SHADOWS it for
+     * every line after its own declaration, including the kernel equality the emitter wrote
+     * there, and the corpus still reported "verified" while an unrelated theorem's type had
+     * become an operator application (`Unknown constant CoeSort`). The name it takes instead
+     * is one no declaration can reach, and it is derived from the glyph alone.
+     */
+    #[test]
+    fn a_name_the_ground_owns_is_letter_coded() {
+        assert_eq!(lean_name("\\Eq"), "lx_Eq", "`\\Eq` would shadow the kernel equality");
+        assert_eq!(lean_name("\\And"), "lx_And", "and `\\And` the ground's conjunction");
+        assert_eq!(lean_name("\\lcAny"), "lx_lcAny", "and the codegen markers");
+        // A name the ground does NOT own keeps its own reading, and a keyword is still
+        // escaped rather than coded: the two rules answer different questions.
+        assert_eq!(lean_name("\\iota"), "iota");
+        assert_eq!(lean_name("\\mathrm{Eq}"), "mathrm_Eq");
+        assert_eq!(lean_name("\\in"), "in_");
     }
 }

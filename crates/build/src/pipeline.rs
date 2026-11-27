@@ -459,6 +459,66 @@ pub fn emit_file_cached(
     emit_file_with(ctx, conn, path, cache, &opts)
 }
 
+/// The corpus's own definitions, read from SOURCE, join every module's context.
+///
+/// A source node is the only copy carrying the authored `Type:` signature, and — since a
+/// `Sema:` is a recipe for its operator's type — the only copy that says what an operator
+/// defined by a `Sema:` IS. An operator written in terms of another one
+/// (`a \otimes b = (a \oplus b) \oplus b`) has no sort of its own to read unless the operator
+/// it is written with is in scope, and that operator is a different file's node. Entering the
+/// context is neither re-emitting nor importing: the frame still declares only this module's
+/// own text, and the imports it owes are derived from the names it writes.
+///
+/// A source node enters when it carries the authored `Type:`, when it DECLARES A FORMATION
+/// (the module emits that inductive and types its carrier), when its `Sema:` is a recursive
+/// tick-operator equation (the operator emits as a recursor `def`), or when its `Sema:` is a
+/// case definition — which is every `Sema:` there is, because every `Sema:` states its
+/// operator's type. A node already in `context` is replaced, so the source copy wins and the
+/// division moves with the symbol it was keyed by.
+fn load_source_definitions(
+    ctx: &Ctx,
+    path: &Path,
+    cache: &mut EmitCache,
+    context: &mut Vec<qubitick_model::Node>,
+    def_index: &mut std::collections::HashMap<u32, u32>,
+) {
+    let src_key = format!("{}|{}", ctx.scope(), corpus_root(path).display());
+    let src_nodes = cached_sources(ctx, path, cache, &src_key);
+    for node in src_nodes.iter().cloned() {
+        if let qubitick_model::Node::Definition(d) = &node {
+            let recursor = d
+                .d_block
+                .form
+                .as_ref()
+                .is_some_and(|f| is_recursor_sema_form(f, ctx));
+            let formation = matches!(
+                d.d_block.form,
+                Some(qubitick_model::FormBody::Formation(_))
+            );
+            let sema = matches!(d.d_block.form, Some(qubitick_model::FormBody::MacroExpr(_)));
+            if !(d.d_block.sig.is_some() || recursor || formation || sema) {
+                continue;
+            }
+            match context.iter_mut().find(|n| {
+                matches!(n, qubitick_model::Node::Definition(e) if e.base.name == d.base.name)
+            }) {
+                Some(slot) => {
+                    // Transfer the division from the old definition to the new one's
+                    // symbol.primary so def_index stays correct.
+                    if let qubitick_model::Node::Definition(old_def) = slot {
+                        let old_primary = old_def.symbol.primary;
+                        if let Some(division) = def_index.remove(&old_primary) {
+                            def_index.insert(d.symbol.primary, division);
+                        }
+                    }
+                    *slot = node;
+                }
+                None => context.push(node),
+            }
+        }
+    }
+}
+
 /// As [`emit_file_cached`], but with emission options — the meshed package asks for
 /// `Ground::External` (no frame, no class chain, no assumed lemmas) while keeping
 /// the context assembly here, which is the part that made a re-derived context
@@ -496,20 +556,21 @@ pub fn emit_file_with(
     // every theorem module.
     let mut def_index: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
     let mut context: Vec<qubitick_model::Node> = Vec::new();
-    // A definition's own module emits its Sema directly; it does not re-import the
-    // definition corpus the way theorem/axiom modules must (to resolve citations,
-    // class chains, and the authored `Type:` of glyphs like `\Vert` in A4). Loading
-    // the definition corpus as context for a DEFINITION file collided with its own
-    // emitted body (a `def times ... := tau_0` typed over `Prop` when the frame now
-    // types `\times_\tau` over `tau`). So only axioms and theorems merge the corpus.
+    // The corpus's DEFINITIONS reach a module two ways, and they are not the same load. The
+    // DB-REBUILT nodes below are context for a theorem/axiom module, which resolves citations,
+    // class chains and authored signatures through them; a definition's own module does not
+    // take them, because the rebuilt copy of the very glyph it defines carries no authored
+    // `Type:` and would shadow the module's own declaration of it. The SOURCE nodes reach
+    // every module (`load_source_definitions`): a `Sema:` is what says what an operator IS,
+    // and a module written in terms of another operator needs that operator's declaration.
     /* THE AXIOM CHAIN IS CONTEXT FOR EVERY KIND OF FILE — including a DEFINITION.
      *
      * A definition's module hypothesizes the instance its corpus's class chain names
      * (`section variable [R : Comm]`), because a body written in the corpus's
      * vocabulary reaches its ground symbols through it (`R.plus`). It is context, not
      * content: the chain is the GROUND's to declare, and a node module never emits it.
-     * So the load below is ungated, while the DEFINITIONS load stays gated — those
-     * collide with a definition's own body. */
+     * So the load below is ungated, while the DB-REBUILT definitions load stays gated to
+     * theorem/axiom modules. */
     {
         {
             // Theorems also load the axiom classes they cite.
@@ -531,9 +592,13 @@ pub fn emit_file_with(
             }
         }
     }
-    /* The DEFINITIONS corpus is context only for a theorem/axiom module: a
-       definition's own module emits its body, and loading the corpus for it collided
-       with that body (`def times ... := tau_0` typed over `Prop`). */
+    /* THE DB-REBUILT DEFINITIONS ARE CONTEXT FOR A THEOREM/AXIOM MODULE ONLY.
+     *
+     * A theorem resolves citations, class chains and authored signatures through them. A
+     * definition's own module does not need them, and holding them was harmful: the rebuilt
+     * copy of the very glyph the module defines carries no authored `Type:`, and it shadowed
+     * the module's own declaration (`def times ... := tau_0` typed over `Prop`). The SOURCE
+     * nodes below are loaded for every module — see the rule there. */
     if nodes.iter().any(|n| {
         matches!(n, qubitick_model::Node::Theorem(_) | qubitick_model::Node::Axiom(_))
     }) {
@@ -552,48 +617,27 @@ pub fn emit_file_with(
             }
             context.push(node.clone());
         }
-        // Replace each definition with its SOURCE-parsed form, the only one carrying
-        // the authored `Type:` signature (see `load_definition_sources`). Match on the
-        // node NAME (the source parse resolves a glyph line by its FIRST control word,
-        // which can land on a different id than the DB-rebuilt definition). Only a
-        // source node that CARRIES `Type:` may replace a context node — duplicates
-        // parsed without a sig must not clobber a sig-bearing one.
-        let src_key = format!("{}|{}", ctx.scope(), corpus_root(path).display());
-        let src_nodes = cached_sources(ctx, path, cache, &src_key);
-        for node in src_nodes.iter().cloned() {
-            if let qubitick_model::Node::Definition(d) = &node {
-                // A source node may enter context when it carries the authored
-                // `Type:` (so the frame knows a glyph's declared type), when it
-                // DECLARES A FORMATION (so the module emits that inductive and types
-                // its carrier), or when its `Sema:` is a recursive tick-operator
-                // equation (so the module can emit the operator as a recursor `def`
-                // instead of a bare `axiom`).
-                let recursor = d.d_block.form.as_ref().is_some_and(|f| is_recursor_sema_form(f, ctx));
-                let formation = matches!(
-                    d.d_block.form,
-                    Some(qubitick_model::FormBody::Formation(_))
-                );
-                if d.d_block.sig.is_some() || recursor || formation {
-                    match context.iter_mut().find(|n| {
-                        matches!(n, qubitick_model::Node::Definition(e) if e.base.name == d.base.name)
-                    }) {
-                        Some(slot) => {
-                            // Transfer the division from the old definition to the new
-                            // one's symbol.primary so def_index stays correct.
-                            if let qubitick_model::Node::Definition(old_def) = slot {
-                                let old_primary = old_def.symbol.primary;
-                                if let Some(division) = def_index.remove(&old_primary) {
-                                    def_index.insert(d.symbol.primary, division);
-                                }
-                            }
-                            *slot = node;
-                        }
-                        None => context.push(node),
-                    }
-                }
-            }
-        }
     }
+    /* THE CORPUS'S OWN DEFINITIONS, AS SOURCE, ENTER EVERY MODULE'S CONTEXT.
+     *
+     * A source node is the only copy carrying the authored `Type:` signature, and — since a
+     * `Sema:` is a recipe for its operator's type — the only copy that says what an operator
+     * defined by a `Sema:` IS. An operator written in terms of another one
+     * (`a \otimes b = (a \oplus b) \oplus b`) has no sort to read unless the operator it is
+     * written with is in scope, and that operator is declared in another file. Entering the
+     * context is not re-emitting and not importing: the frame still declares only this
+     * module's own text, and the imports it owes are derived from the names it writes. */
+    /* THE CORPUS'S OWN DEFINITIONS, AS SOURCE, ENTER EVERY MODULE'S CONTEXT.
+     *
+     * A source node is the only copy carrying the authored `Type:` signature, and — since a
+     * `Sema:` is a recipe for its operator's type — the only copy that says what an operator
+     * defined by a `Sema:` IS. An operator written in terms of another one
+     * (`a \otimes b = (a \oplus b) \oplus b`) has no sort of its own to read unless the
+     * operator it is written with is in scope, and that operator is declared in another file.
+     * Entering the context is not re-emitting and not importing: the frame still declares
+     * only this module's own text, and the imports it owes are derived from the names it
+     * writes. */
+    load_source_definitions(ctx, path, cache, &mut context, &mut def_index);
     // Formations (declarative custom inductives) must be in EVERY module's context so
     // operators defined by recursion over a formation can be emitted as `{carrier}.rec`
     // recursor defs. They are not re-emitted; they contribute their constructor algebra.

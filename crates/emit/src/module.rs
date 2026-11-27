@@ -189,6 +189,17 @@ fn split_node(
 }
 const FN_OFFSET: u32 = 1_000_000_000;
 
+/// The `_fn` variant of a symbol id, when the id can have one.
+///
+/// The declaration format reserves the two ids at the top of the range (`=` is
+/// `u32::MAX - 1`), and the offset sits a billion below it: adding it to a reserved id
+/// overflowed, and an `=`-headed definition — a `Sema:` written without the parentheses its
+/// cases need — took the whole build down with an arithmetic panic instead of being reported
+/// as the corpus mistake it is. A reserved id has no `_fn` variant, which is what `None` says.
+fn fn_variant(id: u32) -> Option<u32> {
+    id.checked_add(FN_OFFSET)
+}
+
 /// Dual-use polysymbol split, recursed over the whole proof IR tree.
 ///
 /// A theorem's proof chains are parsed from source with the BARE symbol id for an
@@ -293,9 +304,10 @@ fn split_expr(
 ) {
     match e {
         Expr::Apply(h, args) => {
-            if dual.contains(&h.primary) {
+            if dual.contains(&h.primary)
+                && let Some(fn_id) = fn_variant(h.primary)
+            {
                 let base = crate::lean_name_of(ctx, h.primary);
-                let fn_id = h.primary + FN_OFFSET;
                 fn_names
                     .entry(fn_id)
                     .or_insert_with(|| format!("{base}_fn"));
@@ -354,11 +366,9 @@ pub(crate) fn definition_decl_name(
     d: &qubitick_model::Definition,
     fn_names: &std::collections::HashMap<u32, String>,
 ) -> String {
-    let id = if fn_names.contains_key(&(d.symbol.primary + FN_OFFSET)) {
-        d.symbol.primary + FN_OFFSET
-    } else {
-        d.symbol.primary
-    };
+    let id = fn_variant(d.symbol.primary)
+        .filter(|v| fn_names.contains_key(v))
+        .unwrap_or(d.symbol.primary);
     crate::resolver(ctx, fn_names)(id)
 }
 
@@ -687,14 +697,172 @@ fn leaf_carriers(
     out
 }
 
+/// The sorts a `Sema:` composition has learned about an operator: one entry per parameter
+/// position, and its result.
+///
+/// Kept apart from the frame's signatures while the reading runs, because the reading is a
+/// fixpoint over the corpus's own definitions and the frame's signatures also hold what the
+/// corpus's USES were observed to say. The composition is written into the frame at the end,
+/// where it has the last word about the operator it defines.
+type Composed = HashMap<u32, (Vec<Option<u32>>, Option<u32>)>;
+
+/// The conjuncts of a body: the equation itself, or the `\land` chain of equations a corpus
+/// writes to state several cases at once.
+fn split_conjuncts<'a>(ctx: &Ctx, x: &'a qubitick_model::Expr, out: &mut Vec<&'a qubitick_model::Expr>) {
+    use qubitick_model::Expr;
+    match x {
+        Expr::Apply(h, args) if args.len() == 2 && is_conjunct_head(ctx, h.primary) => {
+            split_conjuncts(ctx, &args[0], out);
+            split_conjuncts(ctx, &args[1], out);
+        }
+        other => out.push(other),
+    }
+}
+
+/// A carrier is usable only when the corpus DECLARES it as a sort.
+///
+/// A glyph written inside a signature, declared nowhere (`Type: plus : \mathfrak{R} \to
+/// \mathfrak{R} \to \mathfrak{R}` in a corpus with no `\mathfrak{R}` node), names no Lean type
+/// this module could write: nothing declares it, and the ordinary rendering of such a glyph
+/// in a TYPE is the module's carrier (`Prop`) — see `resolver_with_sorts`, which is what
+/// renders the statements of the same corpus. Reading it as a carrier here put `mathfrak_R`
+/// into a type the frame never declared, and the emitted module failed to elaborate with an
+/// `Unknown identifier` nobody could trace to a signature they had not written in that file.
+fn declared_sort(ctx: &Ctx, env: &SortEnv, c: Option<u32>) -> Option<u32> {
+    c.filter(|id| declares_sort(ctx, env, *id))
+}
+
+/// Whether the corpus gives this glyph a meaning a type can be written over.
+///
+/// Three ways a glyph is something: the corpus declares it a FORMATION (an inductive the
+/// emitter generates), it declares it a SPACE with a `Type:` of its own, or it names a name
+/// the GROUND owns (`Type: E` — the ground says what `E` is, and the module writes it). A
+/// glyph that appears only INSIDE somebody else's signature has none of the three: nothing
+/// declares it, so it names no Lean type, and the module's own carrier is what a type
+/// position over it renders as.
+fn declares_sort(ctx: &Ctx, env: &SortEnv, id: u32) -> bool {
+    env.sorts.contains(&id)
+        || ctx
+            .by_id(id as i64)
+            .is_some_and(|r| r.kind == "bound")
+}
+
+/// The sort an operator RETURNS: what it has already composed, else what its own `Type:`
+/// states, else what the corpus's uses of it were observed to say.
+fn result_sort_of(
+    authored: &HashMap<u32, AuthoredType>,
+    composed: &Composed,
+    sigs: &HashMap<u32, GlyphSig>,
+    ctx: &Ctx,
+    env: &SortEnv,
+    id: u32,
+) -> Option<u32> {
+    if let Some((_, r)) = composed.get(&id)
+        && r.is_some()
+    {
+        return *r;
+    }
+    if let Some(auth) = authored.get(&id)
+        && auth.res.is_some()
+    {
+        return declared_sort(ctx, env, auth.res);
+    }
+    sigs.get(&id).and_then(|s| s.res_carrier)
+}
+
+/// The sort an operator's `i`th parameter is written at, by the same precedence: what its
+/// own `Sema:` has established about that position, else its own `Type:` signature — which
+/// states every position or none (`Type: E` states none) — else the observed uses.
+fn param_sort_of(
+    authored: &HashMap<u32, AuthoredType>,
+    composed: &Composed,
+    sigs: &HashMap<u32, GlyphSig>,
+    ctx: &Ctx,
+    env: &SortEnv,
+    id: u32,
+    i: usize,
+) -> Option<u32> {
+    if let Some((args, _)) = composed.get(&id)
+        && args.get(i).copied().flatten().is_some()
+    {
+        return args.get(i).copied().flatten();
+    }
+    if let Some(auth) = authored.get(&id)
+        && auth.args.iter().any(|a| a.is_some())
+    {
+        return declared_sort(ctx, env, auth.args.get(i).copied().flatten());
+    }
+    sigs.get(&id)
+        .and_then(|s| s.arg_carrier.get(i).copied().flatten())
+}
+
+/// The sort a TERM is written at, as far as the corpus's own declarations say.
+///
+/// A constant carries its `Type:`; an application carries the result sort of its head — a
+/// constructor's carrier, a primitive's declared result, or an operator's own composed
+/// result, which is what makes a definition written IN TERMS OF another operator typed
+/// rather than a lump of `Prop`; a metavariable carries nothing here — its sort is stated
+/// where the corpus puts it (`note_var_sorts`), never by the term itself.
+fn sort_of_term(
+    authored: &HashMap<u32, AuthoredType>,
+    composed: &Composed,
+    sigs: &HashMap<u32, GlyphSig>,
+    leaves: &HashMap<u32, u32>,
+    ctx: &Ctx,
+    env: &SortEnv,
+    e: &qubitick_model::Expr,
+) -> Option<u32> {
+    use qubitick_model::Expr;
+    let head = match e {
+        Expr::Sym(ac) => ac.primary,
+        Expr::Apply(h, _) => h.primary,
+        _ => return None,
+    };
+    leaves
+        .get(&head)
+        .copied()
+        .or_else(|| env.carrier_of_head(head))
+        .or_else(|| result_sort_of(authored, composed, sigs, ctx, env, head))
+}
+
+/// The sorts an expression states for the VARIABLES it mentions.
+///
+/// A metavariable's sort is stated at an operator's parameter position and nowhere else: in
+/// `(a \oplus b) \oplus b` no term is a constant and no term is a constructor, and `a` and `b`
+/// sit where `\oplus`'s own signature puts its parameters. Read without this, a definition
+/// composed out of other definitions — the ordinary case for a corpus that builds its
+/// arithmetic up — had no evidence about its own arguments and fell to `Prop`.
+fn note_var_sorts(
+    authored: &HashMap<u32, AuthoredType>,
+    composed: &Composed,
+    sigs: &HashMap<u32, GlyphSig>,
+    ctx: &Ctx,
+    env: &SortEnv,
+    e: &qubitick_model::Expr,
+    out: &mut HashMap<String, u32>,
+) {
+    use qubitick_model::Expr;
+    let Expr::Apply(h, args) = e else { return };
+    for (i, a) in args.iter().enumerate() {
+        if let (Expr::Var(v), Some(c)) =
+            (a, param_sort_of(authored, composed, sigs, ctx, env, h.primary, i))
+        {
+            out.entry(v.clone()).or_insert(c);
+        }
+    }
+    for a in args {
+        note_var_sorts(authored, composed, sigs, ctx, env, a, out);
+    }
+}
+
 /// Read every definition's `Sema:` as a recipe for its operator's type.
 ///
-/// Sections are `lhs = rhs` where `lhs` applies the operator being defined. The carrier
-/// each argument is written at comes from the pattern (a constant of a declared sort, or
-/// an application whose head returns one), and the section establishes the RESULT sort:
-/// a componentwise definition over `\tau` returns a `\tau`. Positions the patterns leave
-/// open take the carrier the section establishes, which is the reading that makes
-/// `\tau_0 \oplus b = b` say `b : \tau`.
+/// Sections are `lhs = rhs` where `lhs` applies the operator being defined. The sort each
+/// argument is written at comes from the term in it — a constant of a declared sort, an
+/// application whose head returns one, a variable at a parameter position of a known operator
+/// — and the section establishes the RESULT sort: a componentwise definition over `\tau`
+/// returns a `\tau`. What the corpus leaves open stays open, and the frame's observation of
+/// the corpus's uses answers for it.
 fn types_from_semas(
     ctx: &Ctx,
     nodes: &[Node],
@@ -704,26 +872,17 @@ fn types_from_semas(
 ) {
     use qubitick_model::Expr;
     let leaves = leaf_carriers(ctx, authored, env);
+    // Every defining equation the module's scope holds, in node order: the operator the
+    // section defines, the operands it is applied to, and its body.
+    let mut sections: Vec<(u32, Vec<Expr>, Expr)> = Vec::new();
     for n in nodes {
         let Node::Definition(d) = n else { continue };
         let Some(FormBody::MacroExpr(e)) = &d.d_block.form else {
             continue;
         };
-        // the sections: the body itself, or the conjuncts of a `\land` chain of them
-        let mut sections: Vec<&Expr> = Vec::new();
-        fn split<'a>(ctx: &Ctx, x: &'a Expr, out: &mut Vec<&'a Expr>) {
-            match x {
-                Expr::Apply(h, args)
-                    if args.len() == 2 && crate::module::is_conjunct_head(ctx, h.primary) =>
-                {
-                    split(ctx, &args[0], out);
-                    split(ctx, &args[1], out);
-                }
-                other => out.push(other),
-            }
-        }
-        split(ctx, e, &mut sections);
-        for section in sections {
+        let mut parts: Vec<&Expr> = Vec::new();
+        split_conjuncts(ctx, e, &mut parts);
+        for section in parts {
             let Expr::Apply(h, sides) = section else { continue };
             if h.primary != EQ_SYM || sides.len() != 2 {
                 continue;
@@ -732,70 +891,115 @@ fn types_from_semas(
             if head.primary != d.symbol.primary || args.is_empty() {
                 continue;
             }
+            sections.push((head.primary, args.clone(), sides[1].clone()));
+        }
+    }
+    /* AN OPERATOR'S BODY NAMES OTHER OPERATORS, SO ITS TYPE IS COMPOSED FROM THEIRS.
+     *
+     * `a \otimes b = (a \oplus b) \oplus b` holds no constant and no constructor at all: both
+     * its parameters and its result are `\oplus`'s, and `\oplus`'s own signature comes from
+     * ANOTHER `Sema:` — in another node, or another module of the same scope. Read once in
+     * node order, `\otimes` was typed `Prop → Prop → Prop` whenever the operator it is
+     * written in terms of was read after it, which is every corpus that defines an operator
+     * on top of one defined above it. So the reading is a fixpoint: a pass learns what the
+     * signatures now state, and it ends when a whole pass learns nothing. A position keeps
+     * the first sort a section states for it, so the answer does not depend on how many
+     * passes it took to find. */
+    let mut composed: Composed = Composed::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (own, args, rhs) in &sections {
             /* WHAT EACH ARGUMENT POSITION IS USED AT, read off the term in it: a constant's
-               `Type:`, an application's result sort, a constructor's carrier. This is the ONLY
-               evidence a Sema gives about a position. Writing the section's carrier into every
-               open slot instead typed `a \star b` — a `\tau` and an `\iota` operator — as
-               `tau → tau → tau`, after which its `\iota` argument could not be applied. */
+               `Type:`, an application's result sort, a constructor's carrier, a variable's
+               parameter position. This is the ONLY evidence a Sema gives about a position.
+               Writing the section's carrier into every open slot instead typed `a \star b` —
+               a `\tau` and an `\iota` operator — as `tau → tau → tau`, after which its
+               `\iota` argument could not be applied. */
+            let mut var_sorts: HashMap<String, u32> = HashMap::new();
+            note_var_sorts(authored, &composed, sigs, ctx, env, rhs, &mut var_sorts);
             let mut constrained: Vec<Option<u32>> = args
                 .iter()
-                .map(|a| sort_of_term(&leaves, env, a))
+                .map(|a| match a {
+                    Expr::Var(v) => var_sorts.get(v).copied(),
+                    other => sort_of_term(authored, &composed, sigs, &leaves, ctx, env, other),
+                })
                 .collect();
             // The section is written over the carrier its patterns name.
             let section_carrier = constrained.iter().flatten().next().copied();
-            let rhs_sort = sort_of_term(&leaves, env, &sides[1]);
+            let rhs_sort = sort_of_term(authored, &composed, sigs, &leaves, ctx, env, rhs);
             let result = rhs_sort.or(section_carrier);
             /* THE EQUATION TIES THE REMAINING SORT: `\tau_0 \oplus b = b` says the operator's
                result IS `b`, so `b` sits at the result's sort. That is what makes a homogeneous
                operator `tau → tau → tau` without the corpus restating its second argument. A
                position that appears nowhere else stays unknown: the observation from the
                corpus's uses answers for it, or the frame's default does. Nothing is invented. */
-            if let (Expr::Var(v), Some(r)) = (&sides[1], result) {
+            if let (Expr::Var(v), Some(r)) = (rhs, result) {
                 for (i, a) in args.iter().enumerate() {
                     if matches!(a, Expr::Var(w) if w == v) {
                         constrained[i] = Some(r);
                     }
                 }
             }
-            let sig = sigs.entry(head.primary).or_default();
-            if args.len() > sig.len {
-                sig.len = args.len();
-            }
-            sig.binder.resize(sig.len, false);
-            sig.arg_carrier.resize(sig.len, None);
-            for (i, c) in constrained.into_iter().enumerate() {
-                if let Some(c) = c {
-                    sig.arg_carrier[i] = Some(c);
+            /* A POSITION THE SECTION LEAVES OPEN TAKES THE CARRIER IT IS WRITTEN OVER.
+             *
+             * `a \times b = a + a` names `\mathfrak{R}` for `a` and says nothing about `b`
+             * — and an operator is not half-typed, so a module that wrote `times : R → Prop
+             * → R` would refuse the corpus's own applications of `times`. The carrier the
+             * section's patterns name is the answer, UNLESS the corpus's uses of the
+             * operator already say what sits there: an observation is evidence, and this is
+             * a reading of what the section's own carrier implies. Overwriting an observed
+             * `\iota` argument with the section's `\tau` typed a mixed-sort operator
+             * `tau → tau → tau` and broke every application of it. */
+            for (i, c) in constrained.iter_mut().enumerate() {
+                if c.is_none()
+                    && let Some(carrier) = section_carrier
+                    && sigs
+                        .get(own)
+                        .and_then(|s| s.arg_carrier.get(i).copied().flatten())
+                        .is_none()
+                {
+                    *c = Some(carrier);
                 }
             }
-            if let Some(r) = result {
-                sig.res_carrier = Some(r);
+            let entry = composed.entry(*own).or_insert_with(|| (Vec::new(), None));
+            if entry.0.len() < constrained.len() {
+                entry.0.resize(constrained.len(), None);
+                changed = true;
+            }
+            for (i, c) in constrained.iter().enumerate() {
+                if let Some(c) = c
+                    && entry.0[i].is_none()
+                {
+                    entry.0[i] = Some(*c);
+                    changed = true;
+                }
+            }
+            if let Some(r) = result
+                && entry.1.is_none()
+            {
+                entry.1 = Some(r);
+                changed = true;
             }
         }
     }
-}
-
-/// The sort a TERM is written at, as far as the corpus's own declarations say.
-///
-/// A constant carries its `Type:`; an application carries the result sort of its head (a
-/// constructor's carrier, a primitive's declared result); a metavariable carries nothing —
-/// its sort comes from where else it appears in the same equation, never from here.
-fn sort_of_term(
-    leaves: &HashMap<u32, u32>,
-    env: &SortEnv,
-    e: &qubitick_model::Expr,
-) -> Option<u32> {
-    use qubitick_model::Expr;
-    match e {
-        Expr::Sym(ac) => leaves
-            .get(&ac.primary)
-            .copied()
-            .or_else(|| env.carrier_of_head(ac.primary)),
-        Expr::Apply(h, _) => leaves
-            .get(&h.primary)
-            .copied()
-            .or_else(|| env.carrier_of_head(h.primary)),
-        _ => None,
+    // The composition has the last word: it is what the corpus SAYS the operator is, over an
+    // observation of what the corpus happens to do with it.
+    for (id, (args, res)) in composed {
+        let sig = sigs.entry(id).or_default();
+        if args.len() > sig.len {
+            sig.len = args.len();
+        }
+        sig.binder.resize(sig.len, false);
+        sig.arg_carrier.resize(sig.len, None);
+        for (i, c) in args.into_iter().enumerate() {
+            if let Some(c) = c {
+                sig.arg_carrier[i] = Some(c);
+            }
+        }
+        if let Some(r) = res {
+            sig.res_carrier = Some(r);
+        }
     }
 }
 
@@ -1025,6 +1229,19 @@ fn symbol_declarations(
     // typing decision below reads this map and the glyphs' own authored signatures;
     // the emitter supplies no meaning for a glyph of its own.
     let env = SortEnv::of(ctx, nodes);
+    /* HOW A CARRIER RENDERS. A glyph the corpus gives a meaning renders as its own name; a
+       glyph that exists only inside another declaration's signature renders as the module's
+       carrier, `Prop` — the same reading `resolver_with_sorts` gives the statements of a
+       corpus that declares no space of its own (crates/emit/src/lib.rs). Without this the
+       composition put an undeclared `\mathfrak{R}` into a type and the module failed to
+       elaborate with an `Unknown identifier` for a glyph nothing in the file mentions. */
+    let ty_of = |id: u32| -> String {
+        if declares_sort(ctx, &env, id) {
+            name_of(id)
+        } else {
+            "Prop".to_string()
+        }
+    };
 
     // Every name this frame DECLARES itself. The node loop needs it: the frame
     // declares a formation's carrier and its constructors, so a `Definition` node for
@@ -1052,15 +1269,17 @@ fn symbol_declarations(
     // the family sig to the bare id typed bare `cap a \mathfrak{L}` against a
     // function type, which broke the whole `class` chain.
     let mut authored: HashMap<u32, AuthoredType> = HashMap::new();
-    for n in nodes.iter().chain(emitted.iter()) {
+    /* THE MODULE'S OWN TEXT FIRST. A context node for the same glyph can be the
+       DB-rebuilt copy, which carries no authored `Type:` — or the same definition read
+       from another file. First entry wins, so the module's own declaration is the one the
+       frame believes. */
+    for n in emitted.iter().chain(nodes.iter()) {
         if let Node::Definition(d) = n
             && let Some(sig) = &d.d_block.sig
         {
-            let family = if fn_names.contains_key(&(d.symbol.primary + FN_OFFSET)) {
-                d.symbol.primary + FN_OFFSET
-            } else {
-                d.symbol.primary
-            };
+            let family = fn_variant(d.symbol.primary)
+                .filter(|v| fn_names.contains_key(v))
+                .unwrap_or(d.symbol.primary);
             authored
                 .entry(family)
                 .or_insert_with(|| read_type_arrow(ctx, sig));
@@ -1235,6 +1454,21 @@ fn symbol_declarations(
         let nm = recursor_resolver(*id);
         own_names.insert(nm);
     }
+    /* The corpus-wide node ids of the nodes this module's own definitions are homed at.
+     *
+     * A glyph's `home_node` is a corpus-wide id and a parsed node id counts within its own
+     * file, so "is this glyph declared here" cannot be asked by comparing the two: a corpus
+     * whose files are numbered 1..n lines both schemes up often enough that the comparison
+     * looks right, and then one module drops the import of a glyph it does not declare — an
+     * `Unknown identifier` in the emitted Lean — or imports itself. Both sides here come
+     * from the DB: the home of a symbol this module declares, and the home of the glyph. */
+    let own_homes: HashSet<i64> = emitted
+        .iter()
+        .filter_map(|n| match n {
+            Node::Definition(d) => ctx.by_id(d.symbol.primary as i64).map(|r| r.home_node),
+            _ => None,
+        })
+        .collect();
 
     // DEMAND CLOSURE: an admitted def's Sema glyphs are also demanded, so the
     // dependency chain of a definition over a formation becomes reducible defs.
@@ -1438,7 +1672,7 @@ fn symbol_declarations(
         // may apply it. The name stays FREE for a later glyph of the same spelling.
         if defined_names.contains(&lean) {
             if !sorts.contains(&id) {
-                inferred_types.insert(lean.clone(), glyph_type(id, &sigs, &authored, &name_of));
+                inferred_types.insert(lean.clone(), glyph_type(id, &sigs, &authored, &ty_of));
             }
             continue;
         }
@@ -1514,10 +1748,22 @@ fn symbol_declarations(
                 .unwrap_or(-1);
             /* A GLYPH THIS MODULE DECLARES IS NOT IMPORTED. `Type: \mathcal{P} -> ...`
                with no ground name is a glyph the module itself declares (a frame sort), so
-               its home node is this one — importing it made the module import ITSELF, and
-               the compile order had no first module. */
-            if emitted.iter().any(|n| n.base().id as i64 == home) {
+               its home is this one — importing it made the module import ITSELF, and the
+               compile order had no first module. The module's own symbols answer for the
+               carrier and the applied variant of a glyph it defines; `own_homes` answers for
+               a glyph whose home node is this node without being its symbol. */
+            if emitted.iter().any(|n| {
+                matches!(n, Node::Definition(d)
+                    if d.symbol.primary == id
+                        || fn_variant(d.symbol.primary) == Some(id)
+                        || formulations_carrier(&formations, d.symbol.primary) == Some(id))
+            }) || own_homes.contains(&home)
+            {
                 continue;
+            }
+            if std::env::var("QB_DEBUG_IMP3").is_ok() {
+                eprintln!("PUSH {lean} home={home} own_homes={own_homes:?} emitted={:?}",
+                    emitted.iter().map(|n| match n { Node::Definition(d) => format!("{}:{}", d.base.name, d.symbol.primary), other => format!("{:?}", other.base().name) }).collect::<Vec<_>>());
             }
             needed.push((lean.clone(), home));
         }
@@ -1704,7 +1950,7 @@ fn symbol_declarations(
             resolver(*id),
             auth.verbatim
                 .clone()
-                .unwrap_or_else(|| arrow_ty(&auth.args, auth.res, &name_of)),
+                .unwrap_or_else(|| arrow_ty(&auth.args, auth.res, &ty_of)),
         );
     }
     /* THE OPERATOR A `Sema:` DEFINES IS TYPED BY THAT SEMA, and its own module needs the
@@ -1719,7 +1965,7 @@ fn symbol_declarations(
         }
         inferred_types
             .entry(name_of(*id))
-            .or_insert_with(|| glyph_type(*id, &sigs, &authored, &name_of));
+            .or_insert_with(|| glyph_type(*id, &sigs, &authored, &ty_of));
     }
     known_types.extend(inferred_types.clone());
     known_types.extend(declared_types.clone());

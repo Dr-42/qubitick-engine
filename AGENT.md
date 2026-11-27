@@ -129,6 +129,17 @@ Consequences that have bitten:
   stamped file is rebuilt, not migrated.
 - **Symbol hashes are derived from the kind**, so anything that changes a kind must rewrite
   `symbol_hash` in the same transaction, before any expression is stored.
+- **A parsed node id counts within its own file; `home_node` is the corpus-wide id.** The two
+  agree often enough in a one-node-per-file corpus to look like one scheme, so a comparison
+  between them silently answers "the wrong node": `n.base().id == home` made a module drop the
+  import of a glyph another file declares (`Unknown identifier oplus`) and made another import
+  itself (`build.import-cycle`). Ask the DB on both sides — the home of a symbol the module
+  declares against the home of the glyph (`symbol_declarations`, `own_homes`).
+- **A definition node carries ONE body.** `split_fields` gives every bare line its own entry,
+  and `resolve_multiline_values` folds exactly one continuation line into `Sema:`/`Type:`, so a
+  second equation on a line of its own is not part of the body — it is a corpus mistake and the
+  parser refuses it by name. Several cases are ONE expression, joined by a declared connective
+  and parenthesised: `(A = B) \land (C = D)`.
 
 ## Where to add what
 
@@ -167,10 +178,34 @@ Consequences that have bitten:
   module at a time, `Qubitick.HL.tau has already been declared` the moment two of them met
   in one environment (`crates/emit/src/module.rs`, the formation loop in
   `symbol_declarations`, gated on `emit_nodes`; `declared_formation.rs` holds it).
-- **A Sema composes a type from EVIDENCE only** (`module.rs::types_from_semas`,
-  `sort_of_term`): constants by their `Type:`, applications by their head's result sort, the
-  right side of an equation by the result. Never from the carrier the section is written
-  over — that turned a `\tau`/`\iota` operator into `tau → tau → tau`.
+- **A Sema composes its operator's type, and the composition is a FIXPOINT**
+  (`module.rs::types_from_semas`, `sort_of_term`, `note_var_sorts`). The evidence, in order:
+  a term's head — a constant's `Type:`, a constructor's carrier, another operator's own
+  composed or authored RESULT; a variable at a parameter position of a known operator; the
+  right side of an equation for the result. Then, for a position still open, the carrier the
+  section is written over — UNLESS the corpus's uses of the operator already state a sort
+  there, because an observation is evidence and that fill was what typed a `\tau`/`\iota`
+  operator `tau → tau → tau`. The reading repeats until a pass learns nothing, because
+  `a \otimes b = (a \oplus b) \oplus b` holds no constant at all: every sort in it is
+  `\oplus`'s, and `\oplus` is a different node, often a different file, read at a different
+  time. A carrier reached through another declaration's signature counts only when the corpus
+  gives it a meaning (`declares_sort`: a formation, a `Type:` of its own, or a ground name);
+  a glyph written only inside a signature renders as `Prop`, the same reading
+  `resolver_with_sorts` gives the statements of such a corpus.
+- **The corpus's definitions are SOURCE context for every module**
+  (`pipeline.rs::load_source_definitions`): the source parse is the only copy carrying the
+  authored `Type:`, and a `Sema:` is the only copy that says what an operator IS — so a
+  module written in terms of another module's operator needs it in scope, and that module's
+  `def` comes from it by IMPORT, not by a repeated declaration. The DB-rebuilt definition
+  nodes stay gated to theorem/axiom modules: the rebuilt copy carries no authored `Type:`
+  and shadows the module's own declaration of the glyph it defines.
+- **A glyph that would take a name the GROUND owns is letter-coded** (`ingest.rs::lean_name`,
+  `ground_owned_name`, the contract's `REQUIRED`): `\Eq` → `lx_Eq`. Modules are emitted
+  inside `namespace Qubitick.HL`, so such a glyph does not clash with the ground's name, it
+  SHADOWS it — including the kernel equality the emitter writes in the same module — and the
+  corpus still reports every file verified while an unrelated theorem's type has become an
+  operator application (`Unknown constant CoeSort`). Keywords take `_` (`\in` → `in_`);
+  punctuation-only glyphs take `sym_<hex>`.
 - **The recursor matches the position the EVIDENCE names**, not the first argument
   (`definition.rs::formation_match_def_text`): the position whose terms are constructors of
   one formation; the others must be variables, since a recursor holds them fixed.

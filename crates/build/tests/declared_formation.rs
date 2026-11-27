@@ -448,3 +448,52 @@ fn an_induction_over_a_case_defined_operator_verifies() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/* AN OPERATOR WRITTEN IN TERMS OF ANOTHER OPERATOR IS TYPED BY IT.
+ *
+ * `a \otimes b = (a \oplus b) \oplus b` holds no constant and no constructor: every sort in
+ * that body is `\oplus`'s, and `\oplus` is a DIFFERENT NODE — a different module — whose own
+ * `Sema:` is the recipe for its type. Read once in node order, `\otimes` came out
+ * `Prop → Prop → Prop`, and the module could not even name `oplus` (it never imported the
+ * module that defines it). Both are the same reading: a `Sema:` composes its operator's type
+ * from the signatures of the operators its body uses, and a module imports what its own text
+ * names and does not declare.
+ */
+#[test]
+fn an_operator_defined_through_another_is_typed_by_it() {
+    let dir = root("compose");
+    corpus(&dir);
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
+        "D.S.05. Plus\na \\oplus b\nSema:\n(\\tau_0 \\oplus b = b) \\land ((^+ a) \\oplus b = ^+ (a \\oplus b))\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_06_Times.qbit",
+        "D.S.06. Times\na \\otimes b\nSema:\na \\otimes b = (a \\oplus b) \\oplus b\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let ctx = qubitick_ctx::build_ctx(&db, "Era0/Strata0").unwrap();
+    let file = dir.join("Era0/Strata0/Definitions/D_S_06_Times.qbit");
+    let emitted = qubitick_build::pipeline::emit_file(&ctx, &db, &file).expect("the operator emits");
+    assert!(
+        emitted.contains("otimes (a : tau) (b : tau) : tau"),
+        "the body's operands type the parameters and its head types the result:\n{emitted}"
+    );
+    assert!(
+        !emitted.contains("Prop → Prop → Prop"),
+        "and never the Prop fallback:\n{emitted}"
+    );
+    assert!(
+        emitted.contains("import Qubitick.Corpus.Era0.Strata0.Definitions.D_S_05_Plus"),
+        "a glyph this module names and does not declare is imported, not assumed:\n{emitted}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

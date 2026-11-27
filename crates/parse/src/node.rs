@@ -609,7 +609,22 @@ pub fn parse_definition(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) 
                 // The first bare math line is the surface glyph being defined.
                 glyph_tokens.push(v.clone());
             }
-            "" => {}
+            /* A SECOND BARE LINE IS NOT PART OF ANYTHING, AND SAYING SO IS THE POINT.
+             *
+             * This arm used to drop it. A multi-case `Sema:` written one equation per line
+             * therefore lost every case but the first, silently: `\iota_0 \oplus b = b` and
+             * `\bullet a \oplus b = \bullet (a \oplus b)` on two lines defined `\oplus` by
+             * the zero case alone, which the emitter then could not read as a definition and
+             * declared uninterpreted — with nothing anywhere naming the line that was thrown
+             * away. A definition carries ONE body: several cases are one expression, joined
+             * by a declared connective and parenthesised (`(A = B) \land (C = D)`). */
+            "" => bail!(
+                "a definition carries one glyph line and then its fields; this line is \
+                 neither.\n  line: `{}`\n  a `Sema:` with several cases is ONE expression: \
+                 `Sema:` then the cases joined by a declared connective, parenthesised — \
+                 `(A = B) \\land (C = D)`",
+                v.trim()
+            ),
             // "math", "req", "symbol", "kind", "tex", ... are metadata/ignored
             // on the user surface; the IR block is synthesized by the engine.
             _ => {}
@@ -744,21 +759,24 @@ fn definition_symbol_id(ctx: &Ctx, glyph: Option<&str>, sema: Option<&Expr>) -> 
         // Recurse through `\land` to find a base defining equation `Eq (Apply op …) rhs`
         // and take `op` as the defined symbol (handles the recursive `\land` form).
         fn base_eq_op(e: &Expr) -> Option<u32> {
-            match e {
-                Expr::Apply(h, args)
-                    if args.len() == 2
-                        && h.primary == EQ_SYM
-                        && let Expr::Apply(op, _) = &args[0] =>
-                {
-                    return Some(op.primary);
-                }
-                _ => {}
+            let Expr::Apply(h, args) = e else { return None };
+            if h.primary != EQ_SYM {
+                // A `\land` chain — or any other head — holds the first equation on its left.
+                return args.first().and_then(base_eq_op);
             }
-            match e {
-                Expr::Apply(h, args) if args.len() == 2 && h.primary != EQ_SYM => {
-                    base_eq_op(&args[0])
-                }
-                _ => None,
+            /* A LEFT SIDE THAT IS ITSELF AN EQUATION is a `Sema:` written without the
+               parentheses its cases need: `A = B \land C = D` parses as `((A = B) = C) ∧ D`,
+               because a connective is a TERM inside a `Sema:` body (parser.rs,
+               `is_logic_connective`) and `=` is left-associative. `=` is the declaration
+               format's, never an operator a node declares — handing it back as the node's
+               symbol gave the emitter a definition of equality itself, whose `_fn` name
+               derivation overflowed and panicked. Descending keeps the node's symbol a glyph
+               the corpus actually declares; the equation that is not a section then shows up
+               where it should, as a body that cannot be read. */
+            match args.first() {
+                Some(Expr::Apply(op, _)) if op.primary != EQ_SYM => Some(op.primary),
+                Some(inner) => base_eq_op(inner),
+                None => None,
             }
         }
         if let Some(op) = base_eq_op(sema) {

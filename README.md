@@ -176,13 +176,22 @@ whatever follows `Type:` is exactly what is rendered.
 
 **Type and form** come from `Type:` (a signature, so an operator is typed over its
 carrier) and from `Sema:` (a body — and, where there is no signature, the RECIPE for the
-type: `\tau_0 \oplus b = b` applies `\oplus` to a constructor of `\tau` and equates the
-result with a metavariable, so `\oplus` is `\tau → \tau → \tau`. An operator whose only
-appearance is its own definition has no use site to be observed at, which is why the Sema
-is read; `crates/build/tests/declared_formation.rs` holds it). A `Sema:` whose alternatives are separated by a
+type). The recipe reads the sorts the body mentions: `\tau_0 \oplus b = b` applies `\oplus`
+to a constructor of `\tau` and equates the result with a metavariable, so `\oplus` is
+`\tau → \tau → \tau`; and `a \otimes b = (a \oplus b) \oplus b` has no constant at all, so
+both its arguments and its result are `\oplus`'s, taken from `\oplus`'s own `Sema:` — or its
+`Type:` — in whatever file that operator is declared. A position the corpus leaves open
+takes the carrier the section is written over, unless the corpus's own uses of the operator
+already say what sits there. A carrier nothing declares — a glyph written only inside
+another declaration's signature — renders as the module's own carrier (`Prop`), which is how
+the statements of such a corpus are read. A `Sema:` whose alternatives are separated by a
 declared connective declares a **formation** — an inductive: `\tau = \tau_0 \vee (^+ \tau)`
 is a carrier with a nullary and a recursive constructor, and the emitter generates the
-Lean `inductive` and its constructor aliases.
+Lean `inductive` and its constructor aliases. Several CASES of one operator are ONE
+expression, their equations joined by a declared connective and parenthesised —
+`(\tau_0 \oplus b = b) \land ((^+ a) \oplus b = ^+ (a \oplus b))` — because inside a
+`Sema:` a connective is a term and `=` binds left; a second bare line after the glyph line
+is refused, since a definition carries one body.
 
 **Precedence** is the charter's, not a glyph's: `Precedence:` lines run loosest first, and a
 glyph the table does not name binds looser than every glyph it does. Association is not
@@ -202,6 +211,18 @@ Emission is **term mode** against a fixed contract of 16 Lean names in three tie
 it). Run without one against the repository's source `prelude/` — which carries `HL.lean`
 and no `.olean` — it answers `satisfied: false` with an empty `missing`, Lean's own error
 line in `failures`, and a `hint` naming the flag.
+
+Every module is emitted inside `namespace Qubitick.HL`, which is where the ground declares
+those names. A corpus glyph derives its Lean name from its LaTeX (`\oplus` → `oplus`,
+`^+` → `caret`, `\in` → `in_`), and a glyph whose derived name would take one the GROUND
+owns is emitted as a **letter code** instead: `lx_` and then the name (`\Eq` → `lx_Eq`,
+`\And` → `lx_And`). The prefix is the engine's — a LaTeX control word cannot contain `_`, so
+no corpus declaration reaches it — and the code is derived from the glyph alone, so the same
+glyph gets the same name in every module. Without the code the glyph does not clash with
+the ground's name, it shadows it: a corpus `\Eq` emitted as `def Eq : \tau → \tau → \tau`
+makes every `Eq` written in that module after it — the kernel equality the emitter itself
+writes — mean the corpus's operator, and the failure surfaces in an unrelated file as an
+error about a name nobody wrote.
 
 The engine embeds a base ground (`prelude/Qubitick/HL.lean`). A project replaces it by
 carrying its own — `LeanDir:` names the directory, `Module:` the module inside it — which
@@ -427,7 +448,7 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 48 targets, 321 tests, 2 ignored
+cargo test --workspace        # 50 targets, 335 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets
 cargo build -p qubitick-cli
@@ -450,7 +471,7 @@ The tests that state a promise rather than a detail:
 |---|---|
 | `crates/build/tests/no_glyph_names.rs` | no corpus glyph appears as a string literal in the engine |
 | `crates/build/tests/declaration_authority.rs` | an undeclared operator fails naming the glyph; declaring it makes the same corpus verify |
-| `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors; its operators are typed over the carrier; a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive again; a `Sema:` of cases becomes a definition over the recursor; and an induction over that operator VERIFIES, its recursive branch taking the hypothesis |
+| `crates/build/tests/declared_formation.rs` | a corpus's formation becomes an inductive with typed constructors; its operators are typed over the carrier; an operator defined through another one is typed BY it, and imports that module; a theorem that only NAMES the carrier imports the formation's module instead of declaring the inductive again; a `Sema:` of cases becomes a definition over the recursor; and an induction over that operator VERIFIES, its recursive branch taking the hypothesis |
 | `crates/build/tests/precedence.rs` | the charter's table reaches the rows, and `a + b × a` binds as `a + (b × a)` when built |
 | `crates/build/tests/tutorial_ship.rs` | the ship builds with school notation and never rots |
 | `crates/build/tests/lean_binding.rs` | a bound glyph gets no declaration of its own, and the corpus verifies against the ground that carries the name |
