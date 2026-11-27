@@ -116,7 +116,7 @@ pub fn load_definition_nodes(
         // compound (e.g. `e_1 \cap e_2`), the head is an OPERATOR that is NOT the
         // glyph being defined — skip it so it doesn't pollute `defined_names` and
         // evict `cap`/`Delta` from the frame (which broke theorem modules).
-        let symbol = definiendum_head(ctx, &sema);
+        let symbol = defined_symbol(ctx, &sema);
         // Skip operator-headed misparses, unidentifiable (symbol 0) glyphs, and
         // duplicate glyphs claimed by more than one definition.
         if is_operator_of_another_node(ctx, symbol, header.id)
@@ -240,6 +240,45 @@ fn is_operator_of_another_node(ctx: &Ctx, head: u32, node: i64) -> bool {
 /// is the head of the compound definiendum on the left — peel top-level `=`/`\leftrightarrow`
 /// connectives into it. So `a \ne b \leftrightarrow …` defines `\ne` (not the
 /// `\leftrightarrow` connective that only heads the equation).
+/// THE GLYPH A `Sema:` DEFINES, through its cases.
+///
+/// A `Sema:` written as one body has its definiendum at the top. One written as CASES
+/// (`(\tau_0 \oplus b = b) \land ((^+ a) \oplus b = ^+ (a \oplus b))`) has a conjunction at
+/// the top, and its definiendum is the head of every section's left side. Reading only the
+/// top gave `\land` — an operator another node declares — so the definition was skipped
+/// and its `[D.5]` citation reached the rewriter with nothing to apply.
+fn defined_symbol(ctx: &Ctx, sema: &qubitick_model::Expr) -> u32 {
+    use qubitick_model::Expr;
+    let mut heads: Vec<u32> = Vec::new();
+    fn walk(ctx: &Ctx, e: &Expr, out: &mut Vec<u32>) {
+        match e {
+            Expr::Apply(h, args)
+                if args.len() == 2
+                    && h.primary != qubitick_model::EQ_SYM
+                    && ctx
+                        .by_id(i64::from(h.primary))
+                        .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Connective)) =>
+            {
+                walk(ctx, &args[0], out);
+                walk(ctx, &args[1], out);
+            }
+            Expr::Apply(h, args) if h.primary == qubitick_model::EQ_SYM && args.len() == 2 => {
+                if let Expr::Apply(dh, _) = &args[0] {
+                    out.push(dh.primary);
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(ctx, sema, &mut heads);
+    // Every case must define the SAME operator; anything else is not this shape and the
+    // ordinary peel gets its say.
+    if !heads.is_empty() && heads.iter().all(|h| *h == heads[0]) {
+        return heads[0];
+    }
+    definiendum_head(ctx, sema)
+}
+
 fn definiendum_head(ctx: &Ctx, sema: &qubitick_model::Expr) -> u32 {
     // The rule itself lives in `qubitick_model::corpus`, because the PARSER needs
     // the very same peel: a definition must resolve to one symbol id whether it is
@@ -258,6 +297,45 @@ pub(crate) fn node_visible(scope: &str, era: &str, strata: i64) -> bool {
 }
 
 /// The division index in a corpus filename such as `D_BT_02_Neg.qbit`.
+/// THE EQUATIONS A `Sema:` CONTRIBUTES TO THE REWRITE TABLE — one per section.
+///
+/// A `Sema:` is one expression, and a citation to its node (`[D.5]`) is one citation. Written
+/// as a body (`a \times b = a + a`) that is one equation, and the rewriter applies it as it
+/// stands. Written as CASES over a declared carrier —
+/// `(\tau_0 \oplus b = b) \land ((^+ a) \oplus b = ^+ (a \oplus b))` — it is one equation
+/// per constructor, and a row over the operator matches exactly one of them. Registering the
+/// conjunction registered a statement no row can apply, and every such row failed with
+/// `cannot justify rewrite … citing [D.5 (not in this module)]`.
+///
+/// The split is by the SEMA's own separator, validated against the corpus's declarations: a
+/// top-level head the corpus declares as a connective separates the cases. Anything else
+/// (a single `=`-headed body) is returned whole, which is what every definition looked like
+/// before cases existed.
+pub fn definition_cases(ctx: &Ctx, whole: qubitick_model::Expr) -> Vec<qubitick_model::Expr> {
+    use qubitick_model::Expr;
+    fn split(ctx: &Ctx, e: &Expr, out: &mut Vec<Expr>) {
+        match e {
+            Expr::Apply(h, args)
+                if args.len() == 2
+                    && h.primary != qubitick_model::EQ_SYM
+                    && ctx
+                        .by_id(i64::from(h.primary))
+                        .is_some_and(|r| ctx.has_facet(&r.tex, Facet::Connective)) =>
+            {
+                split(ctx, &args[0], out);
+                split(ctx, &args[1], out);
+            }
+            other => out.push(other.clone()),
+        }
+    }
+    let mut parts: Vec<Expr> = Vec::new();
+    split(ctx, &whole, &mut parts);
+    if parts.len() <= 1 {
+        return vec![whole];
+    }
+    parts
+}
+
 pub fn division_of_filename(filename: &str) -> Option<u32> {
     let stem = filename.rsplit('/').next().unwrap_or(filename);
     // Skip the leading kind tag (`D_`, `T_`, `A_`) and the division tag

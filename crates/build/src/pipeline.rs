@@ -680,12 +680,23 @@ pub fn emit_file_with(
         None => {
             let mut v: Vec<(u32, qubitick_model::Expr)> = Vec::new();
             for d in crate::axioms::load_definition_nodes(conn, ctx, ctx.scope())? {
-                if let qubitick_model::Node::Definition(def) = &d.node
-                    && let Some(form) = &def.d_block.form
-                    && let Ok(expr) =
-                        qubitick_parse::semantic::parse_expr(&format!("{form:?}"), ctx)
-                {
-                    v.push((d.division, expr));
+                if let qubitick_model::Node::Definition(def) = &d.node {
+                    /* THE EXPRESSION ITSELF. This used to stringify the `FormBody` and feed
+                       the string to the expression parser — `MacroExpr(…)` / `Formation([…])`
+                       lexed as `unknown symbol 'MacroExpr'`, and an `Expr`'s Debug lexed as
+                       `unknown symbol 'Apply'`. BOTH failed, silently, for every definition:
+                       this loop registered nothing and a `[D.n]` row reached the rewriter with
+                       no rule. `load_definition_nodes` has already rebuilt the expression for
+                       this context, so there is nothing to parse. */
+                    let Some(qubitick_model::FormBody::MacroExpr(sema)) = &def.d_block.form else {
+                        // A formation declares a carrier; it has no equation to rewrite with.
+                        continue;
+                    };
+                    // One rule per section: a case-defined operator is one citation over
+                    // one equation per constructor (crate::axioms::definition_cases).
+                    for case in crate::axioms::definition_cases(ctx, sema.clone()) {
+                        v.push((d.division, case));
+                    }
                 }
             }
             let v = std::sync::Arc::new(v);

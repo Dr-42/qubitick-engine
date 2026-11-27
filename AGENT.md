@@ -172,8 +172,14 @@ Consequences that have bitten:
   "the corpus's lowest-id connective" made a formation depend on how many other connectives
   were declared, so one unrelated `\land` node turned `\tau = \tau_0 \vee (^+ \tau)` into an
   ordinary equation and every constructor into a coverage hole.
-- **A case-defined operator's rows cannot be justified yet**: the rule table keeps one
-  statement per definition division, and a `Sema:` of cases needs one rule per section.
+- **A citation may name several statements.** A `Sema:` written as cases is one `[D.n]` over
+  one equation per section, so `RuleTable` keeps a LIST per citation and the row is justified
+  by whichever case matches (`crates/rewrite/src/rules.rs`, `chain.rs`). The loader must hand
+  the table the EXPRESSION: stringifying a `FormBody` (`MacroExpr(…)`) or an `Expr` (`Apply(…)`)
+  and re-parsing it fails in the lexer, silently, and did for every definition until now.
+- **A definitional row still emits a `trans` chain** (`Eq.trans (Eq.refl lhs) (Eq.refl rhs)`),
+  which Lean refuses where the two sides are only definitionally equal; it wants `Eq.refl lhs`
+  against the goal.
 - **Autoinduce is client-side text substitution** (`js/live/induce.js`): it writes each case
   goal under a case pattern the author wrote, and nothing derives the patterns.
   `tests/unit/induce.test.mjs` holds the laws; `/api/induce` is a stub.

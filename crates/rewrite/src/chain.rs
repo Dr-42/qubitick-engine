@@ -136,20 +136,33 @@ fn render_just(
                     tried.push(format!("{cite} (not an axiom line)"));
                     continue;
                 };
-                let Some(rule) = rules.get(node, line) else {
+                let cases = rules.all(node, line);
+                if cases.is_empty() {
                     tried.push(format!("{cite} (not in this module)"));
                     continue;
-                };
-                if let Some(term) = justify_step(rule, lhs, rhs, rf.rev, tc) {
-                    return Ok(term);
+                }
+                /* EVERY STATEMENT THE CITATION NAMES IS TRIED: a definition written as cases
+                   is one citation over one equation per constructor, and the row matches
+                   exactly one of them. */
+                for rule in cases {
+                    if let Some(term) = justify_step(rule, lhs, rhs, rf.rev, tc) {
+                        return Ok(term);
+                    }
                 }
                 if let Some(term) = justify_multi(rules, refs, lhs, rhs, tc) {
                     return Ok(term);
                 }
-                let (_, body) = crate::rules::strip_binders(&rule.statement);
+                let rules_text: Vec<String> = cases
+                    .iter()
+                    .map(|r| {
+                        let (_, body) = crate::rules::strip_binders(&r.statement);
+                        format!("`{}`", lean_render(&body, &|id| tc.resolve(id)))
+                    })
+                    .collect();
                 tried.push(format!(
-                    "{cite} (does not match; rule is `{}`)",
-                    lean_render(&body, &|id| tc.resolve(id))
+                    "{cite} (does not match; {} rule{})",
+                    rules_text.join(" / "),
+                    if rules_text.len() == 1 { " is" } else { "s are" }
                 ));
             }
             bail!(
@@ -390,9 +403,15 @@ fn justify_multi(
     const MAX_STEPS: usize = 600;
     let laws: Vec<Law> = refs
         .iter()
-        .filter_map(|r| {
-            let (node, line) = cite_axiom_line(&r.name)?;
-            law_of(rules.get(node, line)?, r.rev)
+        .flat_map(|r| {
+            let Some((node, line)) = cite_axiom_line(&r.name) else {
+                return Vec::new();
+            };
+            rules
+                .all(node, line)
+                .iter()
+                .filter_map(|rule| law_of(rule, r.rev))
+                .collect::<Vec<_>>()
         })
         .collect();
     if laws.is_empty() {

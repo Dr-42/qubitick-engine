@@ -493,11 +493,12 @@ fn write_meshed(
                         // unfolding, and a glyph that has one must not also be
                         // declared as a frame axiom.
                         def_index.insert(def.symbol.primary, unit.division);
-                        if let Some(qubitick_model::FormBody::MacroExpr(sema)) = &def.d_block.form
-                            && let Ok(expr) =
-                                qubitick_parse::semantic::parse_expr(&format!("{sema:?}"), era_ctx)
-                        {
-                            rules.insert_definition(unit.division, expr);
+                        if let Some(qubitick_model::FormBody::MacroExpr(sema)) = &def.d_block.form {
+                            // The parsed expression itself: stringifying it and re-parsing
+                            // never worked (the lexer refuses `Apply`/`MacroExpr`).
+                            for case in crate::axioms::definition_cases(era_ctx, sema.clone()) {
+                                rules.insert_definition(unit.division, case);
+                            }
                         }
                     }
                     // Only this scope's own theorems are declared here; the rest are

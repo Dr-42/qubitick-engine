@@ -311,3 +311,67 @@ fn a_semas_cases_become_a_definition_over_the_recursor() {
     assert!(!emitted.contains("axiom"), "a definition is not an assumption:\n{emitted}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/* A ROW OVER A CASE-DEFINED OPERATOR IS JUSTIFIED BY THE CASE THAT MATCHES IT.
+ *
+ * One citation (`[D.5]`) names a `Sema:` written as cases, so the rewrite table has to hold
+ * one rule per section — and it held none at all, for two reasons that hid each other:
+ *
+ *   · the table kept ONE statement per key, so the cases overwrote each other;
+ *   · the loader stringified the `FormBody` (`MacroExpr(…)`, `Formation([…])`) and fed the
+ *     string to the expression parser, which refuses it — and an `Expr`'s own Debug is
+ *     refused too (`unknown symbol 'Apply'`). Both failed silently, so NO definition rule
+ *     was ever registered through this path.
+ *
+ * With both fixed, a row `\tau_0 \oplus a = a` citing `[D.05]` closes, and the corpus — a
+ * declared carrier, a two-case operator, a theorem that uses it — verifies.
+ */
+#[test]
+fn a_row_over_a_case_defined_operator_is_justified() {
+    if !lean_is_here() {
+        eprintln!("skipping: lean not found");
+        return;
+    }
+    let dir = root("cases-cite");
+    corpus(&dir);
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_00_Land.qbit",
+        "D.S.00. Land\na \\land b\nRole: connective\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
+        "D.S.05. Plus\na \\oplus b\nSema:\n(\\tau_0 \\oplus b = b) \\land ((^+ a) \\oplus b = ^+ (a \\oplus b))\n",
+    );
+    wit(
+        &dir,
+        "Era0/Strata0/Theorems/T_S_01_Zero.qbit",
+        "T.S.01. ZeroPlus\n\\tau_0 \\oplus \\tau_0 = \\tau_0\nProof:\n\\tau_0 \\oplus \\tau_0\n  = \\tau_0  [D.05]\n",
+    );
+    let mut db = qubitick_db::open_in_memory().unwrap();
+    qubitick_build::ingest_corpus(&mut db, &dir).unwrap();
+    let ground = qubitick_build::ground::for_check(&dir).expect("the ground assembles");
+    let results =
+        qubitick_build::run_pipeline(&db, &qubitick_build::walk_qbit(&dir), Some(&ground)).unwrap();
+    let errors: Vec<String> = results
+        .iter()
+        .flat_map(|r| r.diagnostics.iter())
+        .filter(|d| d.is_error())
+        .map(|d| format!("{}: {}", d.code, d.message))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "a row citing a case-defined operator must justify: {errors:?}"
+    );
+    assert!(
+        results.iter().all(|r| r.verified),
+        "all of it verifies: {:?}",
+        results
+            .iter()
+            .filter(|r| !r.verified)
+            .map(|r| (r.path.clone(), r.diagnostics.first().cloned()))
+            .collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
