@@ -101,11 +101,33 @@ export function createInstanceManager({ ws, registry, governor, scope, services 
       subscribeProjects: (fn) => (services.subscribeProjects ? services.subscribeProjects(fn) : () => {}),
     };
 
+    /* THE REST OF THE HOST'S ANSWERS, forwarded and not snapshotted. A pane's ctx is part of its
+       contract: a question it asks and the host does not answer is a panel that looks mounted and
+       does nothing — `ctx.url` missing meant the Goal panel could never ask the engine for the
+       obligation at the caret (it drew its local fallback: a node name and a caret position), and
+       `ctx.check`/`ctx.runCheck` missing meant the Diagnostics panel's button was inert. Same
+       shape as `projectServices` above, and for the same reason: the values arrive later than the
+       pane does. */
+    const hostServices = {
+      url: (name) => (services.url ? services.url(name) : null),
+      data: () => (services.data ? services.data() : null),
+      check: () => (services.check ? services.check() : null),
+      runCheck: () => { if (services.runCheck) services.runCheck(); },
+      counts: () => (services.counts ? services.counts() : null),
+      /* A CHECK FINISHES AFTER THE PANE IS MOUNTED, so a panel that only reads `ctx.check()`
+         once shows "not checked" forever. `onBuild(fn)` is the subscription: the host calls
+         `fn(state)` whenever a report lands, and returns an unsubscribe. */
+      onBuild: (fn) => (services.onBuild ? services.onBuild(fn) : () => {}),
+      openFile: (path) => { if (services.openFile) services.openFile(path); },
+      endpoint: (name) => (services.endpoint ? services.endpoint(name) : null),
+    };
+
     // Build ctx per D-030/D-031 - references instance via closure
     const ctx = {
       ws,
       id,
       ...projectServices,
+      ...hostServices,
       ui: {
         ...(services.ui || {}),
         /* a message with nowhere to go is dropped quietly rather than thrown: the panes guard their

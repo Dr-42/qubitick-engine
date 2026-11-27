@@ -67,6 +67,57 @@ export default {
       paint();
     });
 
+    /* ---- the row diff: what the step from one expression to the next CHANGED ----
+     *
+     * "the row before it, and added/removed parts colored" is a claim about two strings, so it
+     * is computed on two strings: a longest-common-subsequence over whitespace-delimited tokens,
+     * with the tokens only one side has marked. MathML would be nicer; the corpus's own
+     * expression text is what the engine answers with, and colouring IT is honest about what
+     * was compared. */
+    function diffTokens(a, b) {
+      const A = String(a || '').trim().split(/\s+/).filter(Boolean);
+      const B = String(b || '').trim().split(/\s+/).filter(Boolean);
+      const n = A.length, m = B.length;
+      // lengths of the common subsequence of A[i..] and B[j..]
+      const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+          dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      const out = [];
+      let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (A[i] === B[j]) { out.push({ t: 'same', v: A[i] }); i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: 'del', v: A[i] }); i++; }
+        else { out.push({ t: 'add', v: B[j] }); j++; }
+      }
+      while (i < n) out.push({ t: 'del', v: A[i++] });
+      while (j < m) out.push({ t: 'add', v: B[j++] });
+      return out;
+    }
+
+    /** The two rows as one line of coloured tokens. */
+    function diffHtml(before, after) {
+      const parts = diffTokens(before, after);
+      return parts.map((p) => {
+        const v = esc(p.v);
+        if (p.t === 'del') return '<span class="g-del">' + v + '</span>';
+        if (p.t === 'add') return '<span class="g-add">' + v + '</span>';
+        return '<span class="g-same">' + v + '</span>';
+      }).join(' ');
+    }
+
+    /** Insert a citation at the editor's caret. The Goal panel OFFERS a citation; the editor
+     *  owns the caret, so the panel asks it — `editor.insert` is that call (js/panes/editor.js). */
+    function insertCite(cite) {
+      const e = ctx.ws && ctx.ws.pane ? ctx.ws.pane('editor') : null;
+      const call = e && e.call && e.call.insert;
+      if (call && typeof call.invoke === 'function') {
+        try { call.invoke('[' + cite + ']'); } catch (err) { console.warn('[goal] insert:', err.message); }
+      }
+    }
+
     /** What the corpus made of this position, as the tile shows it. */
     function answerHtml(g) {
       if (!g) return localHtml();
@@ -78,7 +129,12 @@ export default {
       }
       /* THE OBLIGATION: what the statement asks for, and where the proof stands now */
       if (g.target) rows.push('<span class="g-turn">⊢</span> <span class="m">' + esc(g.target) + '</span>');
-      if (g.current && g.current !== g.target) rows.push('<span class="gdim">from</span> ' + esc(g.current));
+      /* THE STEP, with what it added and what it removed coloured: the row before the caret's
+         row, then the caret's row, diffed. `g.current` is where the proof stands and
+         `g.target` is where it has to get to, so the two rows are exactly this pair. */
+      if (g.current && g.current !== g.target) {
+        rows.push('<span class="gdim">from</span> <span class="m">' + diffHtml(g.current, g.target) + '</span>');
+      }
       /* WHAT REMAINS: finishable (with the citations), or the leaves that differ */
       const rem = g.remaining || {};
       if (rem.reached && (rem.citations || []).length) {
@@ -97,10 +153,16 @@ export default {
         rows.push('<span class="g-chip ' + esc(v) + '">' + esc(label) + '</span>'
           + (g.verdict.cite ? ' <span class="gdim">' + esc(g.verdict.cite) + '</span>' : ''));
       }
-      /* WHAT APPLIES from where the proof stands */
+      /* WHAT APPLIES from where the proof stands. Each is a BUTTON: a citation the panel offers
+         is one keystroke away from being written, and a list you have to retype is a list you
+         read once. */
       if (g.steps && g.steps.length) {
-        rows.push('<span class="gdim">next</span> ' + g.steps.slice(0, 3)
-          .map((st) => esc(st.cite) + ' → ' + esc(st.expr)).join('<br>'));
+        rows.push('<span class="gdim">next</span>');
+        for (const st of g.steps.slice(0, 4)) {
+          rows.push('<button class="g-cite" type="button" data-cite="' + esc(st.cite || '') + '"'
+            + ' title="insert [' + esc(st.cite || '') + '] at the caret">'
+            + esc(st.cite || '?') + '</button> → ' + esc(st.expr || ''));
+        }
       }
       if (!rows.length) return localHtml();
       /* the node the ENGINE named, not the app's active file: a goal tile may be looking at a
@@ -137,7 +199,13 @@ export default {
     }
 
     function paint() {
-      if (body) body.innerHTML = answerHtml(goal);
+      if (body) {
+        body.innerHTML = answerHtml(goal);
+        /* the citation buttons are re-created on every paint, so the listener goes on the body */
+        for (const b of body.querySelectorAll('.g-cite')) {
+          b.addEventListener('click', () => insertCite(b.dataset.cite));
+        }
+      }
       portGoalAt.set(goalAt());
     }
 

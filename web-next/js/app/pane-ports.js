@@ -92,10 +92,23 @@ export function bindPanePorts(inst, sources, { map, onBind } = {}) {
     }
   }
 
-  /* ---- call: the pane offers a function, the host's call port invokes it ---- */
+  /* ---- call: the pane offers a function, the host's call port invokes it ----
+   *
+   * TWO CONVENTIONS, and only one of them was handled. A pane may hand back a HANDLER
+   * (`call: { save: doSave }`) or a PORT it built itself (`call: { save: callPort(doSave) }` —
+   * js/panes/editor.js, diag.js, build.js all do this). The port is an object, so
+   * `typeof fn === 'function'` was false and NOTHING BOUND: every call surface in the engine
+   * host — the editor's save/goto, the Diagnostics panel's rerun, the Build panel's rerun, the
+   * Goal panel's citation insert — invoked a port whose impl was never set, and the failure
+   * read `call port not bound` at the moment a person pressed the button. */
   for (const [name, fn] of Object.entries(mine.call)) {
     const port = theirs.call[name];
-    if (typeof fn === 'function' && port && typeof port.bind === 'function') port.bind(fn);
+    if (!port || typeof port.bind !== 'function') continue;
+    if (typeof fn === 'function') {
+      port.bind(fn);
+    } else if (fn && typeof fn.invoke === 'function') {
+      port.bind((args) => fn.invoke(args));
+    }
   }
 
   return () => { for (const off of offs) { try { off(); } catch (e) {} } };

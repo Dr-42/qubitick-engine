@@ -20,6 +20,19 @@ let CM = null;
 async function loadCM() {
   if (CM) return CM;
   CM = {};
+  /* THE BUNDLE THE PAGES SERVE. No page declares an import map, so `import('@codemirror/view')`
+     — a bare specifier — cannot resolve in a browser: this threw, the catch below reported "CM6
+     not available", and the pane fell back to a plain `<textarea>`-less shell whose only visible
+     content was its tab strip and status line. `/vendor/cm.bundle.js` exports the same names and is
+     where `js/live/editor.js` and `js/panes/slate.js` get CodeMirror; the bare specifiers stay as
+     the fallback for a host that does resolve them. */
+  try {
+    CM = await import('/vendor/cm.bundle.js');
+    return CM;
+  } catch (err) {
+    console.warn('[editor] no codemirror bundle:', err && err.message);
+    CM = {};
+  }
   try {
     const viewMod = await import('@codemirror/view');
     const stateMod = await import('@codemirror/state');
@@ -58,7 +71,10 @@ export default {
   ports: {
     in: { file: 'value', goto: 'event' },
     out: { buffer: 'value', cursor: 'value', dirty: 'value', vimMode: 'value', saved: 'event' },
-    call: { save: 'call', goto: 'call' },
+    /* `insert` is the Goal panel's: a citation it offers is a `[cite]` the author wants AT THE
+       CARET, and asking the author to copy it by hand is the gap that made the panel advisory
+       rather than useful. The call replaces the current selection with the text. */
+    call: { save: 'call', goto: 'call', insert: 'call' },
   },
   create(ctx) {
     const { ws, event } = ctx;
@@ -81,6 +97,22 @@ export default {
     const portSaved = eventPort();
     const callSave = callPort(doSave);
     const callGoto = callPort(doGoto);
+
+    /** Put text at the caret — what "insert this citation" means. Falls back to a no-op when
+        there is no editor yet (a tab that has not been mounted), and reports what it did so a
+        caller can tell the two apart. */
+    function doInsert(text) {
+      if (!view || !view.state) return { ok: false, reason: 'no editor' };
+      const v = String(text == null ? '' : text);
+      try {
+        view.dispatch(view.state.replaceSelection(v));
+        view.focus();
+        return { ok: true, inserted: v };
+      } catch (err) {
+        return { ok: false, reason: String((err && err.message) || err) };
+      }
+    }
+    const callInsert = callPort(doInsert);
 
     // Connect file → buffer so tests work without mount()
     portFile.subscribe((v) => {
@@ -299,29 +331,35 @@ Ln:${line} Col:${col}  ${b.dirty ? '●' : '○'}  λ ${symCount}`;
         return;
       }
 
+      /* A BUNDLE IS NOT THE PACKAGES. `/vendor/cm.bundle.js` exports most of what this list
+         names and not all of it (it has no `crosshairCursor`), so a missing extension is SKIPPED
+         rather than called: `CM.crosshairCursor()` on a bundle without it threw during
+         `switchFile`, and the editor stayed an empty frame with a file tab on it. The list is
+         the same; what changed is that absence is survivable. */
+      const ext = (name) => (typeof CM[name] === 'function' ? [CM[name]()] : []);
       const state = CM.EditorState.create({
         doc: content,
         extensions: [
-          CM.lineNumbers(),
-          CM.highlightActiveLineGutter(),
-          CM.highlightSpecialChars(),
-          CM.history(),
-          CM.drawSelection(),
-          CM.dropCursor(),
-          CM.rectangularSelection(),
-          CM.crosshairCursor(),
-          CM.indentOnInput(),
-          CM.bracketMatching(),
-          CM.closeBrackets(),
-          CM.highlightSelectionMatches(),
-          CM.foldGutter(),
+          ...ext('lineNumbers'),
+          ...ext('highlightActiveLineGutter'),
+          ...ext('highlightSpecialChars'),
+          ...ext('history'),
+          ...ext('drawSelection'),
+          ...ext('dropCursor'),
+          ...ext('rectangularSelection'),
+          ...ext('crosshairCursor'),
+          ...ext('indentOnInput'),
+          ...ext('bracketMatching'),
+          ...ext('closeBrackets'),
+          ...ext('highlightSelectionMatches'),
+          ...ext('foldGutter'),
           CM.keymap.of([
-            ...CM.closeBracketsKeymap,
-            ...CM.defaultKeymap,
-            ...CM.historyKeymap,
-            ...CM.searchKeymap,
-            ...CM.foldKeymap,
-            CM.indentWithTab,
+            ...(CM.closeBracketsKeymap || []),
+            ...(CM.defaultKeymap || []),
+            ...(CM.historyKeymap || []),
+            ...(CM.searchKeymap || []),
+            ...(CM.foldKeymap || []),
+            ...(CM.indentWithTab ? [CM.indentWithTab] : []),
           ]),
           CM.keymap.of([
             { key: 'Mod-s', run: () => { doSave(); return true; }, preventDefault: true },
@@ -484,6 +522,7 @@ Ln:${line} Col:${col}  ${b.dirty ? '●' : '○'}  λ ${symCount}`;
       call: {
         save: callSave,
         goto: callGoto,
+        insert: callInsert,
       },
     };
   },

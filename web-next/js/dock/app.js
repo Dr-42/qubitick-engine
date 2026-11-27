@@ -97,8 +97,36 @@ export async function bootDock({ root, preset }) {
   const registry = createPaneRegistry();
   const buildService = createBuildService({ fetch: (u, i) => fetch(u, i), bus });
 
+  /* THE CORPUS SNAPSHOT THE PANES READ. Filled once at boot from the routes the engine serves,
+     and refreshed when a check runs (a build can add files). One object, so `ctx.data()` is the
+     same answer for every panel that asks. */
+  const corpusData = { files: [], stats: null, symbols: null, graph: null };
+  async function refreshCorpusData() {
+    const get = async (name) => {
+      try {
+        const r = await fetch('/api/' + name);
+        return r.ok ? await r.json() : null;
+      } catch { return null; }
+    };
+    const [files, stats, symbols] = await Promise.all([get('files'), get('stats'), get('symbols')]);
+    if (files) corpusData.files = files.files || files || [];
+    if (stats) corpusData.stats = stats;
+    if (symbols) corpusData.symbols = symbols;
+  }
+
   const services = {
     projects: () => projects.get(),
+    url: (name) => endpoints.url(name),
+    data: () => corpusData,
+    counts: () => ({ docks: DOCKS.length, panels: Object.keys(PANELS).length }),
+    endpoint: (name) => endpoints.endpoint(name),
+    onBuild: (fn) => buildService.onChange(fn),
+    openFile: (path) => {
+      // opening a file is what the tree's click does: tell the editor, then focus it
+      const editor = ws.pane('editor');
+      if (editor && editor.in && editor.in.file && editor.in.file.set) editor.in.file.set(path);
+      view && view.focusPanel('editor1');
+    },
     useProject: (id) => projects.use(id),
     loadProjects: () => projects.load(),
     addProject: (p) => projects.add(p),
@@ -163,6 +191,18 @@ export async function bootDock({ root, preset }) {
     }
   }
   wire();
+
+  /* the corpus snapshot, then the tree is told: its `files` in-port is filled by the data flow,
+     and both read the same object. */
+  await refreshCorpusData().catch(() => {});
+  try {
+    const tree = ws.pane('tree');
+    if (tree && tree.in && tree.in.files && tree.in.files.set) tree.in.files.set(corpusData.files);
+    const nodes = ws.pane('nodes');
+    if (nodes && nodes.in && nodes.in.corpus && nodes.in.corpus.set) nodes.in.corpus.set(corpusData.files);
+  } catch (err) {
+    console.warn('[dock] corpus data:', err.message);
+  }
 
   /* the diag pane's own "check corpus" button reaches the same service the strip does */
   bus.on && bus.on('ui:build', () => { buildService.run(); });

@@ -219,15 +219,30 @@ pub async fn get_lean(
     let Some(path) = project_join(&state.corpus(), &rel) else {
         return (axum::http::StatusCode::BAD_REQUEST, "illegal path").into_response();
     };
-    match std::fs::read_to_string(&path) {
-        Ok(src) => match qubitick_parse::parse_content(&state.ctx.read().unwrap(), &src) {
-            Ok(nodes) => match qubitick_emit::emit_lean_text(&state.ctx.read().unwrap(), &nodes, "Qubitick.HL", &mut qubitick_rewrite::rules::RuleTable::new()) {
-                Ok(lean) => Json(json!({ "ok": true, "path": rel, "lean": lean })).into_response(),
-                Err(e) => (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": e.to_string() }))).into_response(),
-            },
-            Err(e) => (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": e.to_string() }))).into_response(),
-        },
-        Err(e) => (axum::http::StatusCode::NOT_FOUND, Json(json!({ "ok": false, "error": e.to_string() }))).into_response(),
+    /* ONE FILE, EMITTED THE WAY THE BUILD EMITS IT.
+     *
+     * `emit_lean_text(nodes, ...)` writes a module from a file's nodes ALONE: it has no
+     * definition corpus, no `home_modules` map and no cited-module imports, so any theorem that
+     * cites a definition elsewhere in the corpus came back as
+     * `\`Type:\` requires a ground name ... (\`times\` is named in this module and nothing
+     * declares it.)` — a 400 for a file the build compiles perfectly. The Lean panel and the
+     * Render panel both ask this route, so the panel was red for every non-trivial theorem.
+     *
+     * `qubitick_build::emit_file` is the same code path `qubitick build` and `qubitick emit` use:
+     * it assembles the file's own scope context, the corpus's definitions and the imports its
+     * citations need. */
+    let ctx = qubitick_ctx::build_ctx(&state.db.lock().unwrap(), &qubitick_build::pipeline::scope_of_path(&path));
+    let emitted = match ctx {
+        Ok(ctx) => qubitick_build::emit_file(&ctx, &state.db.lock().unwrap(), &path),
+        Err(e) => Err(e),
+    };
+    match emitted {
+        Ok(lean) => Json(json!({ "ok": true, "path": rel, "lean": lean })).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": format!("{e:#}") })),
+        )
+            .into_response(),
     }
 }
 

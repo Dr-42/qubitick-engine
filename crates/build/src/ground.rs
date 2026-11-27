@@ -121,6 +121,13 @@ fn key_of(path: &Path) -> u64 {
 fn stamp_of(corpus: &Path, canon: Option<&crate::canon::Canon>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    /* THE COMPILER IS PART OF THE GROUND. A `.olean` is only readable by the Lean that wrote it
+       — `incompatible header` is what a different one says — and this stamp is what decides
+       whether a compiled ground is reused. Without the version, the same corpus built first by
+       one Lean and then by another kept the FIRST one's oleans and every file failed with
+       `failed to read file '.../HL.olean', incompatible header`, which names a temp path and
+       nothing a reader can act on. */
+    lean_version().hash(&mut h);
     HL_LEAN.hash(&mut h);
     std::env::var("QUBITICK_PRELUDE").ok().hash(&mut h);
     canon.map(|c| c.lean_module.clone()).hash(&mut h);
@@ -136,6 +143,16 @@ fn stamp_of(corpus: &Path, canon: Option<&crate::canon::Canon>) -> u64 {
         }
     }
     h.finish()
+}
+
+/// The version of the `lean` this process will run, or `""` when it cannot be asked.
+fn lean_version() -> String {
+    std::process::Command::new("lean")
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
 }
 
 fn collect_lean(dir: &Path, out: &mut Vec<PathBuf>) {

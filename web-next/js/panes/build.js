@@ -54,6 +54,7 @@ export const buildPane = {
     let wired = null;      // a report delivered on the value port
     let el = null;
     let unsub = null;
+    let offBuild = null;
 
     const current = () => wired || (ctx.check ? (ctx.check() || {}).report : null);
 
@@ -129,10 +130,15 @@ export const buildPane = {
         if (port && typeof port.subscribe === 'function') {
           unsub = port.subscribe((v) => { wired = v; paint(); });
         }
+        /* and the host's own check: a report that lands after this pane is open repaints it */
+        if (ctx.onBuild && typeof ctx.onBuild === 'function') {
+          offBuild = ctx.onBuild((state) => { wired = state && state.report ? state.report : wired; paint(); });
+        }
         paint();
       },
       unmount() {
         if (unsub) { try { unsub(); } catch { /* gone */ } unsub = null; }
+        if (offBuild) { try { offBuild(); } catch { /* gone */ } offBuild = null; }
         el = null;
       },
       summary: () => summaryOf(current()),

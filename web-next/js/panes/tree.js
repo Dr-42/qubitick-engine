@@ -15,7 +15,12 @@ export default {
   title: 'Tree',
   ports: {
     in: { files: 'value', current: 'value' },
-    out: { selection: 'value' },
+    /* `selection` is an EVENT, not a value: the pane announces a click (ctx.event('selection')
+       .emit) and a click is a thing that happened, not a state that is true. Declaring it a value
+       port made the engine host hand the pane a valuePort, which has `set` and no `emit` — so the
+       first click on a file threw `event(...).emit is not a function` and the editor never loaded
+       it. The canvas never saw it because its port table builds output ports as events. */
+    out: { selection: 'event' },
     call: { reveal: 'call' },
   },
   create(ctx) {
