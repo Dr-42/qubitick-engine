@@ -1,98 +1,176 @@
 #!/usr/bin/env bash
-# toolchain — run a Qubitick build command with a working toolchain.
+# toolchain — run a Qubitick command with a working Lean and Rust.
 #
-# ── Why this is not (only) `nix develop` ─────────────────────────────────────
-# `flake.nix` obtains Rust through `rust-overlay`'s
-# `rust-bin.stable.latest.default`, which resolves to a *fixed-output
-# derivation* that downloads a prebuilt `cargo-1.99.1-*.tar.xz` and uploads it
-# into the Nix store. Every process in this sandbox starts with `CapEff = 0`
-# (no capabilities at all), so nix's post-build normalisation step —
-# `removexattr("btrfs.compression")` on the uploaded path — fails with EPERM and
-# *every* `nix develop` invocation dies with:
+# THE DEFAULT IS THE PLAIN TOOLCHAIN. `cargo` from whatever is on PATH (it must build
+# edition 2024), and Lean 4.35.0, resolved in this order:
 #
-#     building '/nix/store/…-cargo-1.99.1-….tar.xz.drv'…
-#     error: removing extended attribute 'btrfs.compression' from
-#            '/nix/store/…-cargo-1.99.1-….tar.xz': Permission denied
+#   1. `$QUBITICK_LEAN`                       an explicit path to the `lean` binary
+#   2. `lean` on PATH, if `lean --version`    the version the corpus targets
+#      is the one the corpus targets
+#   3. `elan` pinned by `lean-toolchain`      the file at the repo root names
+#                                             `leanprover/lean4:v4.35.0`, and elan
+#                                             installs and selects it
 #
-# Binary-cache substitutions are unaffected (`nix-shell -p <pkg>` works), so the
-# fallback provisions the toolchain from rustup into the workspace instead
-# (`.rustup/`, `.cargo/`), pinned to the exact `rustc 1.99.1` the flake selected.
+# A step that finds the wrong version says so and moves on; if all three miss, the
+# script stops with a message naming what is missing and how to provide it. It never
+# silently builds the corpus against a different Lean: the prelude's `.olean` files are
+# header-checked, and "incompatible header" is a much worse error than this one.
 #
-# Lean is the one tool that cannot come from the distro (the `lean` on PATH is a
-# bare `elan` shim with no toolchain) or from the pinned nixpkgs (4.7.0, while the
-# corpus targets 4.35.0), so `./toolchain lean …` borrows it from the nix package set
-# without evaluating the flake.
+# `LEAN_PATH` carries the engine's prelude for every command, because the build shells
+# out to Lean and the emitter's contract lives there.
 #
 # Usage:
-#   ./toolchain cargo check --workspace
 #   ./toolchain cargo test --workspace
 #   ./toolchain cargo clippy --workspace --all-targets -- -D warnings
-#   ./toolchain ./target/release/qubitick build ./project
+#   ./toolchain ./target/debug/qubitick build corpus-templates/algebra
 #   ./toolchain lean <file.lean>
 #
-# Set QUBITICK_FORCE_FLAKE=1 to use the flake devShell anyway.
+# ── the sandbox path (opt-in) ───────────────────────────────────────────────
+# The original build sandbox has no `/nix/store` on the host and no capabilities, so
+# its Rust comes from a workspace-local rustup payload and its Lean from a store path
+# that only exists inside `nix-shell`. None of that is a fact about the repository, and
+# it is not the default here. Set QUBITICK_SANDBOX=1 to use it; the store path can be
+# overridden with QUBITICK_SANDBOX_LEAN, and the rustup root with QUBITICK_RUST_ROOT.
 set -euo pipefail
 cd "$(dirname "$0")"
+HERE="$PWD"
 
 export TMPDIR="${TMPDIR:-$PWD/target/tmp}"
 mkdir -p "$TMPDIR"
 
-# The corpus targets Lean 4.35.0 and its `.olean` prelude is built by it. The nix
-# *package set* only has 4.7.0, but the correct build is still in the store (the
-# devShell pins it), so a shim pointing at it is generated here.
-CORPUS_LEAN="/nix/store/2kbz20qdy9vdnc0ilrnmpnd551dk0z09-lean4-4.35.0/bin/lean"
-# NOTE: this path only exists INSIDE the nix-portable sandbox. Testing it on the
-# host always fails (no /nix/store there), so the shim must be written
-# unconditionally — otherwise `ensure_prelude` silently compiles the `.olean` files
-# with nixpkgs' 4.7.0 and every emitted module then fails to import them
-# ("incompatible header").
-if true; then
-  mkdir -p "$PWD/.devbin"
-  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "$CORPUS_LEAN" > "$PWD/.devbin/lean"
-  chmod +x "$PWD/.devbin/lean"
-  # `lake` must come from the SAME distribution as `lean`: the nix shell also
-  # provides nixpkgs' 4.7.0 lake, and a Lake build with it would check the corpus
-  # against the wrong compiler (and refuse the 4.35.0 oleans as "incompatible
-  # header"). Written unconditionally for the same reason as the lean shim — the
-  # store path only resolves inside the shell.
-  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "${CORPUS_LEAN%lean}lake" > "$PWD/.devbin/lake"
-  chmod +x "$PWD/.devbin/lake"
-fi
+# The Lean the corpus targets — the version `lean-toolchain` names.
+CORPUS_LEAN_VERSION="4.35.0"
 
-# ── subcommand: run the corpus Lean ──────────────────────────────────────────
+# ── finding Lean ────────────────────────────────────────────────────────────
+# Prints the path of a Lean 4.35.0 binary, or exits with a message naming what is
+# missing. Written as a function so the `lean` subcommand and the build path resolve
+# it the same way.
+qubitick_find_lean() {
+  if [ -n "${QUBITICK_LEAN:-}" ]; then
+    if [ ! -x "$QUBITICK_LEAN" ]; then
+      echo "toolchain: QUBITICK_LEAN=$QUBITICK_LEAN is not executable" >&2
+      exit 1
+    fi
+    echo "$QUBITICK_LEAN"
+    return 0
+  fi
+  if command -v lean >/dev/null 2>&1; then
+    local v
+    v="$(lean --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9.]*\).*/\1/p' | head -1)"
+    if [ "$v" = "$CORPUS_LEAN_VERSION" ]; then
+      command -v lean
+      return 0
+    fi
+    # A wrong version on PATH is not an error yet: elan may be able to pin it.
+    echo "toolchain: lean on PATH is ${v:-unknown}, not $CORPUS_LEAN_VERSION; trying elan" >&2
+  fi
+  if command -v elan >/dev/null 2>&1; then
+    local want="leanprover/lean4:v$CORPUS_LEAN_VERSION"
+    if [ -f "$HERE/lean-toolchain" ]; then
+      want="$(tr -d '[:space:]' < "$HERE/lean-toolchain")"
+    fi
+    if elan toolchain list 2>/dev/null | grep -qF "$want"; then
+      # `elan which lean` prints the resolved binary for the toolchain the repo pins.
+      local resolved
+      resolved="$(cd "$HERE" && elan which lean 2>/dev/null || true)"
+      if [ -n "$resolved" ] && [ -x "$resolved" ]; then
+        echo "$resolved"
+        return 0
+      fi
+      # The toolchain is installed but elan will not say where: run it through elan.
+      local via="$(cd "$HERE" && elan run "$want" which lean 2>/dev/null || true)"
+      if [ -n "$via" ] && [ -x "$via" ]; then
+        echo "$via"
+        return 0
+      fi
+    fi
+    # Let elan install it: the file at the repo root is the pin.
+    if (cd "$HERE" && elan run "$want" lean --version >/dev/null 2>&1); then
+      local resolved
+      resolved="$(cd "$HERE" && elan which lean 2>/dev/null || true)"
+      if [ -n "$resolved" ] && [ -x "$resolved" ]; then
+        echo "$resolved"
+        return 0
+      fi
+    fi
+    echo "toolchain: elan is installed but $want is not, and could not be fetched" >&2
+    echo "  run: elan toolchain install $want" >&2
+    exit 1
+  fi
+  echo "toolchain: cannot find Lean $CORPUS_LEAN_VERSION" >&2
+  echo "  tried \$QUBITICK_LEAN, \`lean\` on PATH, and \`elan\` pinned by lean-toolchain" >&2
+  echo "  install one of:" >&2
+  echo "    · Lean $CORPUS_LEAN_VERSION from https://github.com/leanprover/lean4/releases" >&2
+  echo "      and put it on PATH, or point QUBITICK_LEAN at its bin/lean" >&2
+  echo "    · elan from https://github.com/leanprover/elan — the repo's lean-toolchain then pins it" >&2
+  exit 1
+}
+
+# ── subcommand: run the corpus Lean ─────────────────────────────────────────
 if [ "${1:-}" = "lean" ]; then
   shift
-  export PATH="$HOME/.local/bin:$PATH"
-  export LEAN_PATH="$PWD/prelude${LEAN_PATH:+:$LEAN_PATH}"
-  exec nix-portable nix-shell -p lean4 --run "$(printf '%q ' "$CORPUS_LEAN" "$@")"
-fi
-
-HERE="$PWD"
-# rustup was provisioned one level up (the session workspace root); the repo
-# itself is a checkout inside it.
-RUST_ROOT="${QUBITICK_RUST_ROOT:-$(dirname "$HERE")}"
-
-# ── flake devShell, only when explicitly requested (see note below) ──────────
-if [ "${QUBITICK_FORCE_FLAKE:-0}" = "1" ]; then
-  export PATH="$HOME/.local/bin:$PATH"
-  exec nix-portable nix develop --command "$@"
-fi
-
-# ── default: workspace-local rustup toolchain ───────────────────────────────
-if [ -x "$RUST_ROOT/.cargo/bin/cargo" ]; then
-  export RUSTUP_HOME="$RUST_ROOT/.rustup"
-  export CARGO_HOME="$RUST_ROOT/.cargo"
+  LEAN_BIN="$(qubitick_find_lean)"
   export LEAN_PATH="$HERE/prelude${LEAN_PATH:+:$LEAN_PATH}"
-  export PATH="$CARGO_HOME/bin:$HOME/.local/bin:$PATH"
-  # `check_file` shells out to `lean`, so the corpus Lean must be on PATH for the
-  # build itself — and it needs nix's shared libraries to start. A shim directory
-  # is used because `nix-shell -p lean4` prepends its own (4.7.0) lean ahead of
-  # anything this script exports; the prepend is left unexpanded so the
-  # nix-shell's environment performs it.
-  cmd="PATH=\"$HERE/.devbin:\$PATH\" $(printf '%q ' "$@")"
-  exec nix-portable nix-shell -p lean4 --run "$cmd"
+  exec "$LEAN_BIN" "$@"
 fi
 
-# ── last resort: the flake devShell (currently broken by the xattr bug) ─────
-export PATH="$HOME/.local/bin:$PATH"
-exec nix-portable nix develop --command "$@"
+# ── the sandbox path, only when explicitly requested ────────────────────────
+if [ "${QUBITICK_SANDBOX:-0}" = "1" ]; then
+  SANDBOX_LEAN="${QUBITICK_SANDBOX_LEAN:-/nix/store/2kbz20qdy9vdnc0ilrnmpnd551dk0z09-lean4-4.35.0/bin/lean}"
+  if [ ! -x "$SANDBOX_LEAN" ]; then
+    echo "toolchain: QUBITICK_SANDBOX=1 but no Lean at $SANDBOX_LEAN" >&2
+    echo "  set QUBITICK_SANDBOX_LEAN to the store path of Lean $CORPUS_LEAN_VERSION" >&2
+    exit 1
+  fi
+  # `lake` must come from the SAME distribution as `lean`, or a Lake build would check
+  # the corpus against the wrong compiler and refuse the 4.35.0 oleans.
+  mkdir -p "$HERE/.devbin"
+  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "$SANDBOX_LEAN" > "$HERE/.devbin/lean"
+  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "${SANDBOX_LEAN%lean}lake" > "$HERE/.devbin/lake"
+  chmod +x "$HERE/.devbin/lean" "$HERE/.devbin/lake"
+  RUST_ROOT="${QUBITICK_RUST_ROOT:-$(dirname "$HERE")}"
+  if [ -x "$RUST_ROOT/.cargo/bin/cargo" ]; then
+    export RUSTUP_HOME="$RUST_ROOT/.rustup"
+    export CARGO_HOME="$RUST_ROOT/.cargo"
+    export PATH="$CARGO_HOME/bin:$HERE/.devbin:$PATH"
+  else
+    export PATH="$HERE/.devbin:$PATH"
+  fi
+  export LEAN_PATH="$HERE/prelude${LEAN_PATH:+:$LEAN_PATH}"
+  exec "$@"
+fi
+
+# ── default: the toolchain that is already here ─────────────────────────────
+LEAN_BIN="$(qubitick_find_lean)"
+
+CARGO_BIN="$(command -v cargo || true)"
+if [ -z "$CARGO_BIN" ]; then
+  echo "toolchain: no cargo on PATH" >&2
+  echo "  install Rust (the workspace is edition 2024: cargo 1.85 or newer)" >&2
+  exit 1
+fi
+CARGO_VERSION="$("$CARGO_BIN" --version 2>/dev/null | awk '{print $2}')"
+if ! printf '%s\n%s\n' "1.85.0" "$CARGO_VERSION" | sort -C -V; then
+  echo "toolchain: cargo $CARGO_VERSION is too old (the workspace is edition 2024)" >&2
+  echo "  cargo 1.85 or newer is required; $CARGO_BIN is on PATH" >&2
+  exit 1
+fi
+
+export LEAN_PATH="$HERE/prelude${LEAN_PATH:+:$LEAN_PATH}"
+export QUBITICK_LEAN_RESOLVED="$LEAN_BIN"
+# A RESOLVED LEAN IS NAMED, NOT IMPOSED. The build shells out to `lean`, so it must
+# find the same one this script validated — but prepending its directory would also
+# shadow whatever else lives there, and `/usr/bin` is where Lean and a distribution's
+# own, older cargo sit side by side. A shim directory carrying only `lean` and `lake`
+# puts the right Lean in front without moving anything else.
+SHIM_DIR="$HERE/target/toolchain-shim"
+mkdir -p "$SHIM_DIR"
+printf '#!/usr/bin/env bash\nexec %s "$@"\n' "$LEAN_BIN" > "$SHIM_DIR/lean"
+LAKE_BIN="${LEAN_BIN%lean}lake"
+if [ -x "$LAKE_BIN" ]; then
+  printf '#!/usr/bin/env bash\nexec %s "$@"\n' "$LAKE_BIN" > "$SHIM_DIR/lake"
+  chmod +x "$SHIM_DIR/lake"
+fi
+chmod +x "$SHIM_DIR/lean"
+export PATH="$SHIM_DIR:$PATH"
+exec "$@"

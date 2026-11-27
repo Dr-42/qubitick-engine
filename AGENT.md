@@ -70,16 +70,19 @@ report a green run you did not run. If a binary is involved, rebuild it first: a
 ## Gates
 
 ```bash
-./toolchain cargo test --workspace                    # 38 targets
-./toolchain cargo clippy --workspace --all-targets    # 5 pre-existing style notes
-./toolchain cargo test -p qubitick-parse --lib        # one crate while iterating
-./toolchain cargo test -p qubitick-build --test declared_formation   # one promise
-./toolchain ./target/debug/qubitick build corpus-templates/algebra   # built 4, verified 4
+cargo test --workspace                    # 47 targets
+cargo clippy --workspace --all-targets    # pre-existing style notes
+cargo test -p qubitick-parse --lib        # one crate while iterating
+cargo test -p qubitick-build --test declared_formation   # one promise
+LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra  # built 5
 ```
 
-`./toolchain` provisions the pinned Rust and borrows the corpus's Lean (4.35.0). Its header
-explains why `nix develop` cannot run in this sandbox; do not replace it with a bare
-`cargo`.
+Two requirements: cargo 1.85+ (edition 2024) and Lean 4.35.0, the version
+`lean-toolchain` names. `./toolchain` resolves both, refuses a `cargo` that cannot build
+the workspace, exports `LEAN_PATH`, and stops with a message naming what is missing
+(`$QUBITICK_LEAN`, then `lean` on `PATH`, then `elan`). Use it when a command's toolchain
+matters; the bare commands above are the same thing. `QUBITICK_SANDBOX=1` selects the
+original sandbox's store path instead — nothing here depends on it.
 
 ## Ingestion order, and the traps in it
 

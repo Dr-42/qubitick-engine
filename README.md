@@ -7,10 +7,14 @@ and it knows no mathematical glyph of any corpus. Everything a symbol means arri
 declaration the corpus writes.
 
 ```
-cargo test --workspace          45 targets · 309 tests · 2 ignored
+cargo test --workspace          47 targets · 314 tests · 2 ignored
 qubitick build <corpus>         5 files, verified 5, error_count 0   (the starter ship)
 qubitick axioms <corpus> <file> "axioms": []    (the ship's theorem stands on nothing)
 ```
+
+Two requirements, both plain: **cargo 1.85 or newer** (the workspace is edition 2024) and
+**Lean 4.35.0**, the version `lean-toolchain` at the repo root names. Nothing else is
+assumed — no nix, no rustup, no fixed install path.
 
 ---
 
@@ -384,13 +388,19 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-./toolchain cargo test --workspace        # 45 targets, 309 tests, 2 ignored
-./toolchain cargo clippy --workspace --all-targets
-./toolchain cargo build -p qubitick-cli
-./toolchain ./target/debug/qubitick build corpus-templates/algebra   # built 5, verified 5
-./toolchain ./target/debug/qubitick axioms corpus-templates/algebra \
+cargo test --workspace        # 47 targets, 314 tests, 2 ignored
+cargo clippy --workspace --all-targets
+cargo build -p qubitick-cli
+LEAN_PATH=$PWD/prelude ./target/debug/qubitick build corpus-templates/algebra
+    # built 5, verified 5
+LEAN_PATH=$PWD/prelude ./target/debug/qubitick axioms corpus-templates/algebra \
     corpus-templates/algebra/Era0/Strata0/Theorems/T_A_01_MulTwo.qbit  # "axioms": []
 ```
+
+Those are the plain commands, and they are what to run. `./toolchain` is the same thing
+with the toolchain checked first: it finds Lean (see below), refuses a `cargo` too old for
+edition 2024, and exports `LEAN_PATH`. Either works; the wrapper exists so a failure names
+what is missing instead of surfacing as an "incompatible header" three minutes into a build.
 
 The tests that state a promise rather than a detail:
 
@@ -409,8 +419,27 @@ The tests that state a promise rather than a detail:
 | `crates/build/tests/freeze.rs` | the ground hash is stable and follows the file; `--frozen` accepts its own hash and refuses another; every preset is a ground |
 | `crates/parse/tests/proof_surface.rs` | `⊢ <term>` closes a proof, `∎` ends it, and prose is refused by name |
 
-`./toolchain` is the build wrapper: it provisions the pinned Rust and borrows the corpus's
-Lean 4.35.0 (see its header for why `nix develop` cannot be used in this sandbox).
+### The toolchain `./toolchain` looks for
+
+**cargo**: whatever is on `PATH`, with edition 2024 support (1.85 or newer). The wrapper
+checks the version and stops with a message if it is older; it makes no assumption about
+where Rust came from.
+
+**Lean 4.35.0**, resolved in this order:
+
+1. `$QUBITICK_LEAN` — an explicit path to the binary;
+2. `lean` on `PATH`, when `lean --version` is the version the corpus targets;
+3. `elan`, pinned by `lean-toolchain` at the repo root
+   (`leanprover/lean4:v4.35.0`), which installs it if needed.
+
+A step that finds the wrong version says so and moves on; when all three miss, the wrapper
+exits naming what it tried and how to provide it. The prelude's `.olean` files are
+header-checked by Lean, so building against a different version is not a warning — it is an
+error much later, which is why the check is here.
+
+`QUBITICK_SANDBOX=1` selects the original sandbox's arrangement instead (a `/nix/store` Lean
+plus a workspace-local rustup payload, `QUBITICK_SANDBOX_LEAN` and `QUBITICK_RUST_ROOT` to
+relocate them). It is opt-in: nothing in the repository depends on those paths.
 
 ---
 
