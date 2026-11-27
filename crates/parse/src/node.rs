@@ -279,6 +279,21 @@ fn parse_theorem(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Resu
             if in_proof {
                 proof_fields.push(v.clone());
             } else {
+                /* A THEOREM CARRIES ONE STATEMENT.
+                 *
+                 * Every bare line before `Proof:` used to overwrite the statement, so the LAST
+                 * one won and the earlier ones were dropped without a word: a file whose first
+                 * line was a scrap of the proof (`\tau_0 \oplus a` where the author was
+                 * mid-edit) still parsed, the scrap disappeared, and the theorem was emitted
+                 * from what was left. One statement, and a second bare line is refused by
+                 * name. */
+                if statement != Expr::Var("<statement>".into()) && !crate::pros_are_tolerated() {
+                    return Err(anyhow::anyhow!(
+                        "a theorem carries ONE statement, and this file has another bare line \
+                         after it:\n  `{}`\n  a proof row goes under `Proof:`",
+                        v.trim()
+                    ));
+                }
                 statement = parse_expr_ok(ctx, v).unwrap_or(statement);
             }
         }
@@ -1224,8 +1239,10 @@ fn parse_chain_rows(ctx: &Ctx, proof_lines: &[String]) -> Result<Vec<ChainRow>> 
                 .collect();
             ChainJust::Rewrite { refs }
         };
-        // An explicit `lhs = rhs` uses its own lhs; the first bare `= rhs` row
-        // takes the chain's initial expression instead.
+        /* An explicit `lhs = rhs` uses its own lhs; a bare `= rhs` row takes the chain's
+           initial expression — and when the proof opens with `= rhs` (the corpus writes the
+           theorem's own statement as the chain's left side), there is none: the row carries no
+           lhs, and the emitter takes it from the goal. */
         let lhs = if lhs_part.trim().is_empty() {
             initial.take()
         } else {

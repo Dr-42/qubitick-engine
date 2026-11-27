@@ -197,6 +197,11 @@ Consequences that have bitten:
   and must not fall through to the term path — that path sees one parameter against two and
   writes `axiom oplus : tau → tau → tau`, an assumption in place of the definition, with every
   file reported verified. The sentence names the missing constructor.
+- **A node carries ONE statement, and a definition ONE body.** `parse_theorem` used to
+  overwrite the statement with every bare line before `Proof:`, so the last one won and the
+  earlier ones vanished without a word — a theorem file whose first line was a scrap of the
+  proof still parsed, and the scrap was what disappeared. Both are refused by name now, and
+  the refusal quotes the line.
 - **A definition node carries ONE body.** `split_fields` gives every bare line its own entry,
   and `resolve_multiline_values` folds exactly one continuation line into `Sema:`/`Type:`, so a
   second equation on a line of its own is not part of the body — it is a corpus mistake and the

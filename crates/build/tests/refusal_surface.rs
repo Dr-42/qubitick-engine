@@ -335,6 +335,38 @@ fn a_sema_body_that_is_not_an_equation_is_refused_by_name() {
 }
 
 #[test]
+fn a_second_statement_line_on_a_theorem_is_refused_by_name() {
+    // Every bare line before `Proof:` used to overwrite the statement, so the LAST one won and
+    // the earlier ones vanished: a file whose first line was a scrap of the proof still parsed,
+    // the scrap disappeared, and what was left was emitted — as an `axiom` when the mangled
+    // theorem had no rows left to prove it with.
+    let files = formation_with(&[
+        (
+            "Era0/Strata0/Definitions/D_S_05_Plus.qbit",
+            "D.S.05. Plus\na \\oplus b\nSema:\n(\\tau_0 \\oplus b = b) \\land ((^+ a) \\oplus b = ^+ (a \\oplus b))\n",
+        ),
+        (
+            "Era0/Strata0/Theorems/T_S_01_Two.qbit",
+            "T.S.01. Two\n\\tau_0 \\oplus a\n\\forall a : \\tau, \\tau_0 \\oplus a = a\nProof:\n\\tau_0 \\oplus a\n  = a  [D.S.05]\n",
+        ),
+    ]);
+    let dir = corpus("twostatements", &files);
+    let o = run(&dir, &[]);
+    assert!(!o.all_verified, "a theorem carries one statement");
+    assert!(
+        says(&o, "a theorem carries ONE statement"),
+        "the refusal says so: {}",
+        detail(&o)
+    );
+    assert!(
+        says(&o, "\\tau_0 \\oplus a"),
+        "and quotes the line that would have vanished: {}",
+        detail(&o)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_sema_with_no_body_at_all_is_refused_by_name() {
     let files = formation_with(&[(
         "Era0/Strata0/Definitions/D_S_05_Empty.qbit",
