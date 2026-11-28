@@ -4,6 +4,36 @@ This repository is the **engine**: it compiles a declarative corpus to Lean and 
 IDE. Read `README.md` first for what the thing is. This file is how to work on it without
 breaking a promise.
 
+## Why the engine exists: readability comes before verification
+
+The corpus is authored **first** in a human-readable symbolic language and **Lean is the
+generated, last layer** — a transcript of what a human actually wrote. The text a human reads
+and the text a machine checks are the **same artifact**. This order is the point, not a
+detail, and every sentence of the invariants below shares it.
+
+Why: machine-verified but human-unreadable is a **confidence increase, not knowledge**. A
+result matters when it **scales down** — when, over a decade or two, it can be taught to an
+undergraduate. Only *derivational validity* is mechanizable; *representational fidelity* (the
+formal object means the question that was asked) and *epistemic significance* (why it is true,
+which is what humans build on) need scarce expert attention. Proof-checking becoming free makes
+verification abundant and **adjudication** the bottle-neck.
+
+The engine is not "Lean is wrong". Lean is an **unreadable target**: a hand-written formal
+proof is accepted by the kernel and yet its author cannot re-derive it by eye. A designer who
+moves the human-readable corpus ahead of the machined language keeps comprehension attached to
+validity — so the two never diverge into separate artifacts that merely happen to agree.
+
+Two rules follow, and they are the reason for ground choices and emission shapes:
+
+- **declaring beats importing.** The corpus builds its own arenas (`\tau` by tick, `Count` for
+  counting, `\mathbb{Z}`/`\mathbb{Q}` as constructions) rather than borrowing even Lean's
+  primitive `Nat`/`Rat`/`Prod`/`Quot`. Importing a substrate is importing an arena the corpus
+  did not build. The engine's contract emits no `axiom`; a premise a theorem rests on is either
+  a corpus definition or an explicitly admitted, counted, named one.
+- **one readable step per node.** A definition is `a \land b := a \cap b` — one glyph line, one
+  body, one file — so a reader can follow a proof the way they follow a page of mathematics,
+  never a 17-million-line generated blob nobody can hold in their head.
+
 ## Roles
 
 | role | owns |
