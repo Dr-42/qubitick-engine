@@ -107,6 +107,13 @@ fn parse_header(line: &str) -> Result<(NodeKind, u32, String)> {
         NodeKind::Definition
     } else if id_part.starts_with('T') {
         NodeKind::Theorem
+    } else if id_part.starts_with('M') {
+        /* `M.` is a METATHEOREM — an imported mathematical system or premise the corpus
+           relies on and does not rederive (`M.BT.0.1 [\mathrm{PA}]`). It is an admitted axiom
+           of its own module: it carries a `Stmt:` and a `DOI:`, it is countable and citable
+           (`[M.BT.0.1]`), and the build warns it as admitted so a reader knows the corpus
+           assumes rather than proves it. */
+        NodeKind::Axiom
     } else if id_part.starts_with("S") {
         NodeKind::Calibration
     } else if id_part.starts_with("FT") {
@@ -186,6 +193,12 @@ fn split_fields(lines: &[&str]) -> Vec<(String, String)> {
                 | "sema" | "type" | "role" | "lean"        // a definition's body, classification, binding
                 | "proof"                                  // a theorem's block
                 | "falsify"                                // an axiom's refutation protocol
+                /* `Stmt:` is the way ANOTHER corpus writes a theorem's statement — the old
+                   formalisation keeps its statements under `Stmt:` and its imported systems'
+                   premises under `M.` nodes with `Stmt:` + `DOI:`. Both are read as fields so a
+                   corpus translates without a transform: `Stmt:` is the statement, `DOI:` is
+                   provenance metadata that flows through to the emitted module as a comment. */
+                | "stmt" | "doi"
                 | "math" | "phys" => {                     // prose, kept as a note
                     out.push((key, v.trim().to_string()));
                 }
@@ -230,6 +243,20 @@ fn parse_axiom(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Result
     // following row that does not introduce one of its own.
     let mut statements: Vec<Expr> = Vec::new();
     let mut pending: Option<(BinderKind, Vec<qubitick_model::Binder>)> = None;
+    // A `Stmt:` field (the way a METATHEOREM — `M.` — writes an imported premise) IS a
+    // statement. If it is present it is the whole statement list; bare lines are for the
+    // multi-row form an axiom block writes.
+    let mut stmt_field: Option<&str> = None;
+    for (k, v) in fields {
+        if k == "stmt" && stmt_field.is_none() {
+            stmt_field = Some(v);
+        }
+    }
+    if let Some(v) = stmt_field {
+        let parsed = crate::semantic::parse_expr(v.trim(), ctx)
+            .unwrap_or_else(|_| Expr::Var(v.trim().to_string()));
+        statements.push(parsed);
+    }
     for (_, v) in fields.iter().filter(|(k, _)| k.is_empty()) {
         // Tolerant, like `parse_expr_ok`: a row whose LaTeX the strict lexer
         // cannot resolve is kept as a raw `Var` holding the text. Dropping it
@@ -268,13 +295,20 @@ fn parse_axiom(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Result
 }
 
 fn parse_theorem(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Result<Node> {
-    // The statement is the first non-empty expression line before `Proof:`.
+    // The statement is the first non-empty expression line before `Proof:`, OR the value of a
+    // `Stmt:` field (the way another corpus writes it). Both spell the same thing; a theorem
+    // carries one statement whichever way it arrives.
     let mut statement = Expr::Var("<statement>".into());
     let mut proof_fields: Vec<String> = Vec::new();
     let mut in_proof = false;
+    let mut stmt_field: Option<&str> = None;
     for (k, v) in fields {
         if k == "proof" {
             in_proof = true;
+            continue;
+        }
+        if k == "stmt" && stmt_field.is_none() {
+            stmt_field = Some(v);
             continue;
         }
         if k.is_empty() {
@@ -299,6 +333,13 @@ fn parse_theorem(ctx: &Ctx, base: NodeBase, fields: &[(String, String)]) -> Resu
                 statement = parse_expr_ok(ctx, v).unwrap_or(statement);
             }
         }
+    }
+    // A `Stmt:` field IS the statement. A corpus that writes both a `Stmt:` and bare lines
+    // before the proof is writing one statement twice; the field is the canonical one.
+    if let Some(text) = stmt_field
+        && let Some(e) = parse_expr_ok(ctx, text)
+    {
+        statement = e;
     }
     let proof = parse_proof_steps(ctx, &proof_fields)?;
     // Auto-populate `req` from the proof's citations (the nodes this theorem

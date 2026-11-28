@@ -105,8 +105,11 @@ corpus that numbers inside tiers (`BT`, `QB`, `T.HD.14.3`) may reuse a number in
 tiers numbering a `1` are two nodes. A citation that writes no tier (`[D.7]`) names the number
 in any tier, which is how a corpus that numbers flat keeps working.
 The first bare line is the **glyph line**. The fields a node may carry are a closed,
-short list: `Type:`, `Sema:`, `Role:`, `Proof:`, `Falsify:`, `Math:`, `Phys:`, and — for a
-calibration — `Symbol:`, `QUnits:`, `Dims:`, `Rate:`.
+short list: `Type:`, `Sema:`, `Role:`, `Proof:`, `Falsify:`, `Math:`, `Phys:`, `Stmt:`,
+`DOI:`, and — for a calibration — `Symbol:`, `QUnits:`, `Dims:`, `Rate:`. `Stmt:` is the
+statement of an `M.` premise and is read on a theorem too; `DOI:` is provenance metadata; and
+`M.<tier>.<n>.<m> [\mathrm{NAME}]` (an **M block**) declares an IMPORTED mathematical system the
+corpus relies on and does not rederive — an admitted premise, counted and citable.
 
 `Type:` is where a glyph lives, and it takes the ground's name:
 
@@ -480,7 +483,7 @@ the API puts the same block in a refusal's `error` alongside the structured `dia
 ## 9. Gates
 
 ```
-cargo test --workspace        # 53 targets, 354 tests, 2 ignored
+cargo test --workspace        # 55 targets, 359 tests, 2 ignored
 node tools/check.mjs          # lint, unit tests, and the browser gates — no dependencies
 cargo clippy --workspace --all-targets     # clean: no warnings
 cargo build -p qubitick-cli
